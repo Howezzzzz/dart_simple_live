@@ -1,0 +1,247 @@
+# 定制 libmpv 构建 —— 阶段 2/2：加滤镜并构建 libmpv（x86_64）
+#
+# 前置条件：阶段 1 build-libmpv-toolchain.yml 已成功（提供 clang_root / build_x86_64 缓存）。
+#
+# 内容：
+#   1. 锁定 commit 拉取 Predidit/libmpv-win32-video-cmake 构建系统
+#   2. 给 packages/ffmpeg.cmake 追加 loudnorm / dynaudnorm / speechnorm 三个原生滤镜
+#      （上游 --disable-filters 后仅启用 overlay/equalizer，故动态响度滤镜全部缺失）
+#   3. 构建并打包，产物改名 mpv-dev-x86_64-slive-custom.7z
+#   4. 计算 SHA256 写入 Summary，并发布到 GitHub Release（tag 可指定）
+#
+# 构建完成后需回填 SHA256 到
+#   simple_live_app/packages/media_kit_libs_windows_video/windows/CMakeLists.txt（LIBMPV_SHA256）
+# 未回填前，应用构建会自动回退到上游原版 libmpv（无滤镜，音量均衡开关运行时自动置灰），不会构建失败。
+
+name: libmpv-custom
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Release tag (asset: mpv-dev-x86_64-slive-custom.7z)'
+        required: false
+        default: 'libmpv-custom-v1'
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: libmpv-custom
+  cancel-in-progress: false
+
+jobs:
+  build_mpv:
+    name: Build libmpv x86_64 (+loudnorm/dynaudnorm/speechnorm)
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    container:
+      image: docker://ghcr.io/shinchiro/archlinux:latest
+    env:
+      CACHE_PREFIX: slive-vnorm-v1
+      BUILD_REPO: Predidit/libmpv-win32-video-cmake
+      BUILD_REPO_SHA: fdf75129fc694b5ca555ce73cffc43bb6943ae13
+      TARGET_ARCH: x86_64-w64-mingw32
+      CUSTOM_LIBMPV_NAME: mpv-dev-x86_64-slive-custom.7z
+    steps:
+      - name: Setup git config
+        run: |
+          git config --global user.name "github-actions"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --global --add safe.directory '*'
+
+      - name: Checkout build system (pinned)
+        uses: actions/checkout@main
+        with:
+          repository: ${{ env.BUILD_REPO }}
+          ref: ${{ env.BUILD_REPO_SHA }}
+
+      - name: Installing Meson
+        run: |
+          python -m pip --version || pacman -Sy --needed --noconfirm python-pip
+          python -m pip install --upgrade --break-system-packages 'meson>=1.3.0'
+          meson --version
+
+      - name: Restore clang_root cache
+        id: clang_root_cache
+        uses: actions/cache/restore@main
+        with:
+          path: clang_root
+          key: ${{ env.CACHE_PREFIX }}-clang_root-${{ github.run_id }}
+          restore-keys: ${{ env.CACHE_PREFIX }}-clang_root
+
+      - name: Restore repository cache
+        id: repo_cache
+        uses: actions/cache/restore@main
+        with:
+          path: src_packages
+          key: ${{ env.CACHE_PREFIX }}-repository-${{ github.run_id }}
+          restore-keys: ${{ env.CACHE_PREFIX }}-repository
+
+      - name: Restore x86_64 toolchain cache
+        id: toolchain_cache
+        uses: actions/cache/restore@main
+        with:
+          path: build_x86_64
+          key: ${{ env.CACHE_PREFIX }}-clang-x86_64_toolchain-${{ github.run_id }}
+          restore-keys: ${{ env.CACHE_PREFIX }}-clang-x86_64_toolchain
+
+      - name: Verify toolchain cache present
+        run: |
+          if [[ -z "${{ steps.clang_root_cache.outputs.cache-matched-key }}" || -z "${{ steps.toolchain_cache.outputs.cache-matched-key }}" ]]; then
+            echo "::error::Toolchain cache missing. Run workflow 'libmpv-toolchain' (stage 1/2) first."
+            exit 1
+          fi
+
+      - name: Patch ffmpeg.cmake (enable loudnorm/dynaudnorm/speechnorm)
+        run: |
+          python3 - <<'PY'
+          import sys
+          path = "packages/ffmpeg.cmake"
+          anchor = "        --enable-filter=equalizer\n"
+          add = (
+              "        --enable-filter=loudnorm\n"
+              "        --enable-filter=dynaudnorm\n"
+              "        --enable-filter=speechnorm\n"
+          )
+          with open(path, encoding="utf-8") as f:
+              src = f.read()
+          count = src.count(anchor)
+          if count != 1:
+              sys.exit(f"ERROR: anchor not unique in {path} (found {count}); aborting to avoid mis-patch")
+          with open(path, "w", encoding="utf-8") as f:
+              f.write(src.replace(anchor, anchor + add, 1))
+          print("patched", path)
+          PY
+          echo "--- filter lines after patch ---"
+          grep -n -- '--enable-filter' packages/ffmpeg.cmake
+          for filt in loudnorm dynaudnorm speechnorm; do
+            grep -qxF "        --enable-filter=${filt}" packages/ffmpeg.cmake || { echo "::error::patch verification failed: ${filt}"; exit 1; }
+          done
+
+      - name: Configure & download sources
+        run: |
+          cmake -DTARGET_ARCH=${TARGET_ARCH} -DCOMPILER_TOOLCHAIN=clang -DCMAKE_INSTALL_PREFIX=$PWD/clang_root -DMINGW_INSTALL_PREFIX=$PWD/build_x86_64/${TARGET_ARCH} -DSINGLE_SOURCE_LOCATION=$PWD/src_packages -DRUSTUP_LOCATION=$PWD/clang_root/install_rustup -G Ninja --fresh -B build_x86_64 -S $PWD
+          if [[ -z "${{ steps.repo_cache.outputs.cache-matched-key }}" || ! -e src_packages/opus/.git ]]; then
+            find build_x86_64/packages -path "*/src/*-stamp/*-download" -delete || true
+          fi
+          ninja -C build_x86_64 download
+
+      - name: Build mpv
+        run: |
+          ninja -C build_x86_64 update
+          ninja -C build_x86_64 mpv
+
+      - name: Package
+        run: |
+          set -euo pipefail
+          mkdir -p release_x86_64
+          ninja -C build_x86_64 mpv-packaging
+          shopt -s nullglob
+          artifacts=(build_x86_64/mpv-dev-x86_64*.7z)
+          if ((${#artifacts[@]} != 1)); then
+            echo "::error::expected exactly one mpv-dev-x86_64 archive, found ${#artifacts[@]}: ${artifacts[*]}"
+            exit 1
+          fi
+          mv "${artifacts[0]}" "release_x86_64/${CUSTOM_LIBMPV_NAME}"
+          ls -la release_x86_64
+
+      - name: Compute SHA256 & write summary
+        run: |
+          sha=$(sha256sum "release_x86_64/${CUSTOM_LIBMPV_NAME}" | awk '{print $1}')
+          echo "CUSTOM_LIBMPV_SHA256=$sha" >> "$GITHUB_ENV"
+          {
+            echo "## Custom libmpv (stage 2/2) built"
+            echo
+            echo "- Asset: \`${CUSTOM_LIBMPV_NAME}\`"
+            echo "- Release tag: \`${{ inputs.release_tag }}\`"
+            echo "- Base: \`${BUILD_REPO}@${BUILD_REPO_SHA}\` + loudnorm/dynaudnorm/speechnorm"
+            echo "- **SHA256**: \`${sha}\`"
+            echo
+            echo "Backfill into \`simple_live_app/packages/media_kit_libs_windows_video/windows/CMakeLists.txt\` -> \`LIBMPV_SHA256\` (x86_64 branch)."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@master
+        with:
+          name: mpv-x86_64-dev-custom
+          path: release_x86_64/${{ env.CUSTOM_LIBMPV_NAME }}
+          retention-days: 7
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.release_tag }}
+        run: |
+          python3 - <<'PY'
+          import json, os, sys, urllib.request, urllib.error
+
+
+          def main():
+              repo = os.environ["GITHUB_REPOSITORY"]
+              token = os.environ["GH_TOKEN"]
+              tag = os.environ["TAG"]
+              name = os.environ["CUSTOM_LIBMPV_NAME"]
+              sha = os.environ["CUSTOM_LIBMPV_SHA256"]
+              run_id = os.environ["GITHUB_RUN_ID"]
+              api_base = os.environ.get("GITHUB_API_URL", "https://api.github.com")
+              base = api_base + "/repos/" + repo
+
+              def req(method, url, data=None, ctype="application/json"):
+                  body = None
+                  if data is not None:
+                      body = data if isinstance(data, bytes) else json.dumps(data).encode()
+                  r = urllib.request.Request(url, data=body, method=method)
+                  r.add_header("Accept", "application/vnd.github+json")
+                  r.add_header("Authorization", "Bearer " + token)
+                  if data is not None:
+                      r.add_header("Content-Type", ctype)
+                  try:
+                      with urllib.request.urlopen(r) as resp:
+                          raw = resp.read().decode()
+                          return resp.status, (json.loads(raw) if raw else {})
+                  except urllib.error.HTTPError as e:
+                      raw = e.read().decode()
+                      try:
+                          return e.code, json.loads(raw)
+                      except Exception:
+                          return e.code, {"raw": raw}
+
+              body = (
+                  "Custom libmpv x86_64 with loudnorm/dynaudnorm/speechnorm filters enabled.\n\n"
+                  "Base: Predidit/libmpv-win32-video-cmake (pinned commit) + filter patch.\n"
+                  "SHA256: " + sha + "\n"
+                  "Workflow run: https://github.com/" + repo + "/actions/runs/" + run_id + "\n"
+              )
+              code, rel = req("POST", base + "/releases",
+                              {"tag_name": tag, "name": tag, "body": body, "draft": False})
+              if code not in (200, 201):
+                  print("create release failed, fallback to existing tag:", code, rel)
+                  code, rel = req("GET", base + "/releases/tags/" + tag)
+              if code not in (200, 201) or "upload_url" not in rel:
+                  raise RuntimeError("cannot create/find release " + tag + ": " + json.dumps(rel)[:500])
+              upload_url = rel["upload_url"].split("{")[0]
+              for a in rel.get("assets", []):
+                  if a.get("name") == name:
+                      print("deleting existing asset", a["id"])
+                      req("DELETE", base + "/releases/assets/" + str(a["id"]))
+              with open(os.path.join("release_x86_64", name), "rb") as f:
+                  data = f.read()
+              code, res = req("POST", upload_url + "?name=" + name, data, "application/x-7z-compressed")
+              if code not in (200, 201):
+                  raise RuntimeError("asset upload failed: " + json.dumps(res)[:500])
+              print("Release published: https://github.com/" + repo + "/releases/tag/" + tag)
+
+
+          if __name__ == "__main__":
+              try:
+                  main()
+              except SystemExit:
+                  raise
+              except Exception as e:
+                  sys.exit("ERROR: release publishing failed for tag "
+                           + os.environ.get("TAG", "?")
+                           + " in " + os.environ.get("GITHUB_REPOSITORY", "?")
+                           + ": " + type(e).__name__ + ": " + str(e))
+          PY
