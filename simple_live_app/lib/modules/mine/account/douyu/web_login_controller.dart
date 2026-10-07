@@ -14,45 +14,60 @@ class DouyuWebLoginController extends BaseController {
   static const String loginUrl =
       "https://passport.douyu.com/index/login?client_id=1&type=login&state=https%3A%2F%2Fwww.douyu.com%2F&source=click_topnavi_login";
 
+  /// 登录页域：命中即拦截（登录成功后斗鱼会跳回 www.douyu.com）
+  static const String _passportHost = "passport.douyu.com";
+
   bool _saved = false;
+  bool _checking = false;
 
   void onWebViewCreated(InAppWebViewController controller) {
     webViewController = controller;
     webViewController!.loadUrl(urlRequest: URLRequest(url: WebUri(loginUrl)));
   }
 
-  /// 登录完成后斗鱼会把页面跳回 www.douyu.com，此时尝试抓取 Cookie。
+  /// 是否已离开登录页、落到斗鱼主站（此时尝试抓取 Cookie）。
   bool shouldIntercept(Uri uri) {
     if (_saved) {
       return false;
     }
     var host = uri.host;
-    if (host.isEmpty || host.startsWith("passport.douyu.com")) {
+    if (host.isEmpty || host == _passportHost) {
       return false;
     }
     return host == "www.douyu.com" || host.endsWith(".douyu.com");
   }
 
+  /// 读取 WebView Cookie：仅在拿到**非空** `acf_jwt_token`（登录态判据，与
+  /// 上游 DouyuUtils.refreshCookie 一致）时才算登录成功，避免游客态误判。
   Future<bool> logined() async {
     if (_saved) {
       return true;
     }
+    // 双通道（shouldOverrideUrlLoading / onLoadStop）可能同时触发，这里同步占位防重复弹栈
+    if (_checking) {
+      return false;
+    }
+    _checking = true;
     try {
       var cookies =
           await cookieManager.getCookies(url: WebUri("https://www.douyu.com"));
       if (cookies.isEmpty) {
         return false;
       }
-      var cookieStr = cookies.map((e) => "${e.name}=${e.value}").join("; ");
-      // 未登录时不会有 jwt token / uid，避免误判
-      if (!cookieStr.contains("acf_jwt_token=") &&
-          !cookieStr.contains("acf_uid=")) {
+      var cookieMap = <String, String>{};
+      for (final c in cookies) {
+        cookieMap[c.name] = c.value == null ? "" : c.value.toString();
+      }
+      if ((cookieMap["acf_jwt_token"] ?? "").isEmpty) {
+        // 未登录（游客）不保存，继续等待用户完成登录
         return false;
       }
+      var cookieStr =
+          cookies.map((e) => "${e.name}=${e.value}").join("; ");
       Log.i(cookieStr);
       PlatformService.instance.setDouyuCookie(cookieStr);
-      var did = _pickCookie(cookieStr, "dy_did");
-      var ltp0 = _pickCookie(cookieStr, "LTP0");
+      var did = cookieMap["dy_did"] ?? "";
+      var ltp0 = cookieMap["LTP0"] ?? "";
       if (did.isNotEmpty || ltp0.isNotEmpty) {
         await PlatformService.instance.setDouyuDidAndLtp0(did, ltp0);
       }
@@ -62,6 +77,8 @@ class DouyuWebLoginController extends BaseController {
     } catch (e, stack) {
       Log.e("斗鱼登录Cookie获取失败: $e", stack);
       return false;
+    } finally {
+      _checking = false;
     }
   }
 
@@ -73,15 +90,5 @@ class DouyuWebLoginController extends BaseController {
     if (shouldIntercept(uri)) {
       logined();
     }
-  }
-
-  String _pickCookie(String cookieStr, String name) {
-    for (final pair in cookieStr.split(";")) {
-      var p = pair.trim();
-      if (p.startsWith("$name=")) {
-        return p.substring(name.length + 1);
-      }
-    }
-    return "";
   }
 }

@@ -116,7 +116,10 @@ class AccountController extends GetxController {
         mainAxisSize: MainAxisSize.min,
         children: [
           Visibility(
-            visible: Platform.isAndroid || Platform.isIOS,
+            visible: Platform.isAndroid ||
+                Platform.isIOS ||
+                Platform.isWindows ||
+                Platform.isMacOS,
             child: ListTile(
               leading: const Icon(Icons.web_outlined),
               title: const Text("网页登录"),
