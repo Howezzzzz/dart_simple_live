@@ -28,7 +28,7 @@ class SyncExecutor {
     bool isSyncFollows = true,
     bool isSyncHistories = true,
     bool isSyncBlockWord = true,
-    bool isSyncAccount = true,
+    bool isSyncAccount = false,
     bool isSyncSetting = true,
   }) {
     _davClient = davClient;

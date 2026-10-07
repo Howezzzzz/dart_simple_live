@@ -17,7 +17,7 @@ class RemoteSyncWebDAVController extends BaseController {
   var isSyncFollows = true.obs;
   var isSyncHistories = true.obs;
   var isSyncBlockWord = true.obs;
-  var isSyncAccount = true.obs;
+  var isSyncAccount = false.obs;
   var isSyncSetting = true.obs;
 
   late DAVClient davClient;
