@@ -22,10 +22,20 @@ import 'package:simple_live_app/app/controller/base_controller.dart';
 import 'package:simple_live_app/app/custom_throttle.dart';
 import 'package:simple_live_app/app/log.dart';
 import 'package:simple_live_app/app/utils.dart';
+import 'package:simple_live_app/services/local_storage_service.dart';
 import 'package:simple_live_app/modules/live_room/danmaku/danmaku_emoticon.dart';
 import 'package:simple_live_core/simple_live_core.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:window_manager/window_manager.dart';
+
+/// 音量均衡滤镜：EBU R128 loudnorm 单遍动态模式（面向直播场景）
+/// I=-16 目标响度 LUFS / TP=-1.5 真峰值 dBTP / LRA=11 响度范围
+/// 单遍动态模式无前瞻延迟；相比 dynaudnorm 更贴近响度标准，跨直播间响度一致性更好
+const String volumeNormFilter = 'loudnorm=I=-16:TP=-1.5:LRA=11';
+
+/// 音量均衡探测期错误抑制时长：mpv 的 af 写入失败会以 stream.error 事件异步到达，
+/// 需在 set 之后留出窗口，避免误触发 mediaError 重拉流（PR #195 教训）
+const Duration volumeNormSuppressDuration = Duration(seconds: 2);
 
 mixin PlayerMixin {
   GlobalKey<VideoState> globalPlayerKey = GlobalKey<VideoState>();
@@ -788,8 +798,50 @@ class PlayerController extends BaseController
     initStream();
     //设置音量
     player.setVolume(AppSettingsController.instance.playerVolume.value);
+    //音量均衡：回填已持久化的能力探测结果（跨启动记忆；App 版本变化则自动失效重探）
+    afLoudnormSupported ??= _readPersistedCapability();
+    if (afLoudnormSupported != null) {
+      AppSettingsController.instance.setVolumeNormSupported(afLoudnormSupported);
+    }
+    //音量均衡热切换：设置页/房内开关拨动即时生效
+    //PR #195 教训：句柄化管理 + onClose 释放 + 回调内 disposed 短路
+    _volumeNormWorker = ever(AppSettingsController.instance.volumeNorm, (bool on) {
+      if (_playerDisposed) {
+        return;
+      }
+      //未播放且能力未知：不在此刻探测（空闲探测不可靠，可能假成功），留到首帧钩子统一处理
+      if (afLoudnormSupported == null && !player.state.playing) {
+        return;
+      }
+      _syncVolumeNorm();
+    });
     super.onInit();
   }
+
+  /// 音量均衡：进程级能力缓存（null=未探测；libmpv 构建固定，探测一次即可）
+  static bool? afLoudnormSupported;
+
+  /// 音量均衡：探测/切换期间抑制错误重试（af 写入失败会以 stream.error 到达，
+  /// 不抑制会误触发 mediaError→重拉流/切线路，PR #195 的实测缺陷）
+  bool _suppressErrorRetry = false;
+
+  /// 音量均衡：抑制令牌（并发/时序保护，仅最新令牌允许解除抑制）
+  int _suppressToken = 0;
+
+  /// 音量均衡：本房间是否已应用 af
+  bool _volumeNormApplied = false;
+
+  /// 音量均衡：本房间首帧播放的一次性探测是否已执行
+  bool _volumeNormInitialized = false;
+
+  /// 音量均衡：热切换监听器句柄（onClose 必须释放；裸 ever() 退房后断言，PR #195 教训）
+  Worker? _volumeNormWorker;
+
+  /// 音量均衡：操作串行队列（探测/应用/移除按发起顺序执行，避免并发交错导致 af 与状态标记不一致）
+  Future<void> _volumeNormQueue = Future<void>.value();
+
+  /// 播放器已释放标记（异步回调短路，防止已释放播放器断言）
+  bool _playerDisposed = false;
 
   StreamSubscription<String>? _errorSubscription;
   StreamSubscription? _completedSubscription;
@@ -802,6 +854,11 @@ class PlayerController extends BaseController
   void initStream() {
     _errorSubscription = player.stream.error.listen((event) {
       Log.d("播放器错误：$event");
+      // 音量均衡探测/切换期间：af 写入失败的错误事件直接跳过，不触发重拉流（PR #195 教训）
+      if (_suppressErrorRetry) {
+        Log.d("音量均衡探测期，抑制错误事件：$event");
+        return;
+      }
       // 跳过无音频输出的错误
       // Could not open/initialize audio device -> no sound.
       if (event.contains('no sound.')) {
@@ -815,6 +872,11 @@ class PlayerController extends BaseController
       if (event) {
         WakelockPlus.enable();
         Log.d("Playing");
+        // 音量均衡：首帧播放后一次性同步（能力未知时顺带探测，必须播放中做）
+        if (!_volumeNormInitialized) {
+          _volumeNormInitialized = true;
+          _syncVolumeNorm();
+        }
       }
     });
 
@@ -865,6 +927,169 @@ class PlayerController extends BaseController
   void mediaError(String error) {
     // 弱网调整：用户自责
     // WakelockPlus.disable();
+  }
+
+  /// 音量均衡：把播放器 af 状态同步到「用户意愿 + 已探测能力」（首帧钩子 / 热切换共用）
+  /// 所有 af 操作经队列串行化：探测期间用户拨开关时，后一次同步会排队到探测结束后执行，
+  /// 避免两次探测并发导致「af 已开但标记为关」而无法关闭的错乱
+  Future<void> _syncVolumeNorm() {
+    return _enqueueVolumeNorm(() async {
+      if (_playerDisposed) {
+        return;
+      }
+      afLoudnormSupported ??= _readPersistedCapability();
+      if (afLoudnormSupported == null) {
+        // 能力未知：执行一次探测（探测后按用户意愿自动还原/保持）
+        await _probeVolumeNormCapability();
+        return;
+      }
+      if (AppSettingsController.instance.volumeNorm.value) {
+        if (afLoudnormSupported == true) {
+          await _applyVolumeNorm(enable: true);
+        }
+      } else if (_volumeNormApplied) {
+        await _applyVolumeNorm(enable: false);
+      }
+    });
+  }
+
+  /// 音量均衡：操作串行队列（异常在队列内消化，避免 fire-and-forget 产生未处理异步异常）
+  Future<void> _enqueueVolumeNorm(Future<void> Function() task) {
+    final next = _volumeNormQueue.then((_) async {
+      try {
+        await task();
+      } catch (e) {
+        Log.logPrint(e);
+      }
+    });
+    _volumeNormQueue = next;
+    return next;
+  }
+
+  /// 音量均衡：探测能力（设置 af → 回读校验），探测后按用户意愿还原或保持
+  Future<void> _probeVolumeNormCapability() async {
+    if (_playerDisposed) {
+      return;
+    }
+    final pp = player.platform;
+    if (pp is! NativePlayer) {
+      return;
+    }
+    final token = ++_suppressToken;
+    _suppressErrorRetry = true;
+    var supported = false;
+    try {
+      await pp.setProperty('af', volumeNormFilter);
+      // 回读校验：af 为未知滤镜时 mpv 会拒绝写入并保持旧值，
+      // 因此回读是否包含 loudnorm 即可判定二进制是否支持
+      final readback = await pp.getProperty('af');
+      supported = readback.contains('loudnorm');
+    } catch (e) {
+      Log.logPrint(e);
+      supported = false;
+    }
+    afLoudnormSupported = supported;
+    _persistCapability(supported);
+    AppSettingsController.instance.setVolumeNormSupported(supported);
+    final keepOn = supported && AppSettingsController.instance.volumeNorm.value;
+    if (keepOn) {
+      _volumeNormApplied = true;
+    } else {
+      // 用户未开启或能力不支持：探测后立即还原为空 af，不影响实际听感
+      try {
+        await pp.setProperty('af', '');
+      } catch (e) {
+        Log.logPrint(e);
+      }
+      _volumeNormApplied = false;
+    }
+    if (!supported) {
+      SmartDialog.showToast("当前播放核心不支持音量均衡，开关已禁用");
+    }
+    _scheduleSuppressRelease(token);
+  }
+
+  /// 音量均衡：对播放器应用/移除 loudnorm 滤镜（能力已知时使用；仅由 _syncVolumeNorm 在队列内调用）
+  Future<void> _applyVolumeNorm({required bool enable}) async {
+    if (_playerDisposed) {
+      return;
+    }
+    final pp = player.platform;
+    if (pp is! NativePlayer) {
+      return;
+    }
+    if (enable == _volumeNormApplied) {
+      return;
+    }
+    if (enable && afLoudnormSupported == false) {
+      // 已知不支持：不再尝试（UI 已禁用，这里是保险短路）
+      return;
+    }
+    final token = ++_suppressToken;
+    _suppressErrorRetry = true;
+    try {
+      await pp.setProperty('af', enable ? volumeNormFilter : '');
+      _volumeNormApplied = enable;
+    } catch (e) {
+      Log.logPrint(e);
+      if (enable) {
+        // 开启失败：保守回退到无滤镜并禁用开关
+        try {
+          await pp.setProperty('af', '');
+        } catch (_) {}
+        _volumeNormApplied = false;
+        afLoudnormSupported = false;
+        _persistCapability(false);
+        AppSettingsController.instance.setVolumeNormSupported(false);
+        SmartDialog.showToast("音量均衡应用失败，已禁用开关");
+      } else {
+        // 关闭失败：回读真实状态，避免 UI 显示与实际听感不一致
+        try {
+          final readback = await pp.getProperty('af');
+          _volumeNormApplied = readback.contains('loudnorm');
+        } catch (e2) {
+          Log.logPrint(e2);
+          // 回读也失败：保守保持「已应用」，下次关闭会重试
+          _volumeNormApplied = true;
+        }
+        if (_volumeNormApplied) {
+          SmartDialog.showToast("音量均衡关闭失败，请重试");
+        }
+      }
+    }
+    _scheduleSuppressRelease(token);
+  }
+
+  /// 音量均衡：读取已持久化的能力探测结果（带 App 版本前缀，版本变化即失效重探）
+  bool? _readPersistedCapability() {
+    final raw = LocalStorageService.instance.getValue<String>(
+      LocalStorageService.kVolumeNormSupported,
+      "",
+    );
+    final prefix = "${Utils.packageInfo.version}:";
+    if (raw.isEmpty || !raw.startsWith(prefix)) {
+      return null;
+    }
+    return raw.substring(prefix.length) == "true";
+  }
+
+  void _persistCapability(bool supported) {
+    LocalStorageService.instance.setValue(
+      LocalStorageService.kVolumeNormSupported,
+      "${Utils.packageInfo.version}:$supported",
+    );
+  }
+
+  void _scheduleSuppressRelease(int token) {
+    // 延迟解除抑制：mpv 错误事件可能略晚于 setProperty 返回
+    Future.delayed(volumeNormSuppressDuration, () {
+      if (_playerDisposed) {
+        return;
+      }
+      if (token == _suppressToken) {
+        _suppressErrorRetry = false;
+      }
+    });
   }
 
   Future<void> toggleOSDStats() async {
@@ -980,6 +1205,9 @@ class PlayerController extends BaseController
   @override
   void onClose() async {
     Log.w("播放器关闭");
+    _playerDisposed = true;
+    _volumeNormWorker?.dispose();
+    _volumeNormWorker = null;
     if (smallWindowState.value) {
       exitSmallWindow();
     }

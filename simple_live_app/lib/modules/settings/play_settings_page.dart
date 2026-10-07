@@ -128,6 +128,26 @@ class PlaySettingsPage extends GetView<AppSettingsController> {
                         controller.setVerticalDragLock(e);
                       }),
                 ),
+                AppStyle.divider,
+                Obx(
+                  () => IgnorePointer(
+                    // 能力不支持时真正禁用（不可点击），而非仅仅视觉弱化
+                    ignoring: controller.volumeNormSupported.value == false,
+                    child: Opacity(
+                      opacity: controller.volumeNormSupported.value == false
+                          ? 0.5
+                          : 1.0,
+                      child: SettingsSwitch(
+                        title: "音量均衡",
+                        subtitle: controller.volumeNormSupported.value == false
+                            ? "当前播放核心不支持（需定制 libmpv 构建）"
+                            : "自动抬升小音量/压低大音量（EBU R128），跨直播间响度更一致",
+                        value: controller.volumeNorm.value,
+                        onChanged: (e) => controller.setVolumeNorm(e),
+                      ),
+                    ),
+                  ),
+                ),
               ],
             ),
           ),

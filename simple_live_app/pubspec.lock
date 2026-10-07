@@ -934,11 +934,9 @@ packages:
   media_kit_libs_windows_video:
     dependency: "direct overridden"
     description:
-      path: "libs/windows/media_kit_libs_windows_video"
-      ref: "78d4cce7b49d5b6b918f78b18ec1fbb7c400b9da"
-      resolved-ref: "78d4cce7b49d5b6b918f78b18ec1fbb7c400b9da"
-      url: "https://github.com/Predidit/media-kit.git"
-    source: git
+      path: "packages/media_kit_libs_windows_video"
+      relative: true
+    source: path
     version: "1.0.10"
   media_kit_video:
     dependency: "direct main"

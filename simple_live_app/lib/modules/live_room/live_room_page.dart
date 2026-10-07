@@ -828,6 +828,33 @@ class LiveRoomPage extends GetView<LiveRoomController> {
                 title: "自定义画面尺寸",
                 onTap: controller.showAspectRatioSheet,
               ),
+              AppStyle.divider,
+              Obx(
+                () => IgnorePointer(
+                  // 能力不支持时真正禁用（不可点击），而非仅仅视觉弱化
+                  ignoring: AppSettingsController
+                          .instance.volumeNormSupported.value ==
+                      false,
+                  child: Opacity(
+                    opacity: AppSettingsController
+                                .instance.volumeNormSupported.value ==
+                            false
+                        ? 0.5
+                        : 1.0,
+                    child: SettingsSwitch(
+                      title: "音量均衡",
+                      subtitle: AppSettingsController
+                                  .instance.volumeNormSupported.value ==
+                              false
+                          ? "当前播放核心不支持（需定制 libmpv 构建）"
+                          : "自动抬升小音量/压低大音量（EBU R128）",
+                      value: AppSettingsController.instance.volumeNorm.value,
+                      onChanged: (e) =>
+                          AppSettingsController.instance.setVolumeNorm(e),
+                    ),
+                  ),
+                ),
+              ),
             ],
           ),
         ),

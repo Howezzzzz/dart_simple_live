@@ -137,6 +137,11 @@ class AppSettingsController extends GetxController {
       300.0,
     );
 
+    volumeNorm.value = LocalStorageService.instance.getValue(
+      LocalStorageService.kVolumeNorm,
+      false,
+    );
+
     audioOutputDriver.value = LocalStorageService.instance.getValue(
       LocalStorageService.kAudioOutputDriver,
       Platform.isAndroid
@@ -458,6 +463,21 @@ class AppSettingsController extends GetxController {
   void saveMessagePanelWidth() {
     LocalStorageService.instance.setValue(
         LocalStorageService.kMessagePanelWidth, messagePanelWidth.value);
+  }
+
+  /// 音量均衡（EBU R128 loudnorm 滤镜；播放器侧安全探测+应用，见 PlayerController._syncVolumeNorm）
+  var volumeNorm = false.obs;
+
+  void setVolumeNorm(bool e) {
+    volumeNorm.value = e;
+    LocalStorageService.instance.setValue(LocalStorageService.kVolumeNorm, e);
+  }
+
+  /// 音量均衡可用性（null=尚未探测；直播间首帧播放后由播放器探测回写）
+  final volumeNormSupported = Rxn<bool>();
+
+  void setVolumeNormSupported(bool? e) {
+    volumeNormSupported.value = e;
   }
 
   var audioOutputDriver = "".obs;

@@ -146,6 +146,12 @@ class LocalStorageService extends GetxService {
   /// 桌面端直播间右侧消息面板宽度
   static const String kMessagePanelWidth = "MessagePanelWidth";
 
+  /// 音量均衡（EBU R128 loudnorm 音频滤镜）
+  static const String kVolumeNorm = "VolumeNorm";
+
+  /// 音量均衡能力探测结果（格式 "<App版本>:<true|false>"，版本变化自动失效重探）
+  static const String kVolumeNormSupported = "VolumeNormSupported";
+
   /// 播放器音量
   static const String kPlayerVolume = "PlayerVolume";
 
