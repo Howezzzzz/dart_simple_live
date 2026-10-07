@@ -38,7 +38,8 @@ class BiliBiliWebLoginController extends BaseController {
         return false;
       }
       var cookieStr = cookies.map((e) => "${e.name}=${e.value}").join(";");
-      Log.i(cookieStr);
+      // 不把 Cookie 明文写日志（含 SESSDATA/bili_jct 等敏感项），只记录字段清单
+      Log.i("B站网页登录成功，已获取 Cookie 字段：${cookies.map((e) => e.name).join(',')}");
       BiliBiliAccountService.instance.setCookie(cookieStr);
       await BiliBiliAccountService.instance.loadUserInfo();
       Get.back();
