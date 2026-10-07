@@ -48,7 +48,7 @@ class AccountPage extends GetView<AccountController> {
               ),
               title: const Text("斗鱼直播"),
               subtitle: Text(
-                PlatformService.instance.douyuCookie.value.isEmpty ? "点击配置Cookie" : "已自定义Cookie",
+                PlatformService.instance.douyuCookie.value.isEmpty ? "点击登录/配置" : "已登录",
               ),
               onTap: controller.douyuTap,
               trailing: PlatformService.instance.douyuCookie.value.isNotEmpty

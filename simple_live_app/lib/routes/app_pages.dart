@@ -18,6 +18,8 @@ import 'package:simple_live_app/modules/mine/account/bilibili/qr_login_controlle
 import 'package:simple_live_app/modules/mine/account/bilibili/qr_login_page.dart';
 import 'package:simple_live_app/modules/mine/account/bilibili/web_login_controller.dart';
 import 'package:simple_live_app/modules/mine/account/bilibili/web_login_page.dart';
+import 'package:simple_live_app/modules/mine/account/douyu/web_login_controller.dart';
+import 'package:simple_live_app/modules/mine/account/douyu/web_login_page.dart';
 import 'package:simple_live_app/modules/mine/history/history_controller.dart';
 import 'package:simple_live_app/modules/mine/history/history_page.dart';
 import 'package:simple_live_app/modules/mine/parse/parse_controller.dart';
@@ -171,6 +173,14 @@ class AppPages {
       page: () => const BiliBiliQRLoginPage(),
       bindings: [
         BindingsBuilder.put(() => BiliBiliQRLoginController()),
+      ],
+    ),
+    //斗鱼网页登录
+    GetPage(
+      name: RoutePath.kDouyuWebLogin,
+      page: () => const DouyuWebLoginPage(),
+      bindings: [
+        BindingsBuilder.put(() => DouyuWebLoginController()),
       ],
     ),
     // 数据同步

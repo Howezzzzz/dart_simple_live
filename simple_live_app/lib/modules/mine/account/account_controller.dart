@@ -104,33 +104,72 @@ class AccountController extends GetxController {
         PlatformService.instance.douyuLogout();
       }
     } else {
-      final douyuParams = await Utils.showEditTextsDialog([
-        TextEditItem(
-          value: PlatformService.instance.douyuCookie.value,
-          label: 'cookie',
-          hintText: 'dy_did=...; acf_did=...;etc',
-          key: 'cookie',
-        ),
-        TextEditItem(
-          value: PlatformService.instance.dy_did,
-          label: 'dy_did',
-          hintText: '10000000000000000000000000001501',
-          key: 'dy_did',
-        ),
-        TextEditItem(
-          value: PlatformService.instance.dyLtp0,
-          label: 'ltp0',
-          hintText: '自动更新cookie',
-          obscureText: true,
-          key: 'ltp0',
-        ),
-      ], title: '请输入斗鱼各项参数');
-      if (douyuParams == null || douyuParams.isEmpty) return;
-      var dyCookie = douyuParams['cookie']??'';
-      var dyDid = douyuParams['dy_did']??'';
-      var dyLtp0 = douyuParams['ltp0']??'';
-      PlatformService.instance.setDouyuCookie(dyCookie);
-      await PlatformService.instance.setDouyuDidAndLtp0(dyDid, dyLtp0);
+      douyuLoginSheet();
     }
+  }
+
+  // 登录方式选择：网页登录（推荐）/ 手动填写 Cookie
+  void douyuLoginSheet() {
+    Utils.showBottomSheet(
+      title: "登录斗鱼",
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Visibility(
+            visible: Platform.isAndroid || Platform.isIOS,
+            child: ListTile(
+              leading: const Icon(Icons.web_outlined),
+              title: const Text("网页登录"),
+              subtitle: const Text("账号密码 / 手机验证码登录（推荐）"),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () {
+                Get.back();
+                Get.toNamed(RoutePath.kDouyuWebLogin);
+              },
+            ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.edit_outlined),
+            title: const Text("手动填写 Cookie"),
+            subtitle: const Text("自行粘贴 dy_did / LTP0 等参数"),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () {
+              Get.back();
+              douyuCookieInput();
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  void douyuCookieInput() async {
+    final douyuParams = await Utils.showEditTextsDialog([
+      TextEditItem(
+        value: PlatformService.instance.douyuCookie.value,
+        label: 'cookie',
+        hintText: 'dy_did=...; acf_did=...;etc',
+        key: 'cookie',
+      ),
+      TextEditItem(
+        value: PlatformService.instance.dy_did,
+        label: 'dy_did',
+        hintText: '10000000000000000000000000001501',
+        key: 'dy_did',
+      ),
+      TextEditItem(
+        value: PlatformService.instance.dyLtp0,
+        label: 'ltp0',
+        hintText: '自动更新cookie',
+        obscureText: true,
+        key: 'ltp0',
+      ),
+    ], title: '请输入斗鱼各项参数');
+    if (douyuParams == null || douyuParams.isEmpty) return;
+    var dyCookie = douyuParams['cookie'] ?? '';
+    var dyDid = douyuParams['dy_did'] ?? '';
+    var dyLtp0 = douyuParams['ltp0'] ?? '';
+    PlatformService.instance.setDouyuCookie(dyCookie);
+    await PlatformService.instance.setDouyuDidAndLtp0(dyDid, dyLtp0);
   }
 }

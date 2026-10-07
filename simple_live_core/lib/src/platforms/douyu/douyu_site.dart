@@ -84,51 +84,54 @@ class DouyuSite implements LiveSite {
   @override
   Future<List<LivePlayQuality>> getPlayQualities(
       {required LiveRoomDetail detail}) async {
-    // 优先微信小程序接口（免登录、无需 cookie、流地址长时效）
+    // 优先网页接口：免登录即可拿到全部档位（原画/蓝光/超清/高清）。
+    // 微信小程序接口（roomPlayer）服务端只发 720p 且忽略 rate，故仅作兜底。
     try {
-      final miniData = await DouyuUtils.miniRoomPlayer(detail.roomId);
-      final rateList = miniData['rate_list'] as List? ?? const [];
-      if (rateList.isNotEmpty) {
-        final qualities = <LivePlayQuality>[];
-        for (final item in rateList) {
-          qualities.add(LivePlayQuality(
-            quality: item['name'].toString(),
-            data: DouyuMiniPlayData(int.tryParse(item['rate'].toString()) ?? 0),
-          ));
+      var data = await DouyuUtils.sign(detail.roomId, cookie: _cookie);
+      var result = await HttpClient.instance.postJson(
+        "https://www.douyu.com/lapi/live/getH5PlayV1/${detail.roomId}",
+        data: data,
+        formUrlEncoded: true,
+        header: DouyuUtils.requestHeader(roomId: detail.roomId, cookie: _cookie),
+      );
+
+      var cdns = <String>[];
+      for (var item in result["data"]["cdnsWithName"]) {
+        cdns.add(item["cdn"].toString());
+      }
+
+      // 如果cdn以scdn开头，将其放到最后
+      cdns.sort((a, b) {
+        if (a.startsWith("scdn") && !b.startsWith("scdn")) {
+          return 1;
+        } else if (!a.startsWith("scdn") && b.startsWith("scdn")) {
+          return -1;
         }
+        return 0;
+      });
+
+      List<LivePlayQuality> qualities = [];
+      for (var item in result["data"]["multirates"]) {
+        qualities.add(LivePlayQuality(
+          quality: item["name"].toString(),
+          data: DouyuPlayData(item["rate"], cdns),
+        ));
+      }
+      if (qualities.isNotEmpty) {
         return qualities;
       }
     } catch (_) {
-      // 小程序接口失败（网络/风控），回退 web 接口
-    }
-    var data = await DouyuUtils.sign(detail.roomId, cookie: _cookie);
-    List<LivePlayQuality> qualities = [];
-    var result = await HttpClient.instance.postJson(
-      "https://www.douyu.com/lapi/live/getH5PlayV1/${detail.roomId}",
-      data: data,
-      formUrlEncoded: true,
-      header: DouyuUtils.requestHeader(roomId: detail.roomId, cookie: _cookie),
-    );
-
-    var cdns = <String>[];
-    for (var item in result["data"]["cdnsWithName"]) {
-      cdns.add(item["cdn"].toString());
+      // 网页接口失败（签名/风控/网络），回退微信小程序接口
     }
 
-    // 如果cdn以scdn开头，将其放到最后
-    cdns.sort((a, b) {
-      if (a.startsWith("scdn") && !b.startsWith("scdn")) {
-        return 1;
-      } else if (!a.startsWith("scdn") && b.startsWith("scdn")) {
-        return -1;
-      }
-      return 0;
-    });
-
-    for (var item in result["data"]["multirates"]) {
+    // 兜底：微信小程序接口（免登录、无需 cookie、流地址长时效，但仅 720p）
+    final miniData = await DouyuUtils.miniRoomPlayer(detail.roomId);
+    final rateList = miniData['rate_list'] as List? ?? const [];
+    final qualities = <LivePlayQuality>[];
+    for (final item in rateList) {
       qualities.add(LivePlayQuality(
-        quality: item["name"].toString(),
-        data: DouyuPlayData(item["rate"], cdns),
+        quality: item['name'].toString(),
+        data: DouyuMiniPlayData(int.tryParse(item['rate'].toString()) ?? 0),
       ));
     }
     return qualities;

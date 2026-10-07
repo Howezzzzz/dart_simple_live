@@ -60,6 +60,9 @@ class RoutePath {
   /// BiliBili 二维码登录
   static const kBiliBiliQRLogin = "/settings/account/bilibili/qr_login";
 
+  /// 斗鱼 网页登录
+  static const kDouyuWebLogin = "/settings/account/douyu/web_login";
+
   /// 数据同步
   static const kLocalSync = "/local_sync";
 
