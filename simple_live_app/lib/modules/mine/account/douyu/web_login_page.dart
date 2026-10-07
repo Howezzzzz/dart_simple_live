@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:get/get.dart';
@@ -17,8 +19,10 @@ class DouyuWebLoginPage extends GetView<DouyuWebLoginController> {
         onWebViewCreated: controller.onWebViewCreated,
         onLoadStop: controller.onLoadStop,
         initialSettings: InAppWebViewSettings(
-          userAgent:
-              "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
+          // 桌面端用桌面 UA，避免移动端风控链路（斗鱼按 UA 分流）
+          userAgent: Platform.isMacOS || Platform.isWindows
+              ? "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+              : "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
           useShouldOverrideUrlLoading: true,
           thirdPartyCookiesEnabled: true,
         ),

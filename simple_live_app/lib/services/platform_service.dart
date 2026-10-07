@@ -139,9 +139,12 @@ class PlatformService extends GetxService {
 
   // 本地存储-> update Core-Site attrs
   void setDouyuCookie(String cookie) {
-    if(cookie.isNotEmpty){
+    if (cookie.isNotEmpty) {
       douyuCookie.value = cookie;
-      LocalStorageService.instance.setValue(LocalStorageService.kDouyuCookie, douyuCookie.value);
+      LocalStorageService.instance
+          .setValue(LocalStorageService.kDouyuCookie, douyuCookie.value);
+      // 同步到 core site 属性，避免仅设置 Cookie 时 session 内不一致
+      _updateDouyuAttr();
     }
   }
 

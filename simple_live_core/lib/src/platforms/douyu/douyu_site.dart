@@ -92,7 +92,8 @@ class DouyuSite implements LiveSite {
         "https://www.douyu.com/lapi/live/getH5PlayV1/${detail.roomId}",
         data: data,
         formUrlEncoded: true,
-        header: DouyuUtils.requestHeader(roomId: detail.roomId, cookie: _cookie),
+        header:
+            DouyuUtils.requestHeader(roomId: detail.roomId, cookie: _cookie),
       );
 
       var cdns = <String>[];
@@ -125,16 +126,21 @@ class DouyuSite implements LiveSite {
     }
 
     // 兜底：微信小程序接口（免登录、无需 cookie、流地址长时效，但仅 720p）
-    final miniData = await DouyuUtils.miniRoomPlayer(detail.roomId);
-    final rateList = miniData['rate_list'] as List? ?? const [];
-    final qualities = <LivePlayQuality>[];
-    for (final item in rateList) {
-      qualities.add(LivePlayQuality(
-        quality: item['name'].toString(),
-        data: DouyuMiniPlayData(int.tryParse(item['rate'].toString()) ?? 0),
-      ));
+    try {
+      final miniData = await DouyuUtils.miniRoomPlayer(detail.roomId);
+      final rateList = miniData['rate_list'] as List? ?? const [];
+      final qualities = <LivePlayQuality>[];
+      for (final item in rateList) {
+        qualities.add(LivePlayQuality(
+          quality: item['name'].toString(),
+          data: DouyuMiniPlayData(int.tryParse(item['rate'].toString()) ?? 0),
+        ));
+      }
+      return qualities;
+    } catch (e) {
+      // 兜底也失败：归一化为可读错误，避免原始类型异常冒泡
+      throw Exception("获取斗鱼清晰度失败（网页/小程序接口均不可用）: $e");
     }
-    return qualities;
   }
 
   @override
@@ -144,10 +150,14 @@ class DouyuSite implements LiveSite {
     // 小程序接口路径：直接按所选码率请求，返回单条长时效 FLV 地址
     final q = quality.data;
     if (q is DouyuMiniPlayData) {
-      final miniData =
-          await DouyuUtils.miniRoomPlayer(detail.roomId, rate: q.rate);
-      final url = miniData['live_url']?.toString() ?? '';
-      return LivePlayUrl(urls: url.isEmpty ? const [] : [url]);
+      try {
+        final miniData =
+            await DouyuUtils.miniRoomPlayer(detail.roomId, rate: q.rate);
+        final url = miniData['live_url']?.toString() ?? '';
+        return LivePlayUrl(urls: url.isEmpty ? const [] : [url]);
+      } catch (e) {
+        throw Exception("获取斗鱼播放地址失败（小程序接口异常）: $e");
+      }
     }
     var data = quality.data as DouyuPlayData;
 
@@ -361,7 +371,10 @@ class DouyuSite implements LiveSite {
   Future<String> refreshCookie(String dy_did, String ltp0) async {
     var newCookie = await DouyuUtils.refreshCookie(
         did: dy_did, ltp0: ltp0, cookie: _cookie);
-    _cookie = newCookie;
+    // 刷新失败返回空串时保留旧值，避免 core 内部 cookie 被清空但持久层仍认为“已登录”
+    if (newCookie.isNotEmpty) {
+      _cookie = newCookie;
+    }
     return newCookie;
   }
 

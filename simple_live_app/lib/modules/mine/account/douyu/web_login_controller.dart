@@ -22,7 +22,12 @@ class DouyuWebLoginController extends BaseController {
 
   void onWebViewCreated(InAppWebViewController controller) {
     webViewController = controller;
-    webViewController!.loadUrl(urlRequest: URLRequest(url: WebUri(loginUrl)));
+    try {
+      webViewController!
+          .loadUrl(urlRequest: URLRequest(url: WebUri(loginUrl)));
+    } catch (e) {
+      Log.e("斗鱼登录页加载失败: $e", StackTrace.current);
+    }
   }
 
   /// 是否已离开登录页、落到斗鱼主站（此时尝试抓取 Cookie）。
@@ -64,7 +69,8 @@ class DouyuWebLoginController extends BaseController {
       }
       var cookieStr =
           cookies.map((e) => "${e.name}=${e.value}").join("; ");
-      Log.i(cookieStr);
+      // 不把 Cookie 明文写日志（含 acf_jwt_token/LTP0 等敏感项），只记录字段清单
+      Log.i("斗鱼网页登录成功，已获取 Cookie 字段：${cookieMap.keys.join(',')}");
       PlatformService.instance.setDouyuCookie(cookieStr);
       var did = cookieMap["dy_did"] ?? "";
       var ltp0 = cookieMap["LTP0"] ?? "";
