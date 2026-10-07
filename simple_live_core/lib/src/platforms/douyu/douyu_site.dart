@@ -24,7 +24,7 @@ class DouyuSite implements LiveSite {
   LiveDanmaku getDanmaku() => DouyuDanmaku();
 
   @override
-  Future<List<LiveCategory>> getCategores() async {
+  Future<List<LiveCategory>> getCategories() async {
     List<LiveCategory> categories = [];
     var result =
         await HttpClient.instance.getJson("https://m.douyu.com/api/cate/list");
@@ -82,7 +82,25 @@ class DouyuSite implements LiveSite {
   }
 
   @override
-  Future<List<LivePlayQuality>> getPlayQualites({required LiveRoomDetail detail}) async {
+  Future<List<LivePlayQuality>> getPlayQualities(
+      {required LiveRoomDetail detail}) async {
+    // 优先微信小程序接口（免登录、无需 cookie、流地址长时效）
+    try {
+      final miniData = await DouyuUtils.miniRoomPlayer(detail.roomId);
+      final rateList = miniData['rate_list'] as List? ?? const [];
+      if (rateList.isNotEmpty) {
+        final qualities = <LivePlayQuality>[];
+        for (final item in rateList) {
+          qualities.add(LivePlayQuality(
+            quality: item['name'].toString(),
+            data: DouyuMiniPlayData(int.tryParse(item['rate'].toString()) ?? 0),
+          ));
+        }
+        return qualities;
+      }
+    } catch (_) {
+      // 小程序接口失败（网络/风控），回退 web 接口
+    }
     var data = await DouyuUtils.sign(detail.roomId, cookie: _cookie);
     List<LivePlayQuality> qualities = [];
     var result = await HttpClient.instance.postJson(
@@ -120,6 +138,14 @@ class DouyuSite implements LiveSite {
   Future<LivePlayUrl> getPlayUrls(
       {required LiveRoomDetail detail,
       required LivePlayQuality quality}) async {
+    // 小程序接口路径：直接按所选码率请求，返回单条长时效 FLV 地址
+    final q = quality.data;
+    if (q is DouyuMiniPlayData) {
+      final miniData =
+          await DouyuUtils.miniRoomPlayer(detail.roomId, rate: q.rate);
+      final url = miniData['live_url']?.toString() ?? '';
+      return LivePlayUrl(urls: url.isEmpty ? const [] : [url]);
+    }
     var data = quality.data as DouyuPlayData;
 
     List<String> urls = [];
@@ -129,7 +155,7 @@ class DouyuSite implements LiveSite {
         // if expire=300 and cdn is ws then add &expire=0
         // user must be live in oversea
         // cookie is better, cookie needs refreshed every 7 days
-        if(url.contains('expire=300') && url.contains('fcdn=ws')){
+        if (url.contains('expire=300') && url.contains('fcdn=ws')) {
           url = '$url&expire=0';
         }
         urls.add(url);
@@ -139,7 +165,8 @@ class DouyuSite implements LiveSite {
   }
 
   Future<String> getPlayUrl(String roomId, int rate, String cdn) async {
-    var sign = await DouyuUtils.sign(roomId, rate: rate, cdn: cdn, cookie: _cookie);
+    var sign =
+        await DouyuUtils.sign(roomId, rate: rate, cdn: cdn, cookie: _cookie);
     var result = await HttpClient.instance.postJson(
       "https://www.douyu.com/lapi/live/getH5PlayV1/$roomId",
       data: sign,
@@ -329,15 +356,17 @@ class DouyuSite implements LiveSite {
   }
 
   Future<String> refreshCookie(String dy_did, String ltp0) async {
-    var newCookie = await DouyuUtils.refreshCookie(did: dy_did, ltp0: ltp0, cookie: _cookie);
+    var newCookie = await DouyuUtils.refreshCookie(
+        did: dy_did, ltp0: ltp0, cookie: _cookie);
     _cookie = newCookie;
     return newCookie;
   }
 
   @override
   Future<void> setSiteAttrs(Map<String, dynamic> data) async {
-    if(data.containsKey('cookie')){
+    if (data.containsKey('cookie')) {
       _cookie = data['cookie'] as String;
+      DouyuUtils.setDyDid(_cookie);
     }
   }
 }
@@ -347,4 +376,11 @@ class DouyuPlayData {
   final List<String> cdns;
 
   DouyuPlayData(this.rate, this.cdns);
+}
+
+/// 小程序接口码率载荷（rate 为 roomPlayer 的 rate 参数）
+class DouyuMiniPlayData {
+  final int rate;
+
+  DouyuMiniPlayData(this.rate);
 }

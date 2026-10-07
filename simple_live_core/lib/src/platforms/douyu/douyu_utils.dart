@@ -1,12 +1,13 @@
-﻿import 'dart:convert';
+import 'dart:convert';
 
 import 'package:crypto/crypto.dart';
+import 'package:simple_live_core/src/common/core_error.dart';
 import 'package:simple_live_core/src/common/http_client.dart';
 import 'package:simple_live_core/src/common/parse_cookie.dart';
 
 class DouyuUtils {
   // params
-  static final String _did = '10000000000000000000000000001501';
+  static String _did = '10000000000000000000000000001501';
 
   static final int _encCacheTTL = 5 * 60;
 
@@ -14,25 +15,29 @@ class DouyuUtils {
 
   // api
   // douyu-enc
-  static final _apiDouyuEnc = "https://www.douyu.com/wgapi/livenc/liveweb/websec/getEncryption";
+  static final _apiDouyuEnc =
+      "https://www.douyu.com/wgapi/livenc/liveweb/websec/getEncryption";
 
   // safe auth
-  static final _apiDouyuPassport = 'https://passport.douyu.com/lapi/passport/iframe/safeAuth';
+  static final _apiDouyuPassport =
+      'https://passport.douyu.com/lapi/passport/iframe/safeAuth';
 
   static final douyuOrigin = 'https://www.douyu.com';
 
-
   // douyu-live-stream
-  static Map<String, String> requestHeader({String roomId = '', String cookie = ''}) {
+  static Map<String, String> requestHeader(
+      {String roomId = '', String cookie = ''}) {
     var referer = roomId.isEmpty ? douyuOrigin : '$douyuOrigin/$roomId';
     var res = {
       'accept': '*/*',
       'accept-encoding': 'gzip, deflate, br, zstd',
-      'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6,zh-Hans;q=0.5',
-      'origin':  douyuOrigin,
+      'accept-language':
+          'zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6,zh-Hans;q=0.5',
+      'origin': douyuOrigin,
       'referer': referer,
       "content-type": "application/x-www-form-urlencoded",
-      'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36 Edg/114.0.1823.43',
+      'user-agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36 Edg/114.0.1823.43',
       'cookie': 'dy_did=$_did; acf_did=$_did',
     };
     if (cookie.isNotEmpty) {
@@ -41,7 +46,13 @@ class DouyuUtils {
     return res;
   }
 
-  static Future<String> refreshCookie({String did = '', String ltp0 = '', String cookie = ''}) async {
+  static void setDyDid(String cookie) {
+    final match = RegExp(r'dy_did=([^;]+)').firstMatch(cookie);
+    _did = match?.group(1) ?? _did;
+  }
+
+  static Future<String> refreshCookie(
+      {String did = '', String ltp0 = '', String cookie = ''}) async {
     // expired-> refresh
     if (_isCookieExpired(cookie) && ltp0.isNotEmpty && did.isNotEmpty) {
       // milliseconds not sec
@@ -62,6 +73,9 @@ class DouyuUtils {
           .map((raw) => raw.split(';').first.trim())
           .where((s) => s.contains('='))
           .join('; ');
+      // check again
+      cookie = _isCookieExpired(cookie) ? '' : cookie;
+      _did = did;
     }
     return cookie;
   }
@@ -82,7 +96,7 @@ class DouyuUtils {
   }
 
   static String? _getJwtToken(String cookie) {
-    if(cookie.isNotEmpty){
+    if (cookie.isNotEmpty) {
       for (final pair in cookie.split(';')) {
         final p = pair.trim();
         if (p.startsWith('acf_jwt_token=')) {
@@ -94,7 +108,8 @@ class DouyuUtils {
   }
 
   static bool _encKeyCheck() {
-    return (_encKey["expire_at"] ?? 0) > (DateTime.now().millisecondsSinceEpoch ~/ 1000);
+    return (_encKey["expire_at"] ?? 0) >
+        (DateTime.now().millisecondsSinceEpoch ~/ 1000);
   }
 
   static Future<void> _encKeyUpdate({String cookie = ''}) async {
@@ -108,12 +123,14 @@ class DouyuUtils {
       },
       header: requestHeader(cookie: cookie),
     );
-    res['data']?["expire_at"] = DateTime.now().millisecondsSinceEpoch ~/ 1000 + _encCacheTTL;
+    res['data']?["expire_at"] =
+        DateTime.now().millisecondsSinceEpoch ~/ 1000 + _encCacheTTL;
     _encKey = res['data'];
   }
 
   // 用于流/登录/弹幕，暂时只需要流获取
-  static Future<String> sign(String rid, {int rate = -1, String cdn = "hw-h5", String cookie = ''}) async {
+  static Future<String> sign(String rid,
+      {int rate = -1, String cdn = "hw-h5", String cookie = ''}) async {
     var ts = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     await _encKeyUpdate(cookie: cookie);
     String randStr = _encKey["rand_str"] ?? "";
@@ -144,4 +161,40 @@ class DouyuUtils {
     return postData;
   }
   // todo: 获取real_rid 暂未发现 fake_id
+
+  /// 微信小程序直播接口（2026-10-07 逆向自斗鱼官方小程序）
+  /// 免登录：token 为小程序内写死值，did 用默认设备号即可，无需 cookie 与 sign；
+  /// 流地址长时效（expire=0），实测可播。
+  static const String _miniApi =
+      'https://wxapp.douyucdn.cn/api/nc/stream/roomPlayer';
+  static const String _miniDid = '100000000000000000000000000015q1';
+
+  static Map<String, String> miniRequestHeader() {
+    return {
+      'user-agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36 Edg/114.0.1823.43',
+    };
+  }
+
+  /// 小程序 roomPlayer 接口，成功返回 data（含 live_url / rate_list）
+  static Future<Map<String, dynamic>> miniRoomPlayer(String roomId,
+      {int rate = 1}) async {
+    final result = await HttpClient.instance.postJson(
+      _miniApi,
+      data: {
+        'room_id': roomId,
+        'token': 'wxapp',
+        'rate': '$rate',
+        'did': _miniDid,
+        'big_ct': 'cpn-androidmpro',
+        'is_Mix': 'false',
+      },
+      formUrlEncoded: true,
+      header: miniRequestHeader(),
+    );
+    if ((result?['error'] ?? -1) != 0) {
+      throw CoreError(result?['msg']?.toString() ?? '小程序接口错误');
+    }
+    return result?['data'] as Map<String, dynamic>;
+  }
 }
