@@ -162,7 +162,7 @@ class DouyuUtils {
   }
   // todo: 获取real_rid 暂未发现 fake_id
 
-  /// 微信小程序直播接口（2026-10-07 逆向自小程序 wxca1e7ba3fe18ff12）
+  /// 微信小程序直播接口（2026-10-07 逆向自斗鱼官方小程序）
   /// 免登录：token 为小程序内写死值，did 用默认设备号即可，无需 cookie 与 sign；
   /// 流地址长时效（expire=0），实测可播。
   static const String _miniApi =
@@ -173,7 +173,6 @@ class DouyuUtils {
     return {
       'user-agent':
           'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36 Edg/114.0.1823.43',
-      'referer': 'https://servicewechat.com/wxca1e7ba3fe18ff12/',
     };
   }
 
