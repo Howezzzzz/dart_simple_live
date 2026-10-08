@@ -50,7 +50,7 @@ jobs:
         run: |
           echo "deb http://deb.debian.org/debian bookworm-backports main" | tee /etc/apt/sources.list.d/bookworm-backports.list
           apt update
-          apt install -y sudo git gcc-multilib libc-dev make automake pkg-config libtool nasm python3-jsonschema wget python3-jinja2 zip python3-pip wget unzip
+          apt install -y sudo git gcc-multilib libc-dev make automake pkg-config libtool nasm python3-jsonschema wget python3-jinja2 zip python3-pip wget unzip binutils
           apt install -y -t bookworm-backports meson
 
       - name: Set up JDK 17
@@ -89,6 +89,8 @@ jobs:
           # 在 --enable-filter=equalizer 后追加 loudnorm（对齐 Windows 自建 libmpv 的滤镜）
           sed -i 's/^[[:space:]]*--enable-filter=equalizer \\$/&\n\t--enable-filter=loudnorm \\/' flavors/default.sh
           grep -n "enable-filter" flavors/default.sh
+          # 断言补丁确实生效（防唐 sed 锚点失配时静默 no-op 导致产物无 loudnorm）
+          grep -q -- '--enable-filter=loudnorm' flavors/default.sh || { echo "ERROR: loudnorm patch not applied (sed 锚点失配？)"; exit 1; }
 
       - name: Symlink SDK
         working-directory: ./buildscripts
@@ -116,6 +118,17 @@ jobs:
       - name: Compute SHA-256
         run: |
           sha256sum buildscripts/*.jar
+
+      - name: Verify loudnorm present in built libmpv (防静默降级)
+        run: |
+          # 解包 arm64 jar，断言 libmpv.so 含 loudnorm 字符串（编译期埋入）
+          mkdir -p /tmp/jarcheck && cd /tmp/jarcheck
+          unzip -o "$GITHUB_WORKSPACE/buildscripts/default-arm64-v8a.jar" >/dev/null
+          if strings lib/arm64-v8a/libmpv.so | grep -q '^loudnorm$'; then
+            echo "OK: loudnorm present in libmpv.so"
+          else
+            echo "ERROR: loudnorm NOT found in built libmpv.so — 构建未启用滤镜，产物不可用"; exit 1
+          fi
 
       - uses: softprops/action-gh-release@v2
         with:
