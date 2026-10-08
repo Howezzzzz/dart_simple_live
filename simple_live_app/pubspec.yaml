@@ -125,11 +125,10 @@ dependency_overrides:
       url: https://github.com/Predidit/media-kit.git
       ref: 78d4cce7b49d5b6b918f78b18ec1fbb7c400b9da
       path: ./libs/ios/media_kit_libs_ios_video
+  # 本地内嵌副本：与 Predidit/media-kit@78d4cce 同源，仅替换 Android libmpv 下载源
+  # （自建构建额外启用 loudnorm 滤镜，音量均衡可用；保留 SHA 校验能力）
   media_kit_libs_android_video:
-    git:
-      url: https://github.com/Predidit/media-kit.git
-      ref: 78d4cce7b49d5b6b918f78b18ec1fbb7c400b9da
-      path: ./libs/android/media_kit_libs_android_video
+    path: packages/media_kit_libs_android_video
   # 本地内嵌副本：与 Predidit/media-kit@78d4cce 同源，仅替换 Windows libmpv 下载源
   # （自建构建额外启用 loudnorm/dynaudnorm/speechnorm 滤镜，并保留回退到上游原版构建的能力）
   media_kit_libs_windows_video:
