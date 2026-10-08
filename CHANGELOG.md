@@ -6,6 +6,19 @@ Format: Each version section starts with `## x.x.x`, followed by change lines st
 
 ---
 
+## Unreleased（本 fork 本地定制）
+
+- feat: 关注列表 / 直播间显示主播开播时长
+  - 关注设置 →「时长显示」可切换：开播时长（默认）/ 观看时长
+  - 开播时长模式：关注列表显示「开播了X小时Y分钟」，直播间内显示每秒刷新的 HH:mm:ss 计时
+  - 数据复用刷新时的房间详情，零额外请求（B站/斗鱼/虎牙；抖音走 reflow 接口）
+- feat: 音量均衡（Windows）：EBU R128 loudnorm 音频滤镜，需配合自建 libmpv
+- feat: 音量均衡（Android）：自建 libmpv 启用 loudnorm 滤镜
+  - 构建编排：`.github/workflows/build-libmpv-android-custom.yml`，产物发布到 Release `libmpv-android-custom-v1`
+  - 内嵌 `simple_live_app/packages/media_kit_libs_android_video`（仅替换 Android libmpv 下载源 + SHA 校验）
+- feat: 窗口全屏 / 自定义画面尺寸 / 右侧消息面板拖拽 / Windows 竖滑调音量（早前本地定制）
+- feat: 斗鱼网页接口优先（全清晰度档位）+ 应用内网页登录（账号密码/手机验证码）
+
 ## 1.8.14
 
 - fix: 进一步修正douyu断流问题
