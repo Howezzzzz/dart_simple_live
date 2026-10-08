@@ -1,0 +1,126 @@
+# 定制 Android libmpv 构建 —— 启用 loudnorm 滤镜（音量均衡）
+#
+# 背景：上游 Predidit/libmpv-android-video-build 的 default 构建 --disable-filters
+#       仅启用 overlay/equalizer，动态响度滤镜 loudnorm 缺失 → 安卓音量均衡不可用。
+# 做法（对齐 build-libmpv-custom.yml 的 Windows 模式）：
+#   1. 锁定 sha 拉取上游构建系统（不 fork、不内嵌，workflow 只是编排）
+#   2. patch buildscripts/flavors/default.sh 追加 --enable-filter=loudnorm
+#   3. 构建 4 个 ABI（arm64-v8a / armeabi-v7a / x86_64 / x86），发布到本仓库 Release
+#
+# 构建完成后需回填 4 个 jar 的 SHA-256 到
+#   simple_live_app/packages/media_kit_libs_android_video/android/build.gradle
+# 未回填前，Android app 会继续用 build.gradle 中的回退（TODO_BACKFILL 时无法通过校验，
+# 此时应保留上游 v1.2.7 的 sha 作回退，见该文件注释）。
+
+name: libmpv-android-custom
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Release tag (assets: 4 ABI jars)'
+        required: false
+        default: 'libmpv-android-custom-v1'
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: libmpv-android-custom
+  cancel-in-progress: false
+
+jobs:
+  build_mpv:
+    name: Build Android libmpv (+loudnorm)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    container: docker.io/debian:bookworm-slim
+    env:
+      BUILD_REPO: Predidit/libmpv-android-video-build
+      BUILD_REPO_SHA: dd2bfba8209bcd22e2d4c79f125b40e619e637ed
+    steps:
+      - name: Checkout build system (pinned)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.BUILD_REPO }}
+          ref: ${{ env.BUILD_REPO_SHA }}
+
+      - name: Install dependency
+        run: |
+          echo "deb http://deb.debian.org/debian bookworm-backports main" | tee /etc/apt/sources.list.d/bookworm-backports.list
+          apt update
+          apt install -y sudo git gcc-multilib libc-dev make automake pkg-config libtool nasm python3-jsonschema wget python3-jinja2 zip python3-pip wget unzip
+          apt install -y -t bookworm-backports meson
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+
+      - name: Setup Android SDK (manual, non-interactive)
+        run: |
+          set -e
+          export ANDROID_HOME=${ANDROID_HOME:-$HOME/android-sdk}
+          echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
+          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> $GITHUB_ENV
+          mkdir -p $ANDROID_HOME/cmdline-tools
+          cd $ANDROID_HOME/cmdline-tools
+          wget -q https://dl.google.com/android/repository/commandlinetools-linux-13114758_latest.zip -O cmdtools.zip
+          unzip -q -o cmdtools.zip
+          mv cmdline-tools latest 2>/dev/null || true
+          SDKMANAGER=$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager
+          yes | $SDKMANAGER --licenses > /dev/null 2>&1 || true
+          $SDKMANAGER "platform-tools" "platforms;android-36" "build-tools;36.0.0" > /dev/null 2>&1 || true
+          echo "SDK ready at $ANDROID_HOME"
+
+      - uses: nttld/setup-ndk@v1
+        with:
+          link-to-sdk: true
+          ndk-version: r27c
+
+      - name: Patch default flavor (enable loudnorm filter)
+        working-directory: ./buildscripts
+        run: |
+          # 在 --enable-filter=equalizer 后追加 loudnorm（对齐 Windows 自建 libmpv 的滤镜）
+          sed -i 's/^[[:space:]]*--enable-filter=equalizer \\$/&\n\t--enable-filter=loudnorm \\/' flavors/default.sh
+          grep -n "enable-filter" flavors/default.sh
+
+      - name: Symlink SDK
+        working-directory: ./buildscripts
+        run: |
+          mkdir sdk
+          ln -s ${ANDROID_HOME} ./sdk/android-sdk-linux
+
+      - name: Bundle (default)
+        working-directory: ./buildscripts
+        env:
+          CUSTOM_RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          sed -i -e 's/sudo//g' *.sh
+          sed -i 's/download-sdk\.sh/download-sdk-debian\.sh/g' download.sh
+          sed -i -e '/git reset --hard/d' patch.sh
+          sudo chmod +x include/download-sdk-debian.sh
+          sudo chmod +x bundle_default.sh
+          ./bundle_default.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: libmpv-android-loudnorm
+          path: buildscripts/*.jar
+
+      - name: Compute SHA-256
+        run: |
+          sha256sum buildscripts/*.jar
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.release_tag }}
+          draft: true
+          prerelease: false
+          files: |
+            buildscripts/*.jar
