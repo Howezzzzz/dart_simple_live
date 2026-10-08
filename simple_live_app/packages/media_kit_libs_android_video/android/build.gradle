@@ -1,4 +1,5 @@
 import java.io.File
+import java.net.HttpURLConnection
 import java.nio.file.Files
 import java.security.MessageDigest
 
@@ -82,8 +83,17 @@ task downloadDependencies(type: Exec) {
             if (!destFile.exists()) {
                 destFile.parentFile.mkdirs()
                 println "Downloading file from: ${fileInfo.url}"
-                destFile.withOutputStream { os ->
-                    os << new URL(fileInfo.url).openStream()
+                // ISS-009：显式连接/读取超时，避免无超时下载挂死；跟随重定向
+                def conn = (HttpURLConnection) new URL(fileInfo.url).openConnection()
+                conn.connectTimeout = 30000
+                conn.readTimeout = 600000
+                conn.instanceFollowRedirects = true
+                try {
+                    destFile.withOutputStream { os ->
+                        os << conn.inputStream
+                    }
+                } finally {
+                    conn.disconnect()
                 }
 
                 def calculatedSHA256 = MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(destFile.toPath())).encodeHex().toString()

@@ -76,6 +76,9 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
 
   Timer? liveDurationTimer;
 
+  /// 监听「时长显示」设置变化，实时起/停直播间计时器
+  Worker? _followTimeModeWorker;
+
   /// 滚动控制
   final ScrollController scrollController = ScrollController();
 
@@ -142,6 +145,10 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     // 解冻：更新 lastWatchTime 并从休眠列表移除
     FollowService.instance.resumeUser("${site.id}_$roomId");
     loadData();
+
+    // 「时长显示」设置切换时即时起/停开播时长计时器（无需重进房间）
+    _followTimeModeWorker = ever(AppSettingsController.instance.followTimeMode,
+        (_) => startLiveDurationTimer());
 
     scrollController.addListener(scrollListener);
     subscription = EventBus.instance.listen(Constant.kUpdateDanmaku, (data) {
@@ -482,7 +489,8 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
       final diff = DateTime.now().difference(
         DateTime.fromMillisecondsSinceEpoch(startTime * 1000),
       );
-      liveDurationText.value = diff.toHHMMSS();
+      // 时钟回拨/服务端时间戳异常时 diff 可能为负，避免显示 -xx:xx:xx
+      liveDurationText.value = diff.isNegative ? "00:00:00" : diff.toHHMMSS();
     }
 
     update();
@@ -1309,6 +1317,7 @@ ${error?.stackTrace}''');
     autoExitTimer?.cancel();
     danmakuTimer?.cancel();
     liveDurationTimer?.cancel();
+    _followTimeModeWorker?.dispose();
     HistoryService.instance.stop();
 
     liveDanmaku.stop();
