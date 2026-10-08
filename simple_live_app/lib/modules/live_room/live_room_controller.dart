@@ -16,6 +16,7 @@ import 'package:simple_live_app/app/event_bus.dart';
 import 'package:simple_live_app/app/log.dart';
 import 'package:simple_live_app/app/sites.dart';
 import 'package:simple_live_app/app/utils.dart';
+import 'package:simple_live_app/app/utils/extensions/duration_2_str_utils.dart';
 import 'package:simple_live_app/app/utils/sandbox.dart';
 import 'package:simple_live_app/models/db/follow_user.dart';
 import 'package:simple_live_app/models/db/follow_user_block.dart';
@@ -69,6 +70,11 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
   var followed = false.obs;
   var liveStatus = false.obs;
   RxList<LiveSuperChatMessage> superChats = RxList<LiveSuperChatMessage>();
+
+  /// 直播已开播时长文本（HH:mm:ss，每秒刷新；未激活为空串）
+  var liveDurationText = "".obs;
+
+  Timer? liveDurationTimer;
 
   /// 滚动控制
   final ScrollController scrollController = ScrollController();
@@ -458,6 +464,31 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     addSysMsg("弹幕服务器连接正常");
   }
 
+  /// 启动开播时长计时器：仅当设置=开播时长、真实直播中且拿到开播时间戳时生效。
+  void startLiveDurationTimer() {
+    liveDurationTimer?.cancel();
+    liveDurationTimer = null;
+    liveDurationText.value = "";
+    if (AppSettingsController.instance.followTimeMode.value !=
+        FollowTimeMode.liveStartTime) {
+      return;
+    }
+    final detail = this.detail.value;
+    if (detail == null || !detail.status || detail.startTime == null) {
+      return;
+    }
+    final startTime = detail.startTime!;
+    void update() {
+      final diff = DateTime.now().difference(
+        DateTime.fromMillisecondsSinceEpoch(startTime * 1000),
+      );
+      liveDurationText.value = diff.toHHMMSS();
+    }
+
+    update();
+    liveDurationTimer = Timer.periodic(const Duration(seconds: 1), (_) => update());
+  }
+
   /// 加载直播间信息
   void loadData() async {
     try {
@@ -508,6 +539,7 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
       if (detail.value!.isRecord) {
         addSysMsg("当前主播未开播，正在轮播录像");
       }
+      startLiveDurationTimer();
     } catch (e) {
       Log.logPrint(e);
       //SmartDialog.showToast(e.toString());
@@ -1276,6 +1308,7 @@ ${error?.stackTrace}''');
     scrollController.removeListener(scrollListener);
     autoExitTimer?.cancel();
     danmakuTimer?.cancel();
+    liveDurationTimer?.cancel();
     HistoryService.instance.stop();
 
     liveDanmaku.stop();

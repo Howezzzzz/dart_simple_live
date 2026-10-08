@@ -63,6 +63,26 @@ enum SortMethod {
   tag,
 }
 
+// 关注列表时长显示模式
+enum FollowTimeMode {
+  /// 显示主播开播时长（直播中才显示）
+  liveStartTime,
+
+  /// 显示本地累计观看时长（原行为）
+  watchDuration,
+}
+
+extension FollowTimeModeStore on FollowTimeMode {
+  String get storeValue => name;
+  static FollowTimeMode fromStore(String? v) {
+    if (v == null) return FollowTimeMode.liveStartTime;
+    return FollowTimeMode.values.firstWhere(
+      (e) => e.name == v,
+      orElse: () => FollowTimeMode.liveStartTime,
+    );
+  }
+}
+
 extension SortMethodStore on SortMethod {
   String get storeValue => name;
   static SortMethod fromStore(String? v) {

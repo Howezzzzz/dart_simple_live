@@ -2,7 +2,10 @@ import 'package:material_ui/material_ui.dart';
 import 'package:get/get.dart';
 import 'package:remixicon/remixicon.dart';
 import 'package:simple_live_app/app/app_style.dart';
+import 'package:simple_live_app/app/constant.dart';
+import 'package:simple_live_app/app/controller/app_settings_controller.dart';
 import 'package:simple_live_app/app/sites.dart';
+import 'package:simple_live_app/app/utils/extensions/duration_2_str_utils.dart';
 import 'package:simple_live_app/models/db/follow_user.dart';
 import 'package:simple_live_app/widgets/net_image.dart';
 import 'dart:ui' as ui;
@@ -87,13 +90,33 @@ class FollowUserItem extends StatelessWidget {
             ),
           ),
           AppStyle.hGap4,
-          Text(
-            item.watchDuration ?? "00:00:00",
-            style: const TextStyle(
-              fontSize: 12,
-              color: Colors.grey,
-            ),
-          ),
+          Obx(() {
+            final mode = AppSettingsController.instance.followTimeMode.value;
+            if (mode == FollowTimeMode.watchDuration) {
+              // 保持原显示逻辑：watchDuration 仍是活跃写入字段，避免旧数据（watchDurationSec 未回填）显示回退
+              return Text(
+                // ignore: deprecated_member_use_from_same_package
+                item.watchDuration ?? "00:00:00",
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: Colors.grey,
+                ),
+              );
+            }
+            // 开播时长模式：仅直播中且有开播时间戳时显示
+            final startTime = item.liveStartTime.value;
+            if (item.liveStatus.value != 2 || startTime == null) {
+              return const SizedBox.shrink();
+            }
+            final liveDuration = DateTime.now().difference(DateTime.fromMillisecondsSinceEpoch(startTime * 1000));
+            return Text(
+              liveDuration.toLiveStartedString(),
+              style: const TextStyle(
+                fontSize: 12,
+                color: Colors.grey,
+              ),
+            );
+          }),
           AppStyle.hGap4,
           Text(
             item.tag.length > 8 ? '${item.tag.substring(0, 8)}...' : item.tag,

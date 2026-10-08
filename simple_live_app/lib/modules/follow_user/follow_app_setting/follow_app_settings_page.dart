@@ -2,12 +2,14 @@ import 'package:material_ui/material_ui.dart';
 import 'package:get/get.dart';
 import 'package:remixicon/remixicon.dart';
 import 'package:simple_live_app/app/app_style.dart';
+import 'package:simple_live_app/app/constant.dart';
 import 'package:simple_live_app/app/controller/app_settings_controller.dart';
 import 'package:simple_live_app/models/db/follow_user.dart';
 import 'package:simple_live_app/modules/follow_user/follow_app_setting/follow_app_settings_controller.dart';
 import 'package:simple_live_app/services/follow_service.dart';
 import 'package:simple_live_app/widgets/settings/settings_action.dart';
 import 'package:simple_live_app/widgets/settings/settings_card.dart';
+import 'package:simple_live_app/widgets/settings/settings_menu.dart';
 import 'package:simple_live_app/widgets/settings/settings_menu_check.dart';
 import 'package:simple_live_app/widgets/settings/settings_number.dart';
 import 'package:simple_live_app/widgets/settings/settings_switch.dart';
@@ -96,6 +98,20 @@ class FollowSettingsPage extends GetView<FollowAppSettingsController> {
                         title: "隐藏离线关注",
                         onChanged: (e) {
                           controller.setFollowSetting(e);
+                        },
+                      ),
+                    ),
+                    Obx(
+                      () => SettingsMenu<FollowTimeMode>(
+                        title: "时长显示",
+                        subtitle: "关注列表时长显示方式",
+                        valueMap: {
+                          FollowTimeMode.liveStartTime: "开播时长",
+                          FollowTimeMode.watchDuration: "观看时长",
+                        },
+                        value: controller.appC.followTimeMode.value,
+                        onChanged: (e) {
+                          controller.appC.setFollowTimeMode(e);
                         },
                       ),
                     ),

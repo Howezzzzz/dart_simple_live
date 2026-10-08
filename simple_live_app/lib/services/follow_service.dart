@@ -513,6 +513,7 @@ class FollowService extends GetxService {
       var site = Sites.allSites[item.siteId]!;
       LiveRoomDetail detail = await site.liveSite.getRoomDetail(roomId: item.roomId);
       item.liveStatus.value = detail.status ? 2 : 1;
+      item.liveStartTime.value = detail.status ? detail.startTime : null;
       item.cover.value = detail.status ? detail.cover : "";
       item.title.value = detail.title;
       item.online.value = detail.online;

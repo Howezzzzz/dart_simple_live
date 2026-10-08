@@ -4,6 +4,7 @@ import 'dart:math';
 
 import 'package:html_unescape/html_unescape.dart';
 import 'package:simple_live_core/simple_live_core.dart';
+import 'package:simple_live_core/src/common/convert_helper.dart';
 import 'package:simple_live_core/src/common/http_client.dart';
 import 'package:simple_live_core/src/platforms/douyu/douyu_utils.dart';
 
@@ -235,6 +236,7 @@ class DouyuSite implements LiveSite {
       data: "",
       url: "https://www.douyu.com/$roomId",
       isRecord: roomInfo["videoLoop"] == 1,
+      startTime: parseStartTime(roomInfo["show_time"]),
     );
   }
 

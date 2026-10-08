@@ -79,6 +79,9 @@ class FollowUser implements Mappable {
   /// 0=未知(加载中) 1=未开播 2=直播中
   Rx<int> liveStatus = 0.obs;
 
+  /// 开播时间戳（秒级）；未开播/未知为 null。运行时字段，不入库。
+  Rx<int?> liveStartTime = Rx<int?>(null);
+
   /// 直播封面
   Rx<String> cover = "".obs;
 

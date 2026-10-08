@@ -142,6 +142,9 @@ class AppSettingsController extends GetxController {
       false,
     );
 
+    followTimeMode.value = FollowTimeModeStore.fromStore(LocalStorageService.instance
+        .getValue(LocalStorageService.kFollowTimeMode, FollowTimeMode.liveStartTime.storeValue));
+
     audioOutputDriver.value = LocalStorageService.instance.getValue(
       LocalStorageService.kAudioOutputDriver,
       Platform.isAndroid
@@ -463,6 +466,14 @@ class AppSettingsController extends GetxController {
   void saveMessagePanelWidth() {
     LocalStorageService.instance.setValue(
         LocalStorageService.kMessagePanelWidth, messagePanelWidth.value);
+  }
+
+  /// 关注列表时长显示模式（开播时长/观看时长）
+  var followTimeMode = FollowTimeMode.liveStartTime.obs;
+
+  void setFollowTimeMode(FollowTimeMode e) {
+    followTimeMode.value = e;
+    LocalStorageService.instance.setValue(LocalStorageService.kFollowTimeMode, e.storeValue);
   }
 
   /// 音量均衡（EBU R128 loudnorm 滤镜；播放器侧安全探测+应用，见 PlayerController._syncVolumeNorm）

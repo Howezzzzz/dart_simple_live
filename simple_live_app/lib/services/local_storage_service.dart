@@ -152,6 +152,9 @@ class LocalStorageService extends GetxService {
   /// 音量均衡能力探测结果（格式 "<App版本>:<true|false>"，版本变化自动失效重探）
   static const String kVolumeNormSupported = "VolumeNormSupported";
 
+  /// 关注列表时长显示模式
+  static const String kFollowTimeMode = "FollowTimeMode";
+
   /// 播放器音量
   static const String kPlayerVolume = "PlayerVolume";
 

@@ -403,6 +403,23 @@ class LiveRoomPage extends GetView<LiveRoomController> {
                           color: Colors.grey,
                         ),
                       ),
+                      Obx(
+                        () => controller.liveDurationText.value.isEmpty
+                            ? const SizedBox.shrink()
+                            : Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  AppStyle.hGap4,
+                                  Text(
+                                    controller.liveDurationText.value,
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.grey,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                      ),
                     ],
                   ),
                 ],

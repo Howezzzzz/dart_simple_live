@@ -217,6 +217,13 @@ class DouyinSite implements LiveSite {
     // 这里简单进行判断，如果roomId长度小于15，则认为是webRid
     var webRid = roomId;
     if (roomId.length > 16) {
+      // 19位 roomId 优先直接走 reflow/info 接口：一次请求含 create_time（开播时间），
+      // 且比先转 webRid 再走 web/enter（两次请求）更省；失败再回退旧路径
+      try {
+        return await getRoomDetailByRoomId(roomId);
+      } catch (e) {
+        CoreLog.error(e);
+      }
       webRid = await _getWebRid(roomId);
     }
     return await getRoomDetailByWebRid(webRid);
@@ -282,6 +289,7 @@ class DouyinSite implements LiveSite {
         cookie: headers["cookie"],
       ),
       data: room["stream_url"],
+      startTime: roomStatus ? parseStartTime(room["create_time"]) : null,
     );
   }
 
@@ -319,6 +327,17 @@ class DouyinSite implements LiveSite {
 
     // 主要是为了获取cookie,用于弹幕websocket连接
     var headers = await getRequestHeaders();
+    // 抖音 web/enter 接口不返回 create_time（开播时间），
+    // 仅在开播中时用 roomId（id_str）补查一次 reflow/info 接口获取
+    int? startTime = roomStatus ? parseStartTime(roomData["create_time"]) : null;
+    if (roomStatus && startTime == null) {
+      try {
+        var reflowData = await _getRoomDataByRoomId(roomId);
+        startTime = parseStartTime(reflowData["data"]["room"]["create_time"]);
+      } catch (e) {
+        CoreLog.error(e);
+      }
+    }
     return LiveRoomDetail(
       roomId: webRid,
       title: roomData["title"].toString(),
@@ -339,6 +358,7 @@ class DouyinSite implements LiveSite {
         cookie: headers["cookie"],
       ),
       data: roomStatus ? roomData["stream_url"] : {},
+      startTime: startTime,
     );
   }
 
@@ -378,6 +398,7 @@ class DouyinSite implements LiveSite {
         cookie: headers["cookie"],
       ),
       data: roomStatus ? room["stream_url"] : {},
+      startTime: roomStatus ? parseStartTime(room["create_time"]) : null,
     );
   }
 

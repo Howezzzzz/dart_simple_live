@@ -3,6 +3,7 @@ import 'dart:math';
 
 import 'package:crypto/crypto.dart';
 import 'package:simple_live_core/simple_live_core.dart';
+import 'package:simple_live_core/src/common/convert_helper.dart';
 import 'package:simple_live_core/src/common/http_client.dart';
 import 'package:simple_live_core/src/platforms/huya/common/huya_request_params.dart';
 import 'package:simple_live_core/src/platforms/huya/huya_utils.dart';
@@ -271,6 +272,9 @@ class HuyaSite implements LiveSite {
           introduction: streamDataGameLiveInfo["introduction"],
           notice: streamDataGameLiveInfo["introduction"],
           isRecord: roomDataJson["isReplay"],
+          startTime: roomDataJson["state"] == "ON"
+              ? parseStartTime(roomDataJson["startTime"])
+              : null,
         );
         // live -> add HuyaUrlDataModel and danmaku
         if (result.status) {

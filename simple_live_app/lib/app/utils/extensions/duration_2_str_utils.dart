@@ -27,4 +27,22 @@ extension DurationExtensions on Duration {
 
     return '$hours:$minutesStr:$secondsStr';
   }
+
+  /// 将 Duration 转换为「开播了X小时Y分钟」中文格式（关注列表用）
+  String toLiveStartedString() {
+    final hours = inHours;
+    final minutes = inMinutes.remainder(60);
+    if (hours > 0) {
+      return '开播了$hours小时$minutes分钟';
+    }
+    return '开播了$minutes分钟';
+  }
+
+  /// 将 Duration 转换为 HH:mm:ss（小时可为总小时数，支持跨天）
+  String toHHMMSS() {
+    final h = inHours.toString().padLeft(2, '0');
+    final m = inMinutes.remainder(60).toString().padLeft(2, '0');
+    final s = inSeconds.remainder(60).toString().padLeft(2, '0');
+    return '$h:$m:$s';
+  }
 }
