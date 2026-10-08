@@ -7,10 +7,9 @@
 #   2. patch buildscripts/flavors/default.sh 追加 --enable-filter=loudnorm
 #   3. 构建 4 个 ABI（arm64-v8a / armeabi-v7a / x86_64 / x86），发布到本仓库 Release
 #
-# 构建完成后需回填 4 个 jar 的 SHA-256 到
+# 重建后需重新回填 4 个 jar 的 SHA-256 到
 #   simple_live_app/packages/media_kit_libs_android_video/android/build.gradle
-# 未回填前，Android app 会继续用 build.gradle 中的回退（TODO_BACKFILL 时无法通过校验，
-# 此时应保留上游 v1.2.7 的 sha 作回退，见该文件注释）。
+# （build.gradle 单源、钉死 SHA；若 jar 变更而 SHA 未同步更新，Android 构建会 SHA 校验失败——fail-loud）
 
 name: libmpv-android-custom
 
@@ -50,7 +49,7 @@ jobs:
         run: |
           echo "deb http://deb.debian.org/debian bookworm-backports main" | tee /etc/apt/sources.list.d/bookworm-backports.list
           apt update
-          apt install -y sudo git gcc-multilib libc-dev make automake pkg-config libtool nasm python3-jsonschema wget python3-jinja2 zip python3-pip wget unzip binutils
+          apt install -y sudo git gcc-multilib libc-dev make automake pkg-config libtool nasm python3-jsonschema wget python3-jinja2 zip python3-pip unzip binutils
           apt install -y -t bookworm-backports meson
 
       - name: Set up JDK 17
@@ -89,7 +88,7 @@ jobs:
           # 在 --enable-filter=equalizer 后追加 loudnorm（对齐 Windows 自建 libmpv 的滤镜）
           sed -i 's/^[[:space:]]*--enable-filter=equalizer \\$/&\n\t--enable-filter=loudnorm \\/' flavors/default.sh
           grep -n "enable-filter" flavors/default.sh
-          # 断言补丁确实生效（防唐 sed 锚点失配时静默 no-op 导致产物无 loudnorm）
+          # 断言补丁确实生效（防止 sed 锚点失配时静默 no-op 导致产物无 loudnorm）
           grep -q -- '--enable-filter=loudnorm' flavors/default.sh || { echo "ERROR: loudnorm patch not applied (sed 锚点失配？)"; exit 1; }
 
       - name: Symlink SDK
