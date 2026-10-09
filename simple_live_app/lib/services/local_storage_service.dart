@@ -245,6 +245,8 @@ class LocalStorageService extends GetxService {
   /// windows 开屏最大化
   static const String kWindowMaxAuto = "WindowMaxAuto";
   static const String kWindowMaxState = "WindowMaxState";
+  /// 上次关闭时窗口是否处于最大化（用于重开时恢复窗口状态）
+  static const String kWindowWasMaximized = "WindowWasMaximized";
 
   /// window窗口size
   static const String kWindowX = "WindowX";
