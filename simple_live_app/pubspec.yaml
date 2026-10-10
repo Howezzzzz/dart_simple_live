@@ -93,51 +93,25 @@ dependencies:
 
   # 视频播放
   volume_controller: any
+  # media_kit：内嵌本仓库副本 packages/media_kit（与 SlotSun/media-kit@b2bb9ff0 同源）
+  # 仅定制 hook/native_bundles.json —— Android×4 + Windows x64 指向自建含 loudnorm 的 libmpv（音量均衡）
   media_kit:
-    git:
-      url: https://github.com/Predidit/media-kit.git
-      ref: 78d4cce7b49d5b6b918f78b18ec1fbb7c400b9da
-      path: ./media_kit
+    path: packages/media_kit
+  # media_kit_video：不改动，直接引用上游 SlotSun/media-kit（fork 自有 libmpv 构建体系）
   media_kit_video:
     git:
-      url: https://github.com/Predidit/media-kit.git
-      ref: 78d4cce7b49d5b6b918f78b18ec1fbb7c400b9da
+      url: https://github.com/SlotSun/media-kit.git
+      ref: b2bb9ff072905ab96dc07201b8b1a19adfeeac67
       path: ./media_kit_video
-  media_kit_libs_video:
-    git:
-      url: https://github.com/Predidit/media-kit.git
-      ref: 78d4cce7b49d5b6b918f78b18ec1fbb7c400b9da
-      path: ./libs/universal/media_kit_libs_video
 
 dependency_overrides:
   get:
     git:
       url: https://github.com/SlotSun/get.git
       ref: master
-
-  media_kit_libs_linux:
-    git:
-      url: https://github.com/Predidit/media-kit.git
-      ref: 78d4cce7b49d5b6b918f78b18ec1fbb7c400b9da
-      path: ./libs/linux/media_kit_libs_linux
-  media_kit_libs_ios_video:
-    git:
-      url: https://github.com/Predidit/media-kit.git
-      ref: 78d4cce7b49d5b6b918f78b18ec1fbb7c400b9da
-      path: ./libs/ios/media_kit_libs_ios_video
-  # 本地内嵌副本：与 Predidit/media-kit@78d4cce 同源，仅替换 Android libmpv 下载源
-  # （自建构建额外启用 loudnorm 滤镜，音量均衡可用；保留 SHA 校验能力）
-  media_kit_libs_android_video:
-    path: packages/media_kit_libs_android_video
-  # 本地内嵌副本：与 Predidit/media-kit@78d4cce 同源，仅替换 Windows libmpv 下载源
-  # （自建构建额外启用 loudnorm/dynaudnorm/speechnorm 滤镜，并保留回退到上游原版构建的能力）
-  media_kit_libs_windows_video:
-    path: packages/media_kit_libs_windows_video
-  media_kit_libs_macos_video:
-    git:
-      url: https://github.com/Predidit/media-kit.git
-      ref: 78d4cce7b49d5b6b918f78b18ec1fbb7c400b9da
-      path: ./libs/macos/media_kit_libs_macos_video
+  # 强制 media_kit 用本仓库内嵌副本（media_kit_video 内部引用 ../media_kit）
+  media_kit:
+    path: packages/media_kit
 
 dev_dependencies:
   flutter_lints: ^6.0.0
