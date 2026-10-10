@@ -1,30 +1,22 @@
-// This is a basic Flutter widget test.
+// 冒烟测试：验证应用的自定义 widget 能正常构建与渲染。
 //
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
-
-import 'package:material_ui/material_ui.dart';
+// 说明：本文件原为 Flutter 模板自带的「计数器」测试（Counter increments
+// smoke test），与 SimpleLive 实际应用不符、恒失败，长期污染测试套件并
+// 掩盖真实回归。已替换为对应用真实 widget 的轻量冒烟测试。
+import 'package:cupertino_ui/cupertino_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
-
-import 'package:simple_live_app/main.dart';
+import 'package:get/get.dart';
+import 'package:material_ui/material_ui.dart';
+import 'package:simple_live_app/widgets/status/app_loadding_widget.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
+  testWidgets('AppLoaddingWidget 能正常构建并渲染', (WidgetTester tester) async {
+    await tester.pumpWidget(
+      const GetMaterialApp(home: Scaffold(body: AppLoaddingWidget())),
+    );
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
-
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
-
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+    expect(find.byType(AppLoaddingWidget), findsOneWidget);
+    expect(find.byType(CupertinoActivityIndicator), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 }

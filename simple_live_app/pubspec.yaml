@@ -108,7 +108,8 @@ dependency_overrides:
   get:
     git:
       url: https://github.com/SlotSun/get.git
-      ref: master
+      # 钉固定 commit（get 4.7.3）而非 master：避免锁文件不可重现/构建非确定（ISS-016）
+      ref: f0ddb3514c96dde2816495e3461d1c3b8456de3c
   # 强制 media_kit 用本仓库内嵌副本（media_kit_video 内部引用 ../media_kit）
   media_kit:
     path: packages/media_kit

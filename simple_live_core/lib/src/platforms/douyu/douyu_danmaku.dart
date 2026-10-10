@@ -11,6 +11,15 @@ class DouyuDanmaku implements LiveDanmaku {
   @override
   int heartbeatTime = 45 * 1000;
 
+  /// 是否显示全部弹幕（含非粉丝）。
+  /// 上游默认只放行 `if == '1'` 的“粉丝发言”（为规避所谓“阴间弹幕”），
+  /// 副作用是把大量正常弹幕也过滤了；此处改为可配置，默认显示全部（对齐网页端）。
+  bool showAll = true;
+
+  /// 最低用户等级：`level` 低于该值的弹幕不显示（0 = 不过滤）。
+  /// 用于精确过滤所谓“阴间弹幕”——斗鱼机器人/水军号普遍为低等级（社区经验：1~25 级）。
+  int minLevel = 0;
+
   @override
   Function(LiveMessage msg)? onMessage;
   @override
@@ -76,11 +85,14 @@ class DouyuDanmaku implements LiveDanmaku {
 
       var type = jsonData["type"]?.toString();
       var fans = jsonData["if"] ?? '0'.toString();
+      var level = int.tryParse(jsonData["level"]?.toString() ?? '0') ?? 0;
       //斗鱼好像不会返回人气值
       //有些直播间存在阴间弹幕，不知道什么情况
-      //只显示粉丝发言
+      //上游默认只显示粉丝发言；现改为可配置（showAll=true 时显示全部，可用 minLevel 按等级精确过滤）
       LiveMessage? liveMsg;
-      if (type == "chatmsg" && fans == '1') {
+      if (type == "chatmsg" &&
+          (showAll || fans == '1') &&
+          level >= minLevel) {
         var col = int.tryParse(jsonData["col"].toString()) ?? 0;
         liveMsg = LiveMessage(
           type: LiveMessageType.chat,

@@ -49,6 +49,8 @@ class AppSettingsController extends GetxController {
     getDanmuSpeed();
     getDanmuEnable();
     getDanmakuMaskEnable();
+    getDouyuShowAllDanmaku();
+    getDouyuDanmakuMinLevel();
     getDanmuEmoticonEnable();
     getDanmuStrokeWidth();
     getDanmuTopMargin();
@@ -292,6 +294,17 @@ class AppSettingsController extends GetxController {
 
   @SettingItem(defaultValue: false, key: LocalStorageService.kDanmakuMaskEnable)
   var danmakuMaskEnable = false.obs;
+
+  /// 斗鱼：是否显示全部弹幕（含非粉丝）。
+  /// 上游默认只显示 `if==1` 的“粉丝发言”（为规避所谓“阴间弹幕”），
+  /// 会把大量正常弹幕一起过滤掉；默认改为显示全部（对齐网页端）。
+  @SettingItem(defaultValue: true, key: LocalStorageService.kDouyuShowAllDanmaku)
+  var douyuShowAllDanmaku = true.obs;
+
+  /// 斗鱼：最低用户等级（0=不过滤）。
+  /// 用于精确过滤低等级机器人/水军弹幕（所谓“阴间弹幕”）。
+  @SettingItem(defaultValue: 0, key: LocalStorageService.kDouyuDanmakuMinLevel)
+  var douyuDanmakuMinLevel = 0.obs;
 
   /// 弹幕表情包：把 B 站下发的表情渲染成图片。
   /// 关闭后仍然是原来的占位符文本，只是不再下载与合成图片。

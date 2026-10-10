@@ -18,6 +18,12 @@ Format: Each version section starts with `## x.x.x`, followed by change lines st
   - 内嵌 `simple_live_app/packages/media_kit_libs_android_video`（仅替换 Android libmpv 下载源 + SHA 校验）
 - feat: 窗口全屏 / 自定义画面尺寸 / 右侧消息面板拖拽 / Windows 竖滑调音量（早前本地定制）
 - feat: 斗鱼网页接口优先（全清晰度档位）+ 应用内网页登录（账号密码/手机验证码）
+- chore: 同步上游 media_kit 到 native-assets 架构 + Flutter 3.47.6
+  - media_kit 改为**内嵌** `simple_live_app/packages/media_kit`（与上游 SlotSun/media-kit 同源），仅定制 `hook/native_bundles.json`：Android×4 + Windows x64 指向自建含 loudnorm 的 libmpv（音量均衡）
+  - 移除全部 `media_kit_libs_*` 依赖/覆盖与两个旧内嵌包；`media_kit_video` 改为直接引用上游 SlotSun/media-kit
+  - `flatpak/flatpak-manifest.yaml` / `.fvmrc` 同步至 Flutter 3.47.6（修复 flatpak 构建）
+- fix: `get` 依赖改钉固定 commit（原 `ref: master` 导致 `pubspec.lock` 不可重现）
+- test: 清理 Flutter 模板残留的无效计数器测试，改为真实冒烟测试
 
 ## 1.8.14
 

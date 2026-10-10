@@ -755,6 +755,8 @@ void showDanmakuSettings(LiveRoomController controller) {
       children: [
         DanmuSettingsView(
           danmakuController: controller.danmakuController,
+          // 斗鱼专属项只在斗鱼直播间显示
+          showDouyuOptions: controller.site.id == "douyu",
         ),
       ],
     ),

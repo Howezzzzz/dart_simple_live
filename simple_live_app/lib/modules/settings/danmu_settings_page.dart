@@ -34,9 +34,13 @@ class DanmuSettingsView extends GetView<AppSettingsController> {
   final Function()? onTapDanmuShield;
   final DanmakuController? danmakuController;
 
+  /// 是否显示斗鱼专属项（显示全部弹幕 / 等级屏蔽）——仅在斗鱼直播间为 true。
+  final bool showDouyuOptions;
+
   const DanmuSettingsView({
     this.onTapDanmuShield,
     this.danmakuController,
+    this.showDouyuOptions = false,
     super.key,
   });
 
@@ -71,6 +75,27 @@ class DanmuSettingsView extends GetView<AppSettingsController> {
                   },
                 ),
               ),
+              if (showDouyuOptions) ...[
+                Obx(
+                  () => SettingsSwitch(
+                    title: "显示全部弹幕（含非粉丝）",
+                    subtitle: "仅斗鱼；关闭则只显示带粉丝牌的发言",
+                    value: controller.douyuShowAllDanmaku.value,
+                    onChanged: (e) {
+                      controller.setDouyuShowAllDanmaku(e);
+                    },
+                  ),
+                ),
+                Obx(
+                  () => SettingsNumber(
+                    title: "等级屏蔽（斗鱼）",
+                    subtitle: "低于该等级的弹幕不显示（0=关）；机器人号普遍低等级",
+                    value: controller.douyuDanmakuMinLevel.value,
+                    max: 60,
+                    onChanged: controller.setDouyuDanmakuMinLevel,
+                  ),
+                ),
+              ],
             ],
           ),
         ),

@@ -78,6 +78,8 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
 
   /// 监听「时长显示」设置变化，实时起/停直播间计时器
   Worker? _followTimeModeWorker;
+  Worker? _douyuDanmakuWorker;
+  Worker? _douyuDanmakuMinLevelWorker;
 
   /// 滚动控制
   final ScrollController scrollController = ScrollController();
@@ -149,6 +151,21 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     // 「时长显示」设置切换时即时起/停开播时长计时器（无需重进房间）
     _followTimeModeWorker = ever(AppSettingsController.instance.followTimeMode,
         (_) => startLiveDurationTimer());
+
+    // 斗鱼弹幕过滤：按其设置决定是否只显示粉丝发言（默认显示全部，对齐网页端）；并按等级精确过滤
+    if (liveDanmaku is DouyuDanmaku) {
+      final douyuDanmaku = liveDanmaku as DouyuDanmaku;
+      douyuDanmaku.showAll =
+          AppSettingsController.instance.douyuShowAllDanmaku.value;
+      douyuDanmaku.minLevel =
+          AppSettingsController.instance.douyuDanmakuMinLevel.value;
+      _douyuDanmakuWorker = ever(
+          AppSettingsController.instance.douyuShowAllDanmaku,
+          (v) => douyuDanmaku.showAll = v);
+      _douyuDanmakuMinLevelWorker = ever(
+          AppSettingsController.instance.douyuDanmakuMinLevel,
+          (v) => douyuDanmaku.minLevel = v);
+    }
 
     scrollController.addListener(scrollListener);
     subscription = EventBus.instance.listen(Constant.kUpdateDanmaku, (data) {
@@ -813,6 +830,8 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
         children: [
           DanmuSettingsView(
             danmakuController: danmakuController,
+            // 斗鱼专属项只在斗鱼直播间显示
+            showDouyuOptions: site.id == "douyu",
             onTapDanmuShield: () {
               Get.back();
               showFollowBlockShield();
@@ -1318,6 +1337,8 @@ ${error?.stackTrace}''');
     danmakuTimer?.cancel();
     liveDurationTimer?.cancel();
     _followTimeModeWorker?.dispose();
+    _douyuDanmakuWorker?.dispose();
+    _douyuDanmakuMinLevelWorker?.dispose();
     HistoryService.instance.stop();
 
     liveDanmaku.stop();

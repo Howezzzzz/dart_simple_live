@@ -71,6 +71,12 @@ class LocalStorageService extends GetxService {
   /// 弹幕去重
   static const String kDanmakuMaskEnable = "DanmakuMaskEnable";
 
+  /// 斗鱼：显示全部弹幕（含非粉丝）；关闭则只显示带粉丝牌的发言
+  static const String kDouyuShowAllDanmaku = "DouyuShowAllDanmaku";
+
+  /// 斗鱼：最低用户等级（低于该等级的弹幕不显示；0=不过滤）
+  static const String kDouyuDanmakuMinLevel = "DouyuDanmakuMinLevel";
+
   /// 弹幕表情包（目前仅 B 站）
   static const String kDanmuEmoticonEnable = "DanmuEmoticonEnable";
 

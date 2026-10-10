@@ -137,6 +137,24 @@ extension AppSettingsControllerSettingGen on AppSettingsController {
     danmakuMaskEnable.value = LocalStorageService.instance.getValue(kDanmakuMaskEnable, false);
   }
 
+  void setDouyuShowAllDanmaku(bool e) {
+    douyuShowAllDanmaku.value = e;
+    LocalStorageService.instance.setValue(kDouyuShowAllDanmaku, e);
+  }
+
+  void getDouyuShowAllDanmaku() {
+    douyuShowAllDanmaku.value = LocalStorageService.instance.getValue(kDouyuShowAllDanmaku, true);
+  }
+
+  void setDouyuDanmakuMinLevel(int e) {
+    douyuDanmakuMinLevel.value = e;
+    LocalStorageService.instance.setValue(kDouyuDanmakuMinLevel, e);
+  }
+
+  void getDouyuDanmakuMinLevel() {
+    douyuDanmakuMinLevel.value = LocalStorageService.instance.getValue(kDouyuDanmakuMinLevel, 0);
+  }
+
   void setDanmuEmoticonEnable(bool e) {
     danmuEmoticonEnable.value = e;
     LocalStorageService.instance.setValue(kDanmuEmoticonEnable, e);
@@ -559,6 +577,8 @@ const String kDanmuArea = "DanmuArea";
 const String kDanmuOpacity = "DanmuOpacity";
 const String kDanmuEnable = "DanmuEnable";
 const String kDanmakuMaskEnable = "DanmakuMaskEnable";
+const String kDouyuShowAllDanmaku = "DouyuShowAllDanmaku";
+const String kDouyuDanmakuMinLevel = "DouyuDanmakuMinLevel";
 const String kDanmuEmoticonEnable = "DanmuEmoticonEnable";
 const String kDanmuStrokeWidth = "DanmuStrokeWidth";
 const String kDanmakuFontClamped = "DanmakuFontClamped";
