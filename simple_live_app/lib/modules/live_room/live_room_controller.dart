@@ -153,19 +153,17 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
         (_) => startLiveDurationTimer());
 
     // 斗鱼弹幕过滤：按其设置决定是否只显示粉丝发言（默认显示全部，对齐网页端）；并按等级精确过滤
-    if (liveDanmaku is DouyuDanmaku) {
-      final douyuDanmaku = liveDanmaku as DouyuDanmaku;
-      douyuDanmaku.showAll =
-          AppSettingsController.instance.douyuShowAllDanmaku.value;
-      douyuDanmaku.minLevel =
-          AppSettingsController.instance.douyuDanmakuMinLevel.value;
-      _douyuDanmakuWorker = ever(
-          AppSettingsController.instance.douyuShowAllDanmaku,
-          (v) => douyuDanmaku.showAll = v);
-      _douyuDanmakuMinLevelWorker = ever(
-          AppSettingsController.instance.douyuDanmakuMinLevel,
-          (v) => douyuDanmaku.minLevel = v);
-    }
+    _applyDouyuDanmakuConfig();
+    _douyuDanmakuWorker = ever(
+        AppSettingsController.instance.douyuShowAllDanmaku, (v) {
+      final danmaku = liveDanmaku;
+      if (danmaku is DouyuDanmaku) danmaku.showAll = v;
+    });
+    _douyuDanmakuMinLevelWorker = ever(
+        AppSettingsController.instance.douyuDanmakuMinLevel, (v) {
+      final danmaku = liveDanmaku;
+      if (danmaku is DouyuDanmaku) danmaku.minLevel = v;
+    });
 
     scrollController.addListener(scrollListener);
     subscription = EventBus.instance.listen(Constant.kUpdateDanmaku, (data) {
@@ -1268,6 +1266,18 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     }
   }
 
+  /// 把斗鱼弹幕的过滤设置（显示全部 / 等级屏蔽）应用到当前弹幕客户端。
+  /// 每次创建/重建 liveDanmaku 后都要调用（onInit 与 resetRoom），否则设置会丢。
+  void _applyDouyuDanmakuConfig() {
+    final danmaku = liveDanmaku;
+    if (danmaku is DouyuDanmaku) {
+      danmaku.showAll =
+          AppSettingsController.instance.douyuShowAllDanmaku.value;
+      danmaku.minLevel =
+          AppSettingsController.instance.douyuDanmakuMinLevel.value;
+    }
+  }
+
   void resetRoom(Site site, String roomId) async {
     if (this.site == site && this.roomId == roomId) {
       return;
@@ -1286,6 +1296,8 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
 
     // 重新设置LiveDanmaku
     liveDanmaku = site.liveSite.getDanmaku();
+    // 重建后必须重套用斗鱼弹幕过滤设置（否则设置会丢、开关看似失效）
+    _applyDouyuDanmakuConfig();
     rustDanmakuMask.reset();
 
     // 停止播放
@@ -1324,7 +1336,7 @@ ${error?.stackTrace}''');
       var height = MediaQuery.of(Get.context!).padding.top;
       Log.d("当前状态栏高度$height");
       Log.d("返回前台");
-      danmakuController?.resume;
+      danmakuController?.resume();
       isBackground = false;
     }
   }

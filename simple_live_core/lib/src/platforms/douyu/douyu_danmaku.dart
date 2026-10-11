@@ -20,6 +20,10 @@ class DouyuDanmaku implements LiveDanmaku {
   /// 用于精确过滤所谓“阴间弹幕”——斗鱼机器人/水军号普遍为低等级（社区经验：1~25 级）。
   int minLevel = 0;
 
+  // —— 诊断计数（每轮心跳汇总一次，便于定位“过滤未生效”）——
+  int _recvChat = 0;
+  int _shownChat = 0;
+
   @override
   Function(LiveMessage msg)? onMessage;
   @override
@@ -66,6 +70,10 @@ class DouyuDanmaku implements LiveDanmaku {
   void heartbeat() {
     var data = serializeDouyu("type@=mrkl/");
     webScoketUtils?.sendMessage(data);
+    CoreLog.i(
+        "DouyuDanmaku: 收到chatmsg=$_recvChat 放行=$_shownChat (showAll=$showAll minLevel=$minLevel)");
+    _recvChat = 0;
+    _shownChat = 0;
   }
 
   @override
@@ -90,9 +98,13 @@ class DouyuDanmaku implements LiveDanmaku {
       //有些直播间存在阴间弹幕，不知道什么情况
       //上游默认只显示粉丝发言；现改为可配置（showAll=true 时显示全部，可用 minLevel 按等级精确过滤）
       LiveMessage? liveMsg;
+      if (type == "chatmsg") {
+        _recvChat++;
+      }
       if (type == "chatmsg" &&
           (showAll || fans == '1') &&
           level >= minLevel) {
+        _shownChat++;
         var col = int.tryParse(jsonData["col"].toString()) ?? 0;
         liveMsg = LiveMessage(
           type: LiveMessageType.chat,
