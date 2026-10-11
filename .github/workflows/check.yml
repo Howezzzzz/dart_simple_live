@@ -1,0 +1,52 @@
+name: check
+
+# 静态检查门禁：push 即跑（本地环境受限时由 CI 兜底）
+# 目的：拦住「调用了不存在的 API（编译错）」「x?.foo; 漏括号（空语句）」这类低级错
+# 说明：仅把 analyze 的 **error 级**当硬门禁；既有 warning/info 不拦（避免旧账劝退）。
+#       反模式哨兵只告警、不阻断（`grep` 有少量误报）。
+#       本 workflow 独立于构建流程，不阻塞产物产出。
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  analyze:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: subosito/flutter-action@v2.16.0
+        with:
+          flutter-version-file: simple_live_app/pubspec.yaml
+          cache: true
+
+      - name: pub get
+        working-directory: simple_live_app
+        run: flutter pub get
+
+      - name: analyze（error 级硬门禁）
+        working-directory: simple_live_app
+        run: |
+          flutter analyze > /tmp/an.txt 2>&1 || true
+          tail -6 /tmp/an.txt
+          if grep -qE '^[[:space:]]*error -' /tmp/an.txt; then
+            echo "::error::analyze 存在 error —— 门禁未通过"
+            grep -nE '^[[:space:]]*error -' /tmp/an.txt
+            exit 1
+          fi
+          echo "✓ analyze 无 error（允许既有 warning/info）"
+
+      - name: 反模式哨兵：空引用表达式语句（非阻断）
+        if: always()
+        working-directory: simple_live_app
+        run: |
+          hits=$(grep -rEn '\?\.[[:space:]]*[A-Za-z_][A-Za-z0-9_]*[[:space:]]*;' lib 2>/dev/null | grep -vE '=[^;]*\?\.' || true)
+          if [ -n "$hits" ]; then
+            echo "::warning::疑似空引用语句（如 x?.resume; 漏括号）——请人工确认"
+            echo "$hits"
+          else
+            echo "✓ 未发现空引用语句"
+          fi
