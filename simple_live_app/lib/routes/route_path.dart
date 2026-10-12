@@ -63,6 +63,9 @@ class RoutePath {
   /// 斗鱼 网页登录
   static const kDouyuWebLogin = "/settings/account/douyu/web_login";
 
+  /// 二维码登录
+  static const kAccountQRLogin = "/settings/account/qr_login/qr_login";
+
   /// 数据同步
   static const kLocalSync = "/local_sync";
 

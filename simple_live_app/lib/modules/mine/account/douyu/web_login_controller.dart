@@ -1,12 +1,16 @@
+import 'dart:convert';
+
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:get/get.dart';
 import 'package:simple_live_app/app/controller/base_controller.dart';
 import 'package:simple_live_app/app/log.dart';
+import 'package:simple_live_app/models/db/account.dart';
 import 'package:simple_live_app/services/platform_service.dart';
 
 /// 斗鱼「网页登录」：在应用内打开斗鱼登录页，用户用账号密码/手机验证码登录，
 /// 登录成功后自动从 WebView 读取并保存 Cookie（等同官方网页登录，无需扫码/装 App）。
 class DouyuWebLoginController extends BaseController {
+  Account account = Get.arguments;
   InAppWebViewController? webViewController;
   final CookieManager cookieManager = CookieManager.instance();
 
@@ -71,12 +75,16 @@ class DouyuWebLoginController extends BaseController {
           cookies.map((e) => "${e.name}=${e.value}").join("; ");
       // 不把 Cookie 明文写日志（含 acf_jwt_token/LTP0 等敏感项），只记录字段清单
       Log.i("斗鱼网页登录成功，已获取 Cookie 字段：${cookieMap.keys.join(',')}");
-      PlatformService.instance.setDouyuCookie(cookieStr);
       var did = cookieMap["dy_did"] ?? "";
       var ltp0 = cookieMap["LTP0"] ?? "";
-      if (did.isNotEmpty || ltp0.isNotEmpty) {
-        await PlatformService.instance.setDouyuDidAndLtp0(did, ltp0);
-      }
+      var credential = jsonEncode({
+        'cookie': cookieStr,
+        'dy_did': did,
+        'LTP0': ltp0,
+      });
+      // 账号体系统一入口：写入 credential 并做一次有效性校验（刷新 cookie）
+      await PlatformService.instance
+          .accountLogin(account.copyWith(credential: credential));
       _saved = true;
       Get.back();
       return true;

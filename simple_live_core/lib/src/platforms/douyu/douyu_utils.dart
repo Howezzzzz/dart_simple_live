@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:crypto/crypto.dart';
 import 'package:simple_live_core/src/common/core_error.dart';
@@ -15,24 +16,25 @@ class DouyuUtils {
 
   // api
   // douyu-enc
-  static final _apiDouyuEnc =
-      "https://www.douyu.com/wgapi/livenc/liveweb/websec/getEncryption";
+  static final _apiDouyuEnc = "https://www.douyu.com/wgapi/livenc/liveweb/websec/getEncryption";
 
   // safe auth
-  static final _apiDouyuPassport =
-      'https://passport.douyu.com/lapi/passport/iframe/safeAuth';
+  static final _apiDouyuPassport = 'https://passport.douyu.com/lapi/passport/iframe/safeAuth';
 
   static final douyuOrigin = 'https://www.douyu.com';
 
+  static final douyuLoginReferer = 'https://passport.douyu.com/index/login?type=login&client_id=1';
+
   // douyu-live-stream
-  static Map<String, String> requestHeader(
-      {String roomId = '', String cookie = ''}) {
+  static Map<String, String> requestHeader({String roomId = '', String cookie = '', bool isLogin = false}) {
     var referer = roomId.isEmpty ? douyuOrigin : '$douyuOrigin/$roomId';
+    if (isLogin) {
+      referer = douyuLoginReferer;
+    }
     var res = {
       'accept': '*/*',
       'accept-encoding': 'gzip, deflate, br, zstd',
-      'accept-language':
-          'zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6,zh-Hans;q=0.5',
+      'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6,zh-Hans;q=0.5',
       'origin': douyuOrigin,
       'referer': referer,
       "content-type": "application/x-www-form-urlencoded",
@@ -46,13 +48,11 @@ class DouyuUtils {
     return res;
   }
 
-  static void setDyDid(String cookie) {
-    final match = RegExp(r'dy_did=([^;]+)').firstMatch(cookie);
-    _did = match?.group(1) ?? _did;
+  static void setDyDid(String dy_did) {
+    _did = dy_did;
   }
 
-  static Future<String> refreshCookie(
-      {String did = '', String ltp0 = '', String cookie = ''}) async {
+  static Future<String> refreshCookie({String did = '', String ltp0 = '', String cookie = ''}) async {
     // expired-> refresh
     if (_isCookieExpired(cookie) && ltp0.isNotEmpty && did.isNotEmpty) {
       // milliseconds not sec
@@ -108,8 +108,7 @@ class DouyuUtils {
   }
 
   static bool _encKeyCheck() {
-    return (_encKey["expire_at"] ?? 0) >
-        (DateTime.now().millisecondsSinceEpoch ~/ 1000);
+    return (_encKey["expire_at"] ?? 0) > (DateTime.now().millisecondsSinceEpoch ~/ 1000);
   }
 
   static Future<void> _encKeyUpdate({String cookie = ''}) async {
@@ -123,14 +122,12 @@ class DouyuUtils {
       },
       header: requestHeader(cookie: cookie),
     );
-    res['data']?["expire_at"] =
-        DateTime.now().millisecondsSinceEpoch ~/ 1000 + _encCacheTTL;
+    res['data']?["expire_at"] = DateTime.now().millisecondsSinceEpoch ~/ 1000 + _encCacheTTL;
     _encKey = res['data'];
   }
 
   // 用于流/登录/弹幕，暂时只需要流获取
-  static Future<String> sign(String rid,
-      {int rate = -1, String cdn = "hw-h5", String cookie = ''}) async {
+  static Future<String> sign(String rid, {int rate = -1, String cdn = "hw-h5", String cookie = ''}) async {
     var ts = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     await _encKeyUpdate(cookie: cookie);
     String randStr = _encKey["rand_str"] ?? "";
@@ -161,6 +158,33 @@ class DouyuUtils {
     return postData;
   }
   // todo: 获取real_rid 暂未发现 fake_id
+
+  // 从set-cookie中获取字段
+  static String pickSetCookie(List<String> raw, String name) {
+    for (final e in raw) {
+      final c = Cookie.fromSetCookieValue(e);
+      if (c.name == name) {
+        return c.value;
+      }
+    }
+    return '';
+  }
+
+  // 从cookie 中获取字段
+  static String pickCookie(String? cookie, String name) {
+    if (cookie == null || cookie.isEmpty) return '';
+
+    for (final part in cookie.split(';')) {
+      final p = part.trim();
+      if (p.isEmpty) continue;
+      final i = p.indexOf('=');
+      if (i <= 0) continue;
+      if (p.substring(0, i).trim() == name) {
+        return p.substring(i + 1).trim();
+      }
+    }
+    return '';
+  }
 
   /// 微信小程序直播接口（2026-10-07 逆向自斗鱼官方小程序）
   /// 免登录：token 为小程序内写死值，did 用默认设备号即可，无需 cookie 与 sign；

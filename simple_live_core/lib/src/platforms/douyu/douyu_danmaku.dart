@@ -60,10 +60,8 @@ class DouyuDanmaku implements LiveDanmaku {
   }
 
   void joinRoom(String roomId) {
-    webScoketUtils
-        ?.sendMessage(serializeDouyu("type@=loginreq/roomid@=$roomId/"));
-    webScoketUtils?.sendMessage(
-        serializeDouyu("type@=joingroup/rid@=$roomId/gid@=-9999/"));
+    webScoketUtils?.sendMessage(serializeDouyu("type@=loginreq/roomid@=$roomId/"));
+    webScoketUtils?.sendMessage(serializeDouyu("type@=joingroup/rid@=$roomId/gid@=-9999/"));
   }
 
   @override
@@ -127,8 +125,7 @@ class DouyuDanmaku implements LiveDanmaku {
           // 斗鱼没有颜色 调整配色方案-偏紫色系
           backgroundBottomColor: "#292a60",
           backgroundColor: "#c1c1ff",
-          endTime:
-              curTimestamp.add(Duration(seconds: int.parse(jsonData["cet"]))),
+          endTime: curTimestamp.add(Duration(seconds: int.parse(jsonData["cet"]))),
           face: "https://apic.douyucdn.cn/upload/${face}_small.jpg",
           message: jsonData["chatmsg"]["txt"].toString(),
           price: int.parse(jsonData["cprice"]) ~/ 100,
@@ -167,8 +164,7 @@ class DouyuDanmaku implements LiveDanmaku {
           color: LiveMessageColor.white,
           data: sc2,
         );
-      } else if (type != "uenter") {
-      }
+      } else if (type != "uenter") {}
       if (liveMsg != null) {
         onMessage?.call(liveMsg);
       }
@@ -203,8 +199,7 @@ class DouyuDanmaku implements LiveDanmaku {
   String? deserializeDouyu(List<int> buffer) {
     try {
       var reader = BinaryReader(Uint8List.fromList(buffer));
-      int fullMsgLength =
-          reader.readInt32(endian: Endian.little); //fullMsgLength
+      int fullMsgLength = reader.readInt32(endian: Endian.little); //fullMsgLength
       reader.readInt32(endian: Endian.little); //fullMsgLength2
       int bodyLength = fullMsgLength - 9;
       reader.readShort(endian: Endian.little); //packType
