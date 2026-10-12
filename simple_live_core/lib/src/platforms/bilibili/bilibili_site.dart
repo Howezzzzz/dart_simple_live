@@ -546,7 +546,10 @@ class BiliBiliSite implements LiveSite {
 
   @override
   void setSiteAttrs(String data) {
-    cookie = data;
+    final map = jsonDecode(data) as Map<String, dynamic>;
+    if (map.containsKey('cookie')) {
+      cookie = map['cookie'];
+    }
   }
 
   @override
