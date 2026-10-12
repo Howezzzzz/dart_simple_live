@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:get/get.dart';
 import 'package:simple_live_app/app/constant.dart';
@@ -11,6 +12,7 @@ import 'package:simple_live_app/models/db/account.dart';
 import 'package:simple_live_app/requests/common_request.dart';
 import 'package:simple_live_app/services/db_service.dart';
 import 'package:simple_live_app/services/local_storage_service.dart';
+import 'package:simple_live_app/services/web_login_cookies.dart';
 import 'package:simple_live_core/simple_live_core.dart';
 
 class PlatformService extends GetxService {
@@ -47,6 +49,27 @@ class PlatformService extends GetxService {
       updatedAt: DateTime.now().millisecondsSinceEpoch,
     );
     await updateAccount(logout);
+    // 同步清掉应用内「网页登录」残留的 Cookie。
+    // 否则退号后再点网页登录，登录页会带着旧 Cookie 自动登录，用户无法换号。
+    await clearWebLoginCookies(ac.siteId);
+  }
+
+  /// 清理「应用内网页登录」（InAppWebView）的 Cookie。
+  ///
+  /// 只在确实使用网页登录的站点（B站/斗鱼）上触发。
+  /// 用 `deleteAllCookies()`（而非按域名 scoped 删除）：Android 的 CookieManager
+  /// 不暴露 cookie 的 Domain/HttpOnly 属性，scoped 删除清不掉 `Domain=.bilibili.com`、
+  /// HttpOnly 的 SESSDATA 等 → 仍会被旧 Cookie 自动登录。
+  /// 与本仓库迁移前的 BiliBiliAccountService.logout 行为一致（当时亦为 deleteAllCookies）。
+  Future<void> clearWebLoginCookies(String siteId) async {
+    if (webLoginCookieDomainsFor(siteId).isEmpty) {
+      return;
+    }
+    try {
+      await CookieManager.instance().deleteAllCookies();
+    } catch (e) {
+      Log.e('清理 $siteId 网页登录 Cookie 失败: $e', StackTrace.current);
+    }
   }
 
   Future<bool> accountLogin(Account ac) async {
