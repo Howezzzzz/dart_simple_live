@@ -475,6 +475,38 @@ class DouyuSite implements LiveSite {
     }
     return qrPollResult;
   }
+
+  /// 获取当前登录账号在斗鱼关注的主播。
+  ///
+  /// 接口：GET https://www.douyu.com/wgapi/live/liveweb/user/follow/list
+  /// 认证：登录 Cookie。⚠️ 该接口为逆向所得，字段/可用性**待真机验证**。
+  @override
+  Future<List<LiveAnchorItem>> getFollowedAnchors({int page = 1}) async {
+    var result = await HttpClient.instance.getJson(
+      "https://www.douyu.com/wgapi/live/liveweb/user/follow/list",
+      queryParameters: {"page": "$page", "pageSize": "50"},
+      header: DouyuUtils.requestHeader(cookie: _cookie),
+    );
+    if (result is Map && (result["error"] ?? 0) != 0) {
+      throw Exception("斗鱼关注列表获取失败：${result["msg"]}");
+    }
+    var data = asT<Map<String, dynamic>>(result["data"]);
+    var list = asT<List<dynamic>>(data?["list"]) ?? const [];
+    var items = <LiveAnchorItem>[];
+    for (var e in list) {
+      var m = asT<Map<String, dynamic>>(e);
+      if (m == null) continue;
+      var roomId = (m["rid"] ?? m["room_id"] ?? "").toString();
+      if (roomId.isEmpty || roomId == "0") continue;
+      items.add(LiveAnchorItem(
+        roomId: roomId,
+        avatar: (m["avatar"] ?? m["avatar_mid"] ?? "").toString(),
+        userName: (m["nickname"] ?? m["nn"] ?? "").toString(),
+        liveStatus: false,
+      ));
+    }
+    return items;
+  }
 }
 
 class DouyuPlayData {

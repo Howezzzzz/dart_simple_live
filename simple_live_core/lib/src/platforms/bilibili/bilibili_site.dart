@@ -628,4 +628,42 @@ class BiliBiliSite implements LiveSite {
     }
     return res;
   }
+
+  /// 获取当前登录账号在 B站关注的主播（「关注的 UP 直播情况」）。
+  ///
+  /// 接口：GET https://api.live.bilibili.com/xlive/web-ucenter/user/following
+  /// 认证：Cookie（SESSDATA）；page_size 上限 10。
+  /// 返回该页主播列表；未登录/接口异常时抛出（调用方自行区分三态）。
+  @override
+  Future<List<LiveAnchorItem>> getFollowedAnchors({int page = 1}) async {
+    var result = await HttpClient.instance.getJson(
+      "https://api.live.bilibili.com/xlive/web-ucenter/user/following",
+      queryParameters: {
+        "page": "$page",
+        "page_size": "10",
+        "ignoreRecord": "1",
+        "hit_ab": "true",
+      },
+      header: await getHeader(),
+    );
+    if (result is Map && result["code"] != 0) {
+      throw CoreError("B站关注列表获取失败：${result["message"]}");
+    }
+    var data = asT<Map<String, dynamic>>(result["data"]);
+    var list = asT<List<dynamic>>(data?["list"]) ?? const [];
+    var items = <LiveAnchorItem>[];
+    for (var e in list) {
+      var m = asT<Map<String, dynamic>>(e);
+      if (m == null) continue;
+      var roomId = (m["roomid"] ?? "").toString();
+      if (roomId.isEmpty || roomId == "0") continue;
+      items.add(LiveAnchorItem(
+        roomId: roomId,
+        avatar: (m["face"] ?? "").toString(),
+        userName: (m["uname"] ?? "").toString(),
+        liveStatus: (asT<int?>(m["live_status"]) ?? 0) == 1,
+      ));
+    }
+    return items;
+  }
 }

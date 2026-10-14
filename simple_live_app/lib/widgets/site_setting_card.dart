@@ -9,8 +9,9 @@ import 'package:simple_live_app/widgets/net_image.dart';
 class SiteSettingCard extends StatelessWidget {
   final Account account;
   final Function() onTap;
+  final VoidCallback? onSync;
 
-  const SiteSettingCard(this.account, {super.key, required this.onTap});
+  const SiteSettingCard(this.account, {super.key, required this.onTap, this.onSync});
 
   @override
   Widget build(BuildContext context) {
@@ -22,7 +23,20 @@ class SiteSettingCard extends StatelessWidget {
           : Image.asset(site.logo, width: 36, height: 36),
       title: Text(site.name),
       subtitle: Text(account.userName ?? "未登录"),
-      trailing: logined ? const Icon(Icons.logout) : const Icon(Icons.chevron_right),
+      trailing: logined
+          ? Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (onSync != null)
+                  IconButton(
+                    icon: const Icon(Icons.sync),
+                    tooltip: "同步关注的主播",
+                    onPressed: onSync,
+                  ),
+                const Icon(Icons.logout),
+              ],
+            )
+          : const Icon(Icons.chevron_right),
       onTap: onTap,
     );
   }

@@ -32,6 +32,11 @@ class AccountController extends GetxController {
     }
   }
 
+  /// 打开「从账号同步关注的主播」页（仅对已支持网页登录/关注接口的站点开放）
+  void syncFollow(Account account) {
+    Get.toNamed(RoutePath.kFollowSync, arguments: account.siteId);
+  }
+
   void login(Account account) {
     Utils.showBottomSheet(
       title: "登录${site.name}",

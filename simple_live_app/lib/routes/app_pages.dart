@@ -18,6 +18,8 @@ import 'package:simple_live_app/modules/mine/account/bilibili/web_login_controll
 import 'package:simple_live_app/modules/mine/account/bilibili/web_login_page.dart';
 import 'package:simple_live_app/modules/mine/account/douyu/web_login_controller.dart';
 import 'package:simple_live_app/modules/mine/account/douyu/web_login_page.dart';
+import 'package:simple_live_app/modules/mine/account/follow_sync/follow_sync_controller.dart';
+import 'package:simple_live_app/modules/mine/account/follow_sync/follow_sync_page.dart';
 import 'package:simple_live_app/modules/mine/account/qr_login/qr_login_controller.dart';
 import 'package:simple_live_app/modules/mine/account/qr_login/qr_login_page.dart';
 import 'package:simple_live_app/modules/mine/history/history_controller.dart';
@@ -181,6 +183,16 @@ class AppPages {
       page: () => const DouyuWebLoginPage(),
       bindings: [
         BindingsBuilder.put(() => DouyuWebLoginController()),
+      ],
+    ),
+    //从账号同步关注的主播
+    GetPage(
+      name: RoutePath.kFollowSync,
+      page: () => const FollowSyncPage(),
+      bindings: [
+        BindingsBuilder.put(
+          () => FollowSyncController(Get.arguments is String ? Get.arguments as String : ''),
+        ),
       ],
     ),
     // 数据同步

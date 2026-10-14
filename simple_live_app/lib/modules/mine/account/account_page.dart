@@ -1,6 +1,7 @@
 import 'package:get/get.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:simple_live_app/app/app_style.dart';
+import 'package:simple_live_app/app/constant.dart';
 import 'package:simple_live_app/app/utils.dart';
 import 'package:simple_live_app/modules/mine/account/account_controller.dart';
 import 'package:simple_live_app/services/platform_service.dart';
@@ -29,6 +30,11 @@ class AccountPage extends GetView<AccountController> {
               (acItem) => SiteSettingCard(
                 acItem,
                 onTap: () => controller.tap(acItem),
+                onSync: acItem.isActive &&
+                        (acItem.siteId == Constant.kBiliBili ||
+                            acItem.siteId == Constant.kDouyu)
+                    ? () => controller.syncFollow(acItem)
+                    : null,
               ),
             ),
             Obx(

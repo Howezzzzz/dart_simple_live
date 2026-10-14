@@ -113,4 +113,12 @@ class LiveSite {
   Future<AccountInfo> getAccountInfo({required String credential}) {
     return Future.value(AccountInfo());
   }
+
+  /// 获取当前登录账号在平台上关注的直播主播（需已通过 setSiteAttrs 注入登录态）。
+  ///
+  /// 返回该页的主播列表；`page` 从 1 开始。不支持/未登录/失败时返回空列表，
+  /// 调用方需自行区分「空」与「失败」（失败应抛异常）。
+  Future<List<LiveAnchorItem>> getFollowedAnchors({int page = 1}) {
+    return Future.value(<LiveAnchorItem>[]);
+  }
 }

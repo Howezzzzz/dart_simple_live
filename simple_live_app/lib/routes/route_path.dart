@@ -66,6 +66,9 @@ class RoutePath {
   /// 二维码登录
   static const kAccountQRLogin = "/settings/account/qr_login/qr_login";
 
+  /// 从账号同步关注的主播
+  static const kFollowSync = "/settings/account/follow_sync";
+
   /// 数据同步
   static const kLocalSync = "/local_sync";
 
