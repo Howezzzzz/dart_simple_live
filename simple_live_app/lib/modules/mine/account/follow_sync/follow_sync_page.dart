@@ -76,6 +76,8 @@ class FollowSyncPage extends GetView<FollowSyncController> {
       );
     }
     final visible = controller.visible;
+    // 在此处读取 selected，使其变化时外层 Obx 重建（列表项在 lazy builder 内读不到）
+    final selectedIds = controller.selected.toSet();
     return Column(
       children: [
         Obx(() => Padding(
@@ -107,14 +109,12 @@ class FollowSyncPage extends GetView<FollowSyncController> {
         Expanded(
           child: visible.isEmpty
               ? const Center(child: Text("当前没有正在直播的主播"))
-              : Obx(
-                  () => ListView.builder(
-                    itemCount: visible.length,
-                    itemBuilder: (context, index) {
-                      final c = visible[index];
-                      return _tile(c);
-                    },
-                  ),
+              : ListView.builder(
+                  itemCount: visible.length,
+                  itemBuilder: (context, index) {
+                    final c = visible[index];
+                    return _tile(c, selectedIds.contains(c.id));
+                  },
                 ),
         ),
         SafeArea(
@@ -155,32 +155,33 @@ class FollowSyncPage extends GetView<FollowSyncController> {
     );
   }
 
-  Widget _tile(FollowSyncCandidate c) {
-    return Obx(() => CheckboxListTile(
-          value: controller.selected.contains(c.id),
-          onChanged: (v) => controller.toggle(c.id, v ?? false),
-          secondary: c.face.isEmpty
-              ? const CircleAvatar(child: Icon(Icons.person))
-              : NetImage(c.face, width: 40, height: 40, borderRadius: 20),
-          title: Row(
-            children: [
-              Flexible(
-                child: Text(
-                  c.userName.isEmpty ? c.roomId : c.userName,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              if (c.live) ...[
-                const SizedBox(width: 6),
-                const Icon(Icons.circle, size: 8, color: Colors.red),
-              ],
-            ],
+  // 不使用逐条 Obx：勾选状态由外层 Obx（读取 controller.selected）驱动重建
+  Widget _tile(FollowSyncCandidate c, bool checked) {
+    return CheckboxListTile(
+      value: checked,
+      onChanged: (v) => controller.toggle(c.id, v ?? false),
+      secondary: c.face.isEmpty
+          ? const CircleAvatar(child: Icon(Icons.person))
+          : NetImage(c.face, width: 40, height: 40, borderRadius: 20),
+      title: Row(
+        children: [
+          Flexible(
+            child: Text(
+              c.userName.isEmpty ? c.roomId : c.userName,
+              overflow: TextOverflow.ellipsis,
+            ),
           ),
-          subtitle: Text(
-            "房间号 ${c.roomId}${c.existing ? " · 已关注" : ""}",
-            style: const TextStyle(fontSize: 12),
-          ),
-        ));
+          if (c.live) ...[
+            const SizedBox(width: 6),
+            const Icon(Icons.circle, size: 8, color: Colors.red),
+          ],
+        ],
+      ),
+      subtitle: Text(
+        "房间号 ${c.roomId}${c.existing ? " · 已关注" : ""}",
+        style: const TextStyle(fontSize: 12),
+      ),
+    );
   }
 
   Future<void> _doImport(BuildContext context) async {
