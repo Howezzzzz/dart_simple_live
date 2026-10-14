@@ -15,6 +15,11 @@ import 'package:simple_live_core/src/platforms/huya/tars/types.dart';
 import 'package:tars_dart/tars/net/base_tars_http.dart';
 
 class HuyaSite implements LiveSite {
+  @override
+  Future<List<LiveAnchorItem>> getFollowedAnchors({int page = 1}) {
+    return Future.value(<LiveAnchorItem>[]);
+  }
+
   static const String baseUrl = HuyaRequestParams.baseUrl;
   static const String wupUrl = HuyaRequestParams.wupUrl;
   static const String kUserAgent = HuyaRequestParams.kUserAgent;

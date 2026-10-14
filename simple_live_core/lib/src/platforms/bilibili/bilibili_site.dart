@@ -647,7 +647,7 @@ class BiliBiliSite implements LiveSite {
       header: await getHeader(),
     );
     if (result is Map && result["code"] != 0) {
-      throw CoreError("B站关注列表获取失败：${result["message"]}");
+      throw Exception("B站关注列表获取失败：${result["message"]}");
     }
     var data = asT<Map<String, dynamic>>(result["data"]);
     var list = asT<List<dynamic>>(data?["list"]) ?? const [];

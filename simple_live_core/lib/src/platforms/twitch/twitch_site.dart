@@ -10,6 +10,11 @@ import 'package:simple_live_core/src/platforms/twitch/twitch_models.dart';
 
 class TwitchSite implements LiveSite {
   @override
+  Future<List<LiveAnchorItem>> getFollowedAnchors({int page = 1}) {
+    return Future.value(<LiveAnchorItem>[]);
+  }
+
+  @override
   String id = 'twitch';
 
   @override

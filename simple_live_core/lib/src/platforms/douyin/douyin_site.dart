@@ -12,6 +12,11 @@ import 'douyin_request_params.dart';
 
 class DouyinSite implements LiveSite {
   @override
+  Future<List<LiveAnchorItem>> getFollowedAnchors({int page = 1}) {
+    return Future.value(<LiveAnchorItem>[]);
+  }
+
+  @override
   String id = "douyin";
 
   @override
