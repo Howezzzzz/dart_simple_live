@@ -478,17 +478,22 @@ class DouyuSite implements LiveSite {
 
   /// 获取当前登录账号在斗鱼关注的主播。
   ///
-  /// 接口：GET https://www.douyu.com/wgapi/live/liveweb/user/follow/list
-  /// 认证：登录 Cookie。⚠️ 该接口为逆向所得，字段/可用性**待真机验证**。
+  /// 接口：GET https://www.douyu.com/wgapi/livenc/liveweb/follow/list
+  /// 认证：登录 Cookie；**一次性返回全部关注**（无分页），故仅第 1 页有效。
+  /// 未登录时返回 `error/code == -1`（msg 含「用户未登陆」）→ 抛异常（三态之「失败」）。
   @override
   Future<List<LiveAnchorItem>> getFollowedAnchors({int page = 1}) async {
+    if (page > 1) {
+      return <LiveAnchorItem>[];
+    }
     var result = await HttpClient.instance.getJson(
-      "https://www.douyu.com/wgapi/live/liveweb/user/follow/list",
-      queryParameters: {"page": "$page", "pageSize": "50"},
+      "https://www.douyu.com/wgapi/livenc/liveweb/follow/list",
+      queryParameters: {"sort": "0", "cid1": "0"},
       header: DouyuUtils.requestHeader(cookie: _cookie),
     );
-    if (result is Map && (result["error"] ?? 0) != 0) {
-      throw Exception("斗鱼关注列表获取失败：${result["msg"]}");
+    var code = (result is Map) ? (result["error"] ?? result["code"] ?? 0) : 0;
+    if (result is Map && asT<int?>(code) != 0) {
+      throw Exception("斗鱼关注列表获取失败：${result["msg"] ?? result["error"]}");
     }
     var data = asT<Map<String, dynamic>>(result["data"]);
     var list = asT<List<dynamic>>(data?["list"]) ?? const [];
@@ -496,13 +501,14 @@ class DouyuSite implements LiveSite {
     for (var e in list) {
       var m = asT<Map<String, dynamic>>(e);
       if (m == null) continue;
-      var roomId = (m["rid"] ?? m["room_id"] ?? "").toString();
+      var roomId = (m["room_id"] ?? "").toString();
       if (roomId.isEmpty || roomId == "0") continue;
       items.add(LiveAnchorItem(
         roomId: roomId,
-        avatar: (m["avatar"] ?? m["avatar_mid"] ?? "").toString(),
-        userName: (m["nickname"] ?? m["nn"] ?? "").toString(),
-        liveStatus: false,
+        avatar: (m["avatar_small"] ?? m["room_src"] ?? "").toString(),
+        userName: (m["nickname"] ?? "").toString(),
+        liveStatus: (asT<int?>(m["show_status"]) ?? 0) == 1 &&
+            (asT<int?>(m["videoLoop"]) ?? 1) == 0,
       ));
     }
     return items;
