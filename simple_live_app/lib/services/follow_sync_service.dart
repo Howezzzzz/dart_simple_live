@@ -45,6 +45,7 @@ class FollowSyncService {
     required String siteId,
     LiveSite? site,
     Set<String>? localIds,
+    void Function(int count)? onProgress,
   }) async {
     final liveSite = site ?? Sites.allSites[siteId]?.liveSite;
     if (liveSite == null) {
@@ -75,8 +76,9 @@ class FollowSyncService {
           existing: local.contains(id),
         ));
       }
+      onProgress?.call(result.length);
       // 分页节流，降低触发风控的概率
-      await Future.delayed(Duration(milliseconds: 250 + (page % 3) * 120));
+      await Future.delayed(Duration(milliseconds: 120 + (page % 3) * 100));
     }
     return result;
   }

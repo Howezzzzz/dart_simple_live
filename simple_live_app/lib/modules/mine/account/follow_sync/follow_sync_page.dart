@@ -16,16 +16,16 @@ class FollowSyncPage extends GetView<FollowSyncController> {
       body: Obx(() {
         switch (controller.state.value) {
           case FollowSyncState.loading:
-            return const Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  CircularProgressIndicator(),
-                  SizedBox(height: 16),
-                  Text("正在获取关注列表…"),
-                ],
-              ),
-            );
+            return Obx(() => Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const CircularProgressIndicator(),
+                      const SizedBox(height: 16),
+                      Text("正在获取关注列表…已获取 ${controller.fetched.value} 条"),
+                    ],
+                  ),
+                ));
           case FollowSyncState.error:
             return _buildError(context);
           case FollowSyncState.ready:
@@ -95,6 +95,14 @@ class FollowSyncPage extends GetView<FollowSyncController> {
                 ],
               ),
             )),
+        if (controller.candidates.length > 80)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+            child: Text(
+              "⚠️ 关注较多（${controller.candidates.length} 条）：全部导入后，App 刷新开播状态会向平台发大量请求，可能触发风控（表现为部分房间取不到详情/显示未开播）。建议只导入正在直播或常看的。",
+              style: const TextStyle(fontSize: 12, color: Colors.orange),
+            ),
+          ),
         Expanded(
           child: visible.isEmpty
               ? const Center(child: Text("当前没有正在直播的主播"))

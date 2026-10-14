@@ -12,6 +12,8 @@ class FollowSyncController extends GetxController {
 
   final state = FollowSyncState.loading.obs;
   final error = ''.obs;
+  /// 拉取过程中已获得的条数（供加载态显示进度）
+  final fetched = 0.obs;
   final candidates = <FollowSyncCandidate>[].obs;
   final selected = <String>{}.obs;
   final onlyLive = false.obs;
@@ -34,12 +36,18 @@ class FollowSyncController extends GetxController {
   Future<void> fetch() async {
     state.value = FollowSyncState.loading;
     error.value = '';
+    fetched.value = 0;
     try {
-      final list = await FollowSyncService.fetch(siteId: siteId);
+      final list = await FollowSyncService.fetch(
+        siteId: siteId,
+        onProgress: (n) => fetched.value = n,
+      );
       candidates.assignAll(list);
+      // 安全默认：只勾「未关注且正在直播」的，避免一次导入几百条触发平台风控
       selected
         ..clear()
-        ..addAll(list.where((c) => !c.existing).map((c) => c.id));
+        ..addAll(
+            list.where((c) => !c.existing && c.live).map((c) => c.id));
       state.value = FollowSyncState.ready;
     } catch (e, s) {
       Log.e('同步关注失败: $e', s);
