@@ -9,6 +9,7 @@ import 'package:simple_live_app/app/constant.dart';
 import 'package:simple_live_app/app/controller/app_settings_controller.dart';
 import 'package:simple_live_app/app/controller/base_controller.dart';
 import 'package:simple_live_app/app/event_bus.dart';
+import 'package:simple_live_app/app/sites.dart';
 import 'package:simple_live_app/app/utils.dart';
 import 'package:simple_live_app/models/db/follow_user.dart';
 import 'package:simple_live_app/models/db/follow_user_tag.dart';
@@ -75,20 +76,48 @@ class FollowUserController extends BasePageController<FollowUser> {
   }
 
   @override
+  /// 平台筛选：空串=全部平台，否则为站点 id（bilibili/douyu/...）
+  var platformFilter = ''.obs;
+
+  /// 当前关注里出现过的平台（按 Sites 定义顺序）
+  List<String> get platforms {
+    final ids = <String>{
+      for (final f in FollowService.instance.followList) f.siteId,
+    };
+    final res = <String>[];
+    for (final id in Sites.allSites.keys) {
+      if (ids.remove(id)) {
+        res.add(id);
+      }
+    }
+    res.addAll(ids);
+    return res;
+  }
+
+  void setPlatformFilter(String siteId) {
+    platformFilter.value = siteId;
+    refreshData();
+  }
+
   Future<List<FollowUser>> getData(int page, int pageSize) async {
     if (page > 1) {
       return Future.value([]);
     }
+    List<FollowUser> base;
     if (filterMode.value.tag == "全部") {
-      return FollowService.instance.followList.value;
+      base = FollowService.instance.followList.value;
     } else if (filterMode.value.tag == "直播中") {
-      return FollowService.instance.liveList.value;
+      base = FollowService.instance.liveList.value;
     } else if (filterMode.value.tag == "未开播") {
-      return FollowService.instance.notLiveList.value;
+      base = FollowService.instance.notLiveList.value;
     } else {
       FollowService.instance.filterDataByTag(filterMode.value);
-      return FollowService.instance.curTagFollowList.value;
+      base = FollowService.instance.curTagFollowList.value;
     }
+    if (platformFilter.value.isNotEmpty) {
+      base = base.where((u) => u.siteId == platformFilter.value).toList();
+    }
+    return base;
   }
 
   void updateTagList() {
@@ -118,6 +147,9 @@ class FollowUserController extends BasePageController<FollowUser> {
 
     if (hideOffline && filterMode.value.tag != "未开播") {
       list.retainWhere((user) => user.liveStatus.value == 2);
+    }
+    if (platformFilter.value.isNotEmpty) {
+      list.retainWhere((user) => user.siteId == platformFilter.value);
     }
   }
 

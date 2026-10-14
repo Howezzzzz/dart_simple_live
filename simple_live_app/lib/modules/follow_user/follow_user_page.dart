@@ -144,6 +144,33 @@ class FollowUserPage extends GetView<FollowUserController> {
               ],
             ),
           ),
+          // 平台筛选（仅当关注里有多个平台时显示）
+          if (controller.platforms.length > 1)
+            Padding(
+              padding: AppStyle.edgeInsetsL8,
+              child: Obx(
+                () => SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Wrap(
+                    spacing: 12,
+                    children: [
+                      FilterButton(
+                        text: "全部平台",
+                        selected: controller.platformFilter.value.isEmpty,
+                        onTap: () => controller.setPlatformFilter(''),
+                      ),
+                      ...controller.platforms.map(
+                        (id) => FilterButton(
+                          text: Sites.allSites[id]?.name ?? id,
+                          selected: controller.platformFilter.value == id,
+                          onTap: () => controller.setPlatformFilter(id),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
           Obx(
             () => Expanded(
               child: AppSettingsController.instance.followStyleNotGrid.value
