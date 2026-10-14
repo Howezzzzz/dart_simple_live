@@ -31,6 +31,11 @@ class FollowUserPage extends GetView<FollowUserController> {
       appBar: AppBar(
         title: const Text("关注用户"),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.sync),
+            tooltip: "同步关注的主播",
+            onPressed: () => controller.openFollowSync(),
+          ),
           PopupMenuButton(
             itemBuilder: (context) {
               return const [

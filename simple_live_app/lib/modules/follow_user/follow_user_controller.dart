@@ -5,16 +5,20 @@ import 'dart:async';
 import 'package:material_ui/material_ui.dart';
 import 'package:get/get.dart';
 import 'package:remixicon/remixicon.dart';
+import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:simple_live_app/app/constant.dart';
 import 'package:simple_live_app/app/controller/app_settings_controller.dart';
 import 'package:simple_live_app/app/controller/base_controller.dart';
 import 'package:simple_live_app/app/event_bus.dart';
 import 'package:simple_live_app/app/sites.dart';
 import 'package:simple_live_app/app/utils.dart';
+import 'package:simple_live_app/models/db/account.dart';
 import 'package:simple_live_app/models/db/follow_user.dart';
 import 'package:simple_live_app/models/db/follow_user_tag.dart';
 import 'package:simple_live_app/routes/app_navigation.dart';
+import 'package:simple_live_app/routes/route_path.dart';
 import 'package:simple_live_app/services/follow_service.dart';
+import 'package:simple_live_app/services/platform_service.dart';
 
 class FollowUserController extends BasePageController<FollowUser> {
   StreamSubscription<dynamic>? onUpdatedIndexedStream;
@@ -97,6 +101,50 @@ class FollowUserController extends BasePageController<FollowUser> {
   void setPlatformFilter(String siteId) {
     platformFilter.value = siteId;
     refreshData();
+  }
+
+  /// 从关注页进入「同步关注的主播」：
+  /// 仅对已登录且支持网页登录/关注接口的平台（B站/斗鱼）开放；多个则先让其选择。
+  void openFollowSync() {
+    final candidates = PlatformService.instance.accountList
+        .where((a) =>
+            a.isActive &&
+            (a.siteId == Constant.kBiliBili || a.siteId == Constant.kDouyu))
+        .toList();
+    if (candidates.isEmpty) {
+      SmartDialog.showToast("请先在「账号管理」登录 哔哩哔哩/斗鱼 账号");
+      return;
+    }
+    if (candidates.length == 1) {
+      _goFollowSync(candidates.first.siteId);
+      return;
+    }
+    Utils.showBottomSheet(
+      title: "从哪个平台同步关注？",
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: candidates.map<Widget>((Account ac) {
+          final site = Sites.allSites[ac.siteId];
+          return ListTile(
+            leading: site == null
+                ? const Icon(Icons.live_tv)
+                : Image.asset(site.logo, width: 32, height: 32),
+            title: Text(site?.name ?? ac.siteId),
+            subtitle: Text(ac.userName ?? ""),
+            onTap: () {
+              Get.back();
+              _goFollowSync(ac.siteId);
+            },
+          );
+        }).toList(),
+      ),
+    );
+  }
+
+  void _goFollowSync(String siteId) {
+    Get.toNamed(RoutePath.kFollowSync, arguments: siteId)?.then((_) {
+      refreshData();
+    });
   }
 
   Future<List<FollowUser>> getData(int page, int pageSize) async {
