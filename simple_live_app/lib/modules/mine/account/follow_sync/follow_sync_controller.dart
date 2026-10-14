@@ -1,5 +1,6 @@
 import 'package:get/get.dart';
 import 'package:simple_live_app/app/log.dart';
+import 'package:simple_live_app/services/follow_service.dart';
 import 'package:simple_live_app/services/follow_sync_service.dart';
 
 enum FollowSyncState { loading, ready, error }
@@ -32,6 +33,10 @@ class FollowSyncController extends GetxController {
 
   int get newCount => candidates.where((c) => !c.existing).length;
   int get existCount => candidates.where((c) => c.existing).length;
+
+  /// 勾选中「本地已关注」的数量（移出操作只对这部分生效）
+  int get selectedExistingCount =>
+      candidates.where((c) => selected.contains(c.id) && c.existing).length;
 
   Future<void> fetch() async {
     state.value = FollowSyncState.loading;
@@ -70,6 +75,43 @@ class FollowSyncController extends GetxController {
       selected.addAll(ids);
     } else {
       selected.removeAll(ids);
+    }
+  }
+
+  /// 把勾选中「本地已关注」的从关注列表移除（清理批量导入/不需要的），返回移除数量
+  Future<int> removeSelected() async {
+    if (importing.value) {
+      return 0;
+    }
+    importing.value = true;
+    try {
+      final chosen = candidates
+          .where((c) => selected.contains(c.id) && c.existing)
+          .toList();
+      var removed = 0;
+      final removedIds = <String>{};
+      for (final c in chosen) {
+        await FollowService.instance.removeFollowUser(c.id);
+        removedIds.add(c.id);
+        removed++;
+      }
+      if (removedIds.isNotEmpty) {
+        candidates.assignAll(candidates
+            .map((c) => removedIds.contains(c.id)
+                ? FollowSyncCandidate(
+                    siteId: c.siteId,
+                    roomId: c.roomId,
+                    userName: c.userName,
+                    face: c.face,
+                    live: c.live,
+                    existing: false,
+                  )
+                : c)
+            .toList());
+      }
+      return removed;
+    } finally {
+      importing.value = false;
     }
   }
 

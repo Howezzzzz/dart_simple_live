@@ -1,6 +1,7 @@
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:get/get.dart';
 import 'package:material_ui/material_ui.dart';
+import 'package:simple_live_app/app/utils.dart';
 import 'package:simple_live_app/modules/mine/account/follow_sync/follow_sync_controller.dart';
 import 'package:simple_live_app/services/follow_sync_service.dart';
 import 'package:simple_live_app/widgets/net_image.dart';
@@ -130,6 +131,15 @@ class FollowSyncPage extends GetView<FollowSyncController> {
                   child: const Text("全不选"),
                 ),
                 const Spacer(),
+                Obx(() => TextButton(
+                      onPressed: controller.selectedExistingCount == 0 ||
+                              controller.importing.value
+                          ? null
+                          : () => _doRemove(context),
+                      child:
+                          Text("移出关注 (${controller.selectedExistingCount})"),
+                    )),
+                const SizedBox(width: 8),
                 Obx(() => FilledButton(
                       onPressed: controller.selected.isEmpty ||
                               controller.importing.value
@@ -177,5 +187,18 @@ class FollowSyncPage extends GetView<FollowSyncController> {
     final added = await controller.doImport();
     SmartDialog.showToast("导入完成：新增 $added 个");
     Get.back();
+  }
+
+  Future<void> _doRemove(BuildContext context) async {
+    final n = controller.selectedExistingCount;
+    final ok = await Utils.showAlertDialog(
+      "确定把选中的 $n 个「已关注」主播从本机关注列表移除吗？\n（只影响本机，不影响平台上的关注）",
+      title: "移出关注",
+    );
+    if (!ok) {
+      return;
+    }
+    final removed = await controller.removeSelected();
+    SmartDialog.showToast("已移出 $removed 个");
   }
 }
