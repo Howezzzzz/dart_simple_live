@@ -5,10 +5,14 @@ class FilterButton extends StatelessWidget {
   final bool selected;
   final String text;
   final Function()? onTap;
+
+  /// 可选：chip 左侧的小图标/logo
+  final Widget? leading;
   const FilterButton({
     this.selected = false,
     required this.text,
     this.onTap,
+    this.leading,
     super.key,
   });
 
@@ -23,13 +27,19 @@ class FilterButton extends StatelessWidget {
           border: Border.all(color: selected ? Theme.of(context).textTheme.bodyMedium!.color! : Colors.grey),
           borderRadius: AppStyle.radius24,
         ),
-        child: Text(
-          text,
-          style: selected
-              ? Theme.of(context).textTheme.bodyMedium
-              : Theme.of(context).textTheme.bodyMedium!.copyWith(
-                    color: Colors.grey,
-                  ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (leading != null) ...[leading!, AppStyle.hGap4],
+            Text(
+              text,
+              style: selected
+                  ? Theme.of(context).textTheme.bodyMedium
+                  : Theme.of(context).textTheme.bodyMedium!.copyWith(
+                        color: Colors.grey,
+                      ),
+            ),
+          ],
         ),
       ),
     );

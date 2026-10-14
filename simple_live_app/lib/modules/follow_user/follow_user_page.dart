@@ -152,7 +152,7 @@ class FollowUserPage extends GetView<FollowUserController> {
           // 平台筛选（仅当关注里有多个平台时显示）
           if (controller.platforms.length > 1)
             Padding(
-              padding: AppStyle.edgeInsetsL8,
+              padding: AppStyle.edgeInsetsL8.copyWith(top: 8, bottom: 4),
               child: Obx(
                 () => SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
@@ -160,12 +160,21 @@ class FollowUserPage extends GetView<FollowUserController> {
                     spacing: 12,
                     children: [
                       FilterButton(
+                        leading:
+                            const Icon(Icons.apps, size: 16, color: Colors.grey),
                         text: "全部平台",
                         selected: controller.platformFilter.value.isEmpty,
                         onTap: () => controller.setPlatformFilter(''),
                       ),
                       ...controller.platforms.map(
                         (id) => FilterButton(
+                          leading: Sites.allSites[id] == null
+                              ? const Icon(Icons.live_tv, size: 16)
+                              : Image.asset(
+                                  Sites.allSites[id]!.logo,
+                                  width: 16,
+                                  height: 16,
+                                ),
                           text: Sites.allSites[id]?.name ?? id,
                           selected: controller.platformFilter.value == id,
                           onTap: () => controller.setPlatformFilter(id),
