@@ -266,16 +266,27 @@ class LiveRoomPage extends GetView<LiveRoomController> {
                   ),
                 ],
               ),
-              // 沉浸式：顶栏叠在画面顶部（不覆盖右侧弹幕栏）
+              // 沉浸式：顶栏叠在画面顶部，与底栏同一套自动隐藏逻辑（不覆盖右侧弹幕栏）
               if (showOverlayBar)
                 Obx(
-                  () => Positioned(
+                  () => AnimatedPositioned(
                     left: 0,
-                    top: 0,
+                    top: (controller.showControlsState.value &&
+                            !controller.lockControlsState.value)
+                        ? 0
+                        : -64.0,
                     right: AppSettingsController
                             .instance.messagePanelWidth.value +
                         8,
-                    child: buildVideoTopBar(context),
+                    duration: const Duration(milliseconds: 200),
+                    child: MouseRegion(
+                      // 鼠标移到顶栏上等同移到画面上：唤出并重新计时
+                      onHover: (_) => controller.showControls(),
+                      child: GestureDetector(
+                        onTap: controller.onTap,
+                        child: buildVideoTopBar(context),
+                      ),
+                    ),
                   ),
                 ),
             ],
