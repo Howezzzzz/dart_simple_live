@@ -843,8 +843,8 @@ class LiveRoomPage extends GetView<LiveRoomController> {
               AppStyle.divider,
               Obx(
                 () => SettingsSwitch(
-                  title: "按分辨率自适应宽度",
-                  subtitle: "进入直播间后保持窗口高度、按直播流分辨率调整窗口宽度",
+                  title: "按分辨率自适应",
+                  subtitle: "进入直播间后保持窗口不变、按直播流分辨率调整右侧弹幕栏宽度（最大化时同样生效）",
                   value:
                       AppSettingsController.instance.autoFitWindowWidth.value,
                   onChanged: (e) => AppSettingsController

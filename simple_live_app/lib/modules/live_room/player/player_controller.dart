@@ -417,11 +417,12 @@ mixin PlayerSystemMixin on PlayerMixin, PlayerStateMixin, PlayerDanmakuMixin {
 
   bool _fittingWindowByResolution = false;
 
-  /// 进入直播间后：**保持窗口高度不变**，按当前直播流分辨率调整窗口宽度，
-  /// 使播放区贴合原始比例（无黑边）。仅在普通窗口状态下、且取到分辨率后执行一次。
-  Future<void> fitWindowWidthToVideo({int attempt = 0}) async {
+  /// 进入直播间后：**不改变窗口大小**，按当前直播流分辨率调整「右侧弹幕栏宽度」，
+  /// 使播放区贴合原始比例（无黑边）。因为不动窗口，**最大化/各种窗口状态下同样生效**。
+  Future<void> fitPanelWidthToVideo({int attempt = 0}) async {
     if (Platform.isAndroid || Platform.isIOS) return;
     if (_fittingWindowByResolution) return;
+    // 这些状态下面板不可见，无从调整
     if (fullScreenState.value || windowFillState.value || smallWindowState.value) {
       return;
     }
@@ -429,41 +430,42 @@ mixin PlayerSystemMixin on PlayerMixin, PlayerStateMixin, PlayerDanmakuMixin {
     final h = player.state.height ?? 0;
     if (w <= 0 || h <= 0) return;
     Size? playerSize;
+    double? contentWidth;
     try {
-      playerSize = globalPlayerKey.currentContext?.size;
+      final ctx = globalPlayerKey.currentContext;
+      playerSize = ctx?.size;
+      contentWidth = ctx == null ? null : MediaQuery.maybeOf(ctx)?.size.width;
     } catch (e) {
-      Log.d('fitWindowWidthToVideo 取播放区尺寸异常: $e');
+      Log.d('fitPanelWidthToVideo 取尺寸异常: $e');
     }
-    if (playerSize == null || playerSize.height < 50 || playerSize.width < 50) {
-      Log.d('fitWindowWidthToVideo[try$attempt] 播放区未就绪: video=${w}x$h playerSize=$playerSize');
-      // 播放区还没完成布局（分辨率事件常常早于首帧）→ 稍后重试几次
+    if (playerSize == null ||
+        playerSize.height < 50 ||
+        playerSize.width < 50 ||
+        contentWidth == null) {
+      Log.d('fitPanelWidthToVideo[try$attempt] 未就绪: video=${w}x$h playerSize=$playerSize contentWidth=$contentWidth');
+      // 分辨率事件常常早于首帧布局 → 稍后重试几次
       if (attempt < 12) {
         Future.delayed(const Duration(milliseconds: 400),
-            () => fitWindowWidthToVideo(attempt: attempt + 1));
+            () => fitPanelWidthToVideo(attempt: attempt + 1));
       }
       return;
     }
-    // 保持播放区高度，按比例推宽度
-    final desiredWidth = playerSize.height * (w / h);
-    final delta = desiredWidth - playerSize.width;
-    Log.d('fitWindowWidthToVideo[try$attempt] video=${w}x$h player=${playerSize.width}x${playerSize.height} desired=$desiredWidth delta=$delta');
-    if (delta.abs() < 4) return;
+    const handleWidth = 8.0; // 播放区与面板之间的拖拽条
+    // 播放区高度不变，按比例算它应有的宽度；剩下的留给右侧弹幕栏
+    final desiredPlayerWidth = playerSize.height * (w / h);
+    final desiredPanel = contentWidth - desiredPlayerWidth - handleWidth;
+    if (desiredPanel < 220) {
+      Log.d('fitPanelWidthToVideo 跳过：窗口太窄，无法靠弹幕栏适配 (desiredPanel=$desiredPanel)');
+      return;
+    }
+    final target = desiredPanel.clamp(220.0, 800.0);
+    final current = AppSettingsController.instance.messagePanelWidth.value;
+    Log.d('fitPanelWidthToVideo[try$attempt] video=${w}x$h player=${playerSize.width}x${playerSize.height} contentW=$contentWidth -> panel $current -> $target');
+    if ((target - current).abs() < 4) return;
     _fittingWindowByResolution = true;
     try {
-      if (await windowManager.isMaximized()) {
-        Log.d('fitWindowWidthToVideo 跳过：窗口已最大化');
-        return;
-      }
-      if (await windowManager.isFullScreen()) {
-        Log.d('fitWindowWidthToVideo 跳过：系统全屏');
-        return;
-      }
-      final size = await windowManager.getSize();
-      final newWidth = (size.width + delta).clamp(360.0, 6000.0);
-      await windowManager.setSize(Size(newWidth, size.height));
-      Log.d('fitWindowWidthToVideo OK: win=${size.width}x${size.height} -> ${newWidth}x${size.height}');
-    } catch (e) {
-      Log.d('fitWindowWidthToVideo 失败: $e');
+      AppSettingsController.instance.setMessagePanelWidth(target);
+      Log.d('fitPanelWidthToVideo OK: panel=$target');
     } finally {
       Future.delayed(const Duration(milliseconds: 400), () {
         _fittingWindowByResolution = false;
@@ -930,7 +932,7 @@ class PlayerController extends BaseController
         // 进入直播间按分辨率自适应窗口宽度（播放开始时布局已就绪，重试至生效）
         if (AppSettingsController.instance.autoFitWindowWidth.value &&
             !AppSettingsController.instance.autoFullScreen.value) {
-          fitWindowWidthToVideo();
+          fitPanelWidthToVideo();
         }
         // 音量均衡：首帧播放后一次性同步（能力未知时顺带探测，必须播放中做）
         if (!_volumeNormInitialized) {
@@ -959,7 +961,7 @@ class PlayerController extends BaseController
           enterFullScreen();
         } else if (AppSettingsController.instance.autoFitWindowWidth.value) {
           // 进入直播间后按分辨率自适应窗口宽度（保持高度）
-          Future.delayed(const Duration(milliseconds: 350), fitWindowWidthToVideo);
+          Future.delayed(const Duration(milliseconds: 350), fitPanelWidthToVideo);
         }
       }
     });
@@ -968,7 +970,7 @@ class PlayerController extends BaseController
       isVertical.value = (player.state.height ?? 9) > (player.state.width ?? 16);
       if (AppSettingsController.instance.autoFitWindowWidth.value &&
           !AppSettingsController.instance.autoFullScreen.value) {
-        Future.delayed(const Duration(milliseconds: 350), fitWindowWidthToVideo);
+        Future.delayed(const Duration(milliseconds: 350), fitPanelWidthToVideo);
       }
     });
     _escSubscription = EventBus.instance.listen(EventBus.kEscapePressed, (event) {
