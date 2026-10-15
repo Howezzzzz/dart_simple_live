@@ -8,7 +8,6 @@ import 'package:simple_live_app/app/sites.dart';
 import 'package:simple_live_app/app/utils/extensions/duration_2_str_utils.dart';
 import 'package:simple_live_app/models/db/follow_user.dart';
 import 'package:simple_live_app/widgets/net_image.dart';
-import 'dart:ui' as ui;
 
 class FollowUserItem extends StatelessWidget {
   final FollowUser item;
@@ -59,49 +58,50 @@ class FollowUserItem extends StatelessWidget {
             ),
         ],
       ),
-      title: Text.rich(
-        TextSpan(
-          text: item.remark?.isNotEmpty == true ? item.remark : item.userName,
-          children: [
-            WidgetSpan(
-              alignment: ui.PlaceholderAlignment.middle,
-              child: Obx(
-                () => Offstage(
-                  offstage: item.liveStatus.value == 0,
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      AppStyle.hGap12,
-                      Container(
-                        width: 8,
-                        height: 8,
-                        decoration: BoxDecoration(
-                          color: item.liveStatus.value == 2 ? Colors.green : Colors.grey,
-                          borderRadius: AppStyle.radius12,
-                        ),
-                      ),
-                      AppStyle.hGap4,
-                      Text(
-                        getStatus(item.liveStatus.value),
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.normal,
-                          color: item.liveStatus.value == 2 ? null : Colors.grey,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
+      title: Text(
+        item.remark?.isNotEmpty == true ? item.remark : item.userName,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
       ),
-      // 每条信息单独一行：平台 / 时长 / 标签
+      // 每条信息单独一行：状态 / 平台 / 时长 / 标签
       subtitle: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
+          // 直播状态（放在平台上面）
+          Obx(
+            () => Offstage(
+              offstage: item.liveStatus.value == 0,
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 2),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 8,
+                      height: 8,
+                      decoration: BoxDecoration(
+                        color: item.liveStatus.value == 2
+                            ? Colors.green
+                            : Colors.grey,
+                        borderRadius: AppStyle.radius12,
+                      ),
+                    ),
+                    AppStyle.hGap4,
+                    Text(
+                      getStatus(item.liveStatus.value),
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.normal,
+                        color:
+                            item.liveStatus.value == 2 ? null : Colors.grey,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
