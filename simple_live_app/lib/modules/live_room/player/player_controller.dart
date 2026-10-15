@@ -419,7 +419,7 @@ mixin PlayerSystemMixin on PlayerMixin, PlayerStateMixin, PlayerDanmakuMixin {
 
   /// 进入直播间后：**保持窗口高度不变**，按当前直播流分辨率调整窗口宽度，
   /// 使播放区贴合原始比例（无黑边）。仅在普通窗口状态下、且取到分辨率后执行一次。
-  Future<void> fitWindowWidthToVideo() async {
+  Future<void> fitWindowWidthToVideo({int attempt = 0}) async {
     if (Platform.isAndroid || Platform.isIOS) return;
     if (_fittingWindowByResolution) return;
     if (fullScreenState.value || windowFillState.value || smallWindowState.value) {
@@ -429,7 +429,14 @@ mixin PlayerSystemMixin on PlayerMixin, PlayerStateMixin, PlayerDanmakuMixin {
     final h = player.state.height ?? 0;
     if (w <= 0 || h <= 0) return;
     final playerSize = globalPlayerKey.currentContext?.size;
-    if (playerSize == null || playerSize.height < 50) return;
+    if (playerSize == null || playerSize.height < 50 || playerSize.width < 50) {
+      // 播放区还没完成布局（分辨率事件常常早于首帧）→ 稍后重试几次
+      if (attempt < 12) {
+        Future.delayed(const Duration(milliseconds: 400),
+            () => fitWindowWidthToVideo(attempt: attempt + 1));
+      }
+      return;
+    }
     // 保持播放区高度，按比例推宽度
     final desiredWidth = playerSize.height * (w / h);
     final delta = desiredWidth - playerSize.width;
@@ -909,6 +916,11 @@ class PlayerController extends BaseController
       if (event) {
         WakelockPlus.enable();
         Log.d("Playing");
+        // 进入直播间按分辨率自适应窗口宽度（播放开始时布局已就绪，重试至生效）
+        if (AppSettingsController.instance.autoFitWindowWidth.value &&
+            !AppSettingsController.instance.autoFullScreen.value) {
+          fitWindowWidthToVideo();
+        }
         // 音量均衡：首帧播放后一次性同步（能力未知时顺带探测，必须播放中做）
         if (!_volumeNormInitialized) {
           _volumeNormInitialized = true;
