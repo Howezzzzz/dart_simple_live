@@ -461,6 +461,7 @@ class LiveRoomPage extends GetView<LiveRoomController> {
                     overflow: TextOverflow.ellipsis,
                   ),
                   AppStyle.vGap4,
+                  // 平台一行
                   Row(
                     children: [
                       Image.asset(
@@ -475,24 +476,22 @@ class LiveRoomPage extends GetView<LiveRoomController> {
                           color: Colors.grey,
                         ),
                       ),
-                      Obx(
-                        () => controller.liveDurationText.value.isEmpty
-                            ? const SizedBox.shrink()
-                            : Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  AppStyle.hGap4,
-                                  Text(
-                                    controller.liveDurationText.value,
-                                    style: const TextStyle(
-                                      fontSize: 12,
-                                      color: Colors.grey,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                      ),
                     ],
+                  ),
+                  // 直播时间另起一行（对齐到平台名）
+                  Obx(
+                    () => controller.liveDurationText.value.isEmpty
+                        ? const SizedBox.shrink()
+                        : Padding(
+                            padding: const EdgeInsets.only(top: 2, left: 24),
+                            child: Text(
+                              controller.liveDurationText.value,
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey,
+                              ),
+                            ),
+                          ),
                   ),
                 ],
               ),
