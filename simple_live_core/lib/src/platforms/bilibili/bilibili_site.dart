@@ -215,21 +215,61 @@ class BiliBiliSite implements LiveSite {
     return LiveCategoryResult(hasMore: hasMore, items: items);
   }
 
+  /// 取接口 `data`：对风控 -352 做限次退避重试；失败抛明确异常（不返回 null 引发下游 NPE）。
+  Future<Map<String, dynamic>> _getJsonDataWithRetry({
+    required String api,
+    required Map<String, dynamic> queryParameters,
+  }) async {
+    Object? lastErr;
+    for (var attempt = 0; attempt < 3; attempt++) {
+      var result = await HttpClient.instance.getJson(
+        api,
+        queryParameters: queryParameters,
+        header: await getHeader(),
+      );
+      var code = (result is Map) ? (asT<int?>(result["code"]) ?? 0) : 0;
+      var data =
+          (result is Map) ? asT<Map<String, dynamic>>(result["data"]) : null;
+      if (code == 0 && data != null) {
+        return data;
+      }
+      lastErr = (result is Map) ? (result["message"] ?? code) : code;
+      if (code != -352 || attempt == 2) {
+        break;
+      }
+      await Future.delayed(Duration(milliseconds: 600 * (attempt + 1)));
+    }
+    throw Exception(
+        "哔哩哔哩接口请求失败（code=$lastErr：多为平台风控校验失败，请稍后重试或重新登录）");
+  }
+
   @override
   Future<LiveRoomDetail> getRoomDetail({required String roomId}) async {
     var roomInfo = await getRoomInfo(roomId: roomId);
     var realRoomId = roomInfo["room_info"]["room_id"].toString();
-    var url = "https://api.live.bilibili.com/xlive/web-room/v1/index/getDanmuInfo?id=$realRoomId";
-    var queryParams = await getWbiSign(url);
-    var roomDanmakuResult = await HttpClient.instance.getJson(
-      "https://api.live.bilibili.com/xlive/web-room/v1/index/getDanmuInfo",
-      queryParameters: queryParams,
-      header: await getHeader(),
-    );
-    List<String> serverHosts =
-        (roomDanmakuResult["data"]["host_list"] as List).map<String>((e) => e["host"].toString()).toList();
 
-    //var buvid = await getBuvid();
+    // 弹幕服务器信息：单独容错——即使取不到（风控/接口异常）也不影响房间主体（视频）加载
+    var danmakuToken = "";
+    var serverHosts = <String>[];
+    try {
+      var url =
+          "https://api.live.bilibili.com/xlive/web-room/v1/index/getDanmuInfo?id=$realRoomId";
+      var queryParams = await getWbiSign(url);
+      var danmakuData = await _getJsonDataWithRetry(
+        api:
+            "https://api.live.bilibili.com/xlive/web-room/v1/index/getDanmuInfo",
+        queryParameters: queryParams,
+      );
+      danmakuToken = (danmakuData["token"] ?? "").toString();
+      var hostList = asT<List<dynamic>>(danmakuData["host_list"]) ?? const [];
+      serverHosts = hostList
+          .map((e) => (asT<Map>(e)?["host"] ?? "").toString())
+          .where((e) => e.isNotEmpty)
+          .toList();
+    } catch (e) {
+      CoreLog.e("B站弹幕服务器信息获取失败（房间仍可打开）: $e", StackTrace.current);
+    }
+
     return LiveRoomDetail(
       roomId: realRoomId,
       title: roomInfo["room_info"]["title"].toString(),
@@ -244,8 +284,10 @@ class BiliBiliSite implements LiveSite {
       danmakuData: BiliBiliDanmakuArgs(
         roomId: int.tryParse(realRoomId) ?? 0,
         uid: userId,
-        token: roomDanmakuResult["data"]["token"].toString(),
-        serverHost: serverHosts.isNotEmpty ? serverHosts.first : "broadcastlv.chat.bilibili.com",
+        token: danmakuToken,
+        serverHost: serverHosts.isNotEmpty
+            ? serverHosts.first
+            : "broadcastlv.chat.bilibili.com",
         buvid: buvid3,
         cookie: cookie,
       ),
@@ -256,28 +298,11 @@ class BiliBiliSite implements LiveSite {
   Future<Map<String, dynamic>> getRoomInfo({required String roomId}) async {
     var url =
         "https://api.live.bilibili.com/xlive/web-room/v1/index/getInfoByRoom?room_id=$roomId";
-    Object? lastErr;
-    // 对风控 -352 做限次退避重试（避免瞬时风控直接报错），其他错误立即抛出
-    for (var attempt = 0; attempt < 3; attempt++) {
-      var queryParams = await getWbiSign(url);
-      var result = await HttpClient.instance.getJson(
-        "https://api.live.bilibili.com/xlive/web-room/v1/index/getInfoByRoom",
-        queryParameters: queryParams,
-        header: await getHeader(),
-      );
-      var code = asT<int?>(result["code"]) ?? 0;
-      var data = asT<Map<String, dynamic>>(result["data"]);
-      if (code == 0 && data != null) {
-        return data;
-      }
-      lastErr = result["message"] ?? code.toString();
-      if (code != -352 || attempt == 2) {
-        break;
-      }
-      await Future.delayed(Duration(milliseconds: 600 * (attempt + 1)));
-    }
-    throw Exception(
-        "哔哩哔哩房间信息获取失败（code=$lastErr：多为平台风控校验失败，请稍后重试或重新登录）");
+    var queryParams = await getWbiSign(url);
+    return _getJsonDataWithRetry(
+      api: "https://api.live.bilibili.com/xlive/web-room/v1/index/getInfoByRoom",
+      queryParameters: queryParams,
+    );
   }
 
   @override
