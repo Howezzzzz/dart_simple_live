@@ -92,6 +92,8 @@ class AppSettingsController extends GetxController {
 
     getAutoFullScreen();
 
+    getAutoFitWindowWidth();
+
     getVerticalDragLock();
 
     // ignore: invalid_use_of_protected_member
@@ -359,6 +361,10 @@ class AppSettingsController extends GetxController {
 
   @SettingItem(defaultValue: false, key: LocalStorageService.kAutoFullScreen)
   var autoFullScreen = false.obs;
+
+  // 进入直播间后按当前流分辨率自适应窗口宽度（保持窗口高度）
+  @SettingItem(defaultValue: true, key: LocalStorageService.kAutoFitWindowWidth)
+  var autoFitWindowWidth = true.obs;
 
   // 滑动调节亮度/音量上下滑动手势控制
   @SettingItem(defaultValue: false, key: LocalStorageService.kVerticalDragLock)

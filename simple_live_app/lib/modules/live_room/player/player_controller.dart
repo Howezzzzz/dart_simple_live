@@ -415,6 +415,44 @@ mixin PlayerSystemMixin on PlayerMixin, PlayerStateMixin, PlayerDanmakuMixin {
   Size? _lastWindowSize;
   Offset? _lastWindowPosition;
 
+  bool _fittingWindowByResolution = false;
+
+  /// 进入直播间后：**保持窗口高度不变**，按当前直播流分辨率调整窗口宽度，
+  /// 使播放区贴合原始比例（无黑边）。仅在普通窗口状态下、且取到分辨率后执行一次。
+  Future<void> fitWindowWidthToVideo() async {
+    if (Platform.isAndroid || Platform.isIOS) return;
+    if (_fittingWindowByResolution) return;
+    if (fullScreenState.value || windowFillState.value || smallWindowState.value) {
+      return;
+    }
+    final w = player.state.width ?? 0;
+    final h = player.state.height ?? 0;
+    if (w <= 0 || h <= 0) return;
+    final playerSize = globalPlayerKey.currentContext?.size;
+    if (playerSize == null || playerSize.height < 50) return;
+    // 保持播放区高度，按比例推宽度
+    final desiredWidth = playerSize.height * (w / h);
+    final delta = desiredWidth - playerSize.width;
+    if (delta.abs() < 4) return;
+    _fittingWindowByResolution = true;
+    try {
+      if (await windowManager.isMaximized() ||
+          await windowManager.isFullScreen()) {
+        return;
+      }
+      final size = await windowManager.getSize();
+      final newWidth = (size.width + delta).clamp(360.0, 6000.0);
+      await windowManager.setSize(Size(newWidth, size.height));
+      Log.d('fitWindowWidthToVideo: ${w}x$h, delta=$delta, newWidth=$newWidth');
+    } catch (e) {
+      Log.d('fitWindowWidthToVideo 失败: $e');
+    } finally {
+      Future.delayed(const Duration(milliseconds: 400), () {
+        _fittingWindowByResolution = false;
+      });
+    }
+  }
+
   ///小窗模式()
   void enterSmallWindow() async {
     if (!(Platform.isAndroid || Platform.isIOS)) {
@@ -896,12 +934,19 @@ class PlayerController extends BaseController
         isVertical.value = player.state.height! > player.state.width!;
         if (AppSettingsController.instance.autoFullScreen.value && !fullScreenState.value) {
           enterFullScreen();
+        } else if (AppSettingsController.instance.autoFitWindowWidth.value) {
+          // 进入直播间后按分辨率自适应窗口宽度（保持高度）
+          Future.delayed(const Duration(milliseconds: 350), fitWindowWidthToVideo);
         }
       }
     });
     _heightSubscription = player.stream.height.listen((event) {
       Log.d('height:$event  W:${(player.state.width)}  H:${(player.state.height)}');
       isVertical.value = (player.state.height ?? 9) > (player.state.width ?? 16);
+      if (AppSettingsController.instance.autoFitWindowWidth.value &&
+          !AppSettingsController.instance.autoFullScreen.value) {
+        Future.delayed(const Duration(milliseconds: 350), fitWindowWidthToVideo);
+      }
     });
     _escSubscription = EventBus.instance.listen(EventBus.kEscapePressed, (event) {
       exitFull();

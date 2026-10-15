@@ -842,6 +842,18 @@ class LiveRoomPage extends GetView<LiveRoomController> {
               ),
               AppStyle.divider,
               Obx(
+                () => SettingsSwitch(
+                  title: "按分辨率自适应宽度",
+                  subtitle: "进入直播间后保持窗口高度、按直播流分辨率调整窗口宽度",
+                  value:
+                      AppSettingsController.instance.autoFitWindowWidth.value,
+                  onChanged: (e) => AppSettingsController
+                      .instance
+                      .setAutoFitWindowWidth(e),
+                ),
+              ),
+              AppStyle.divider,
+              Obx(
                 () => IgnorePointer(
                   // 能力不支持时真正禁用（不可点击），而非仅仅视觉弱化
                   ignoring: AppSettingsController

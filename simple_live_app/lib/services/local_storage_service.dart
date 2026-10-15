@@ -149,6 +149,9 @@ class LocalStorageService extends GetxService {
   /// 自动全屏
   static const String kAutoFullScreen = "AutoFullScreen";
 
+  /// 进入直播间后按当前流分辨率自适应窗口宽度（保持高度）
+  static const String kAutoFitWindowWidth = "AutoFitWindowWidth";
+
   /// 桌面端直播间右侧消息面板宽度
   static const String kMessagePanelWidth = "MessagePanelWidth";
 
