@@ -571,6 +571,12 @@ class LiveRoomPage extends GetView<LiveRoomController> {
               indicatorSize: TabBarIndicatorSize.tab,
               labelPadding: EdgeInsets.zero,
               indicatorWeight: 1.0,
+              // 点开「关注」页时刷新关注列表（镜像进房时的快照跳过行为）
+              onTap: (index) {
+                if (index == 2 && !FollowService.instance.updating.value) {
+                  FollowService.instance.loadData();
+                }
+              },
               tabs: [
                 const Tab(
                   text: "聊天",
