@@ -254,14 +254,30 @@ class BiliBiliSite implements LiveSite {
   }
 
   Future<Map<String, dynamic>> getRoomInfo({required String roomId}) async {
-    var url = "https://api.live.bilibili.com/xlive/web-room/v1/index/getInfoByRoom?room_id=$roomId";
-    var queryParams = await getWbiSign(url);
-    var result = await HttpClient.instance.getJson(
-      "https://api.live.bilibili.com/xlive/web-room/v1/index/getInfoByRoom",
-      queryParameters: queryParams,
-      header: await getHeader(),
-    );
-    return result["data"];
+    var url =
+        "https://api.live.bilibili.com/xlive/web-room/v1/index/getInfoByRoom?room_id=$roomId";
+    Object? lastErr;
+    // 对风控 -352 做限次退避重试（避免瞬时风控直接报错），其他错误立即抛出
+    for (var attempt = 0; attempt < 3; attempt++) {
+      var queryParams = await getWbiSign(url);
+      var result = await HttpClient.instance.getJson(
+        "https://api.live.bilibili.com/xlive/web-room/v1/index/getInfoByRoom",
+        queryParameters: queryParams,
+        header: await getHeader(),
+      );
+      var code = asT<int?>(result["code"]) ?? 0;
+      var data = asT<Map<String, dynamic>>(result["data"]);
+      if (code == 0 && data != null) {
+        return data;
+      }
+      lastErr = result["message"] ?? code.toString();
+      if (code != -352 || attempt == 2) {
+        break;
+      }
+      await Future.delayed(Duration(milliseconds: 600 * (attempt + 1)));
+    }
+    throw Exception(
+        "哔哩哔哩房间信息获取失败（code=$lastErr：多为平台风控校验失败，请稍后重试或重新登录）");
   }
 
   @override
