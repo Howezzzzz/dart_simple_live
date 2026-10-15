@@ -61,11 +61,10 @@ mixin PlayerMixin {
     } else if (Platform.isLinux) {
       await pp.setProperty('ao', 'alsa');
     }
-    // media_kit 仓库更新导致的问题，临时解决办法
-    if (Platform.isAndroid) {
-      // 通过错误参数强制media_kit不seek, 解决了加载-pause-seek 在直播流上的开屏问题
-      await pp.setProperty('force-seekable', 'yes');
-    }
+    // 直播流（如斗鱼 FLV）不可 seek；不强制 seekable 时，一旦发生 seek 会报
+    //   "Cannot seek in this stream. You can force it with '-force-seekable=yes'"
+    // （原仅 Android 设置；Windows/桌面同样会踩，故改为全平台）
+    await pp.setProperty('force-seekable', 'yes');
     // 低内存管理
     //
     // 根据：https://mpv.io/manual/stable/#cache
