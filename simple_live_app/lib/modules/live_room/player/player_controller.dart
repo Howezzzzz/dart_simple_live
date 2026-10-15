@@ -428,8 +428,14 @@ mixin PlayerSystemMixin on PlayerMixin, PlayerStateMixin, PlayerDanmakuMixin {
     final w = player.state.width ?? 0;
     final h = player.state.height ?? 0;
     if (w <= 0 || h <= 0) return;
-    final playerSize = globalPlayerKey.currentContext?.size;
+    Size? playerSize;
+    try {
+      playerSize = globalPlayerKey.currentContext?.size;
+    } catch (e) {
+      Log.d('fitWindowWidthToVideo 取播放区尺寸异常: $e');
+    }
     if (playerSize == null || playerSize.height < 50 || playerSize.width < 50) {
+      Log.d('fitWindowWidthToVideo[try$attempt] 播放区未就绪: video=${w}x$h playerSize=$playerSize');
       // 播放区还没完成布局（分辨率事件常常早于首帧）→ 稍后重试几次
       if (attempt < 12) {
         Future.delayed(const Duration(milliseconds: 400),
@@ -440,17 +446,22 @@ mixin PlayerSystemMixin on PlayerMixin, PlayerStateMixin, PlayerDanmakuMixin {
     // 保持播放区高度，按比例推宽度
     final desiredWidth = playerSize.height * (w / h);
     final delta = desiredWidth - playerSize.width;
+    Log.d('fitWindowWidthToVideo[try$attempt] video=${w}x$h player=${playerSize.width}x${playerSize.height} desired=$desiredWidth delta=$delta');
     if (delta.abs() < 4) return;
     _fittingWindowByResolution = true;
     try {
-      if (await windowManager.isMaximized() ||
-          await windowManager.isFullScreen()) {
+      if (await windowManager.isMaximized()) {
+        Log.d('fitWindowWidthToVideo 跳过：窗口已最大化');
+        return;
+      }
+      if (await windowManager.isFullScreen()) {
+        Log.d('fitWindowWidthToVideo 跳过：系统全屏');
         return;
       }
       final size = await windowManager.getSize();
       final newWidth = (size.width + delta).clamp(360.0, 6000.0);
       await windowManager.setSize(Size(newWidth, size.height));
-      Log.d('fitWindowWidthToVideo: ${w}x$h, delta=$delta, newWidth=$newWidth');
+      Log.d('fitWindowWidthToVideo OK: win=${size.width}x${size.height} -> ${newWidth}x${size.height}');
     } catch (e) {
       Log.d('fitWindowWidthToVideo 失败: $e');
     } finally {
