@@ -186,7 +186,8 @@ class DouyinSite implements LiveSite {
   }
 
   @override
-  Future<LiveRoomDetail> getRoomDetail({required String roomId}) async {
+  Future<LiveRoomDetail> getRoomDetail(
+      {required String roomId, bool includeDanmaku = true}) async {
     // 有两种roomId，一种是webRid，一种是roomId
     // roomId是一次性的，用户每次重新开播都会生成一个新的roomId
     // roomId一般长度为19位，例如：7376429659866598196
@@ -311,7 +312,10 @@ class DouyinSite implements LiveSite {
     if (roomStatus && startTime == null) {
       try {
         var reflowData = await _getRoomDataByRoomId(roomId);
-        startTime = parseStartTime(reflowData["data"]["room"]["create_time"]);
+        // 防御式取值：data/room 可能缺失（原写法会抛 [] called on null）
+        var roomMap = asT<Map<String, dynamic>>(
+            asT<Map<String, dynamic>>(reflowData["data"])?["room"]);
+        startTime = parseStartTime(roomMap?["create_time"]);
       } catch (e) {
         CoreLog.error(e);
       }

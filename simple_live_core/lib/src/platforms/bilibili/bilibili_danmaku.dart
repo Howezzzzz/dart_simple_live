@@ -57,6 +57,11 @@ class BiliBiliDanmaku implements LiveDanmaku {
   @override
   Future start(dynamic args) async {
     danmakuArgs = args as BiliBiliDanmakuArgs;
+    // 未拿到弹幕凭证（token）时不硬连——否则会被服务端反复断开形成“正在尝试重连”循环
+    if (danmakuArgs.token.isEmpty) {
+      onClose?.call("弹幕暂不可用：未获取到弹幕凭证（可能被平台风控），请稍后重试");
+      return;
+    }
     webScoketUtils = WebScoketUtils(
       url: "wss://${args.serverHost}/sub",
       heartBeatTime: heartbeatTime,

@@ -511,7 +511,9 @@ class FollowService extends GetxService {
   Future updateLiveInformation(FollowUser item) async {
     try {
       var site = Sites.allSites[item.siteId]!;
-      LiveRoomDetail detail = await site.liveSite.getRoomDetail(roomId: item.roomId);
+      // 仅需房间状态/封面等，不获取弹幕凭证（减少请求、降低平台风控）
+      LiveRoomDetail detail = await site.liveSite
+          .getRoomDetail(roomId: item.roomId, includeDanmaku: false);
       item.liveStatus.value = detail.status ? 2 : 1;
       item.liveStartTime.value = detail.status ? detail.startTime : null;
       item.cover.value = detail.status ? detail.cover : "";

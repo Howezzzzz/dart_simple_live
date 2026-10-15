@@ -244,30 +244,34 @@ class BiliBiliSite implements LiveSite {
   }
 
   @override
-  Future<LiveRoomDetail> getRoomDetail({required String roomId}) async {
+  Future<LiveRoomDetail> getRoomDetail(
+      {required String roomId, bool includeDanmaku = true}) async {
     var roomInfo = await getRoomInfo(roomId: roomId);
     var realRoomId = roomInfo["room_info"]["room_id"].toString();
 
-    // 弹幕服务器信息：单独容错——即使取不到（风控/接口异常）也不影响房间主体（视频）加载
+    // 弹幕服务器信息：单独容错——即使取不到（风控/接口异常）也不影响房间主体（视频）加载。
+    // includeDanmaku=false（如关注列表状态刷新）时跳过，减少请求/降低风控。
     var danmakuToken = "";
     var serverHosts = <String>[];
-    try {
-      var url =
-          "https://api.live.bilibili.com/xlive/web-room/v1/index/getDanmuInfo?id=$realRoomId";
-      var queryParams = await getWbiSign(url);
-      var danmakuData = await _getJsonDataWithRetry(
-        api:
-            "https://api.live.bilibili.com/xlive/web-room/v1/index/getDanmuInfo",
-        queryParameters: queryParams,
-      );
-      danmakuToken = (danmakuData["token"] ?? "").toString();
-      var hostList = asT<List<dynamic>>(danmakuData["host_list"]) ?? const [];
-      serverHosts = hostList
-          .map((e) => (asT<Map>(e)?["host"] ?? "").toString())
-          .where((e) => e.isNotEmpty)
-          .toList();
-    } catch (e) {
-      CoreLog.e("B站弹幕服务器信息获取失败（房间仍可打开）: $e", StackTrace.current);
+    if (includeDanmaku) {
+      try {
+        var url =
+            "https://api.live.bilibili.com/xlive/web-room/v1/index/getDanmuInfo?id=$realRoomId";
+        var queryParams = await getWbiSign(url);
+        var danmakuData = await _getJsonDataWithRetry(
+          api:
+              "https://api.live.bilibili.com/xlive/web-room/v1/index/getDanmuInfo",
+          queryParameters: queryParams,
+        );
+        danmakuToken = (danmakuData["token"] ?? "").toString();
+        var hostList = asT<List<dynamic>>(danmakuData["host_list"]) ?? const [];
+        serverHosts = hostList
+            .map((e) => (asT<Map>(e)?["host"] ?? "").toString())
+            .where((e) => e.isNotEmpty)
+            .toList();
+      } catch (e) {
+        CoreLog.e("B站弹幕服务器信息获取失败（房间仍可打开）: $e", StackTrace.current);
+      }
     }
 
     return LiveRoomDetail(

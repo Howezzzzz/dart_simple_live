@@ -208,7 +208,8 @@ class TwitchSite implements LiveSite {
   }
 
   @override
-  Future<LiveRoomDetail> getRoomDetail({required String roomId}) async {
+  Future<LiveRoomDetail> getRoomDetail(
+      {required String roomId, bool includeDanmaku = true}) async {
     var roomInfo = await _getRoomInfo(roomId);
     var channelShell = roomInfo.first;
     var streamMetaData = roomInfo[1];

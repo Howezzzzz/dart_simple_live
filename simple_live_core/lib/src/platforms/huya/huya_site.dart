@@ -225,7 +225,8 @@ class HuyaSite implements LiveSite {
   }
 
   @override
-  Future<LiveRoomDetail> getRoomDetail({required String roomId}) async {
+  Future<LiveRoomDetail> getRoomDetail(
+      {required String roomId, bool includeDanmaku = true}) async {
     // late result is dangerous, many uncertainties pose significant null-safety risks
     late LiveRoomDetail result;
     _isVipRoom = isVipRoom(roomId);

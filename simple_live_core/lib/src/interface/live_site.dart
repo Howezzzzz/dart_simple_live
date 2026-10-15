@@ -55,7 +55,9 @@ class LiveSite {
   }
 
   /// 读取房间详情
-  Future<LiveRoomDetail> getRoomDetail({required String roomId}) {
+  /// [includeDanmaku] = false 时不获取弹幕服务器信息（仅需房间信息的场景，如关注列表状态刷新，可减少请求/降低风控）
+  Future<LiveRoomDetail> getRoomDetail(
+      {required String roomId, bool includeDanmaku = true}) {
     return Future.value(LiveRoomDetail(
       cover: '',
       online: 0,
