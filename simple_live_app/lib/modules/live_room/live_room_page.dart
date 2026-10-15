@@ -497,24 +497,6 @@ class LiveRoomPage extends GetView<LiveRoomController> {
                 ],
               ),
             ),
-            AppStyle.hGap12,
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(
-                  Remix.fire_fill,
-                  size: 20,
-                  color: Colors.orange,
-                ),
-                AppStyle.hGap4,
-                Text(
-                  Utils.onlineToString(
-                    controller.detail.value?.online ?? 0,
-                  ),
-                  style: const TextStyle(fontSize: 14),
-                ),
-              ],
-            ),
           ],
         ),
       ),
