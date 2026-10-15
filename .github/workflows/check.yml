@@ -30,11 +30,13 @@ jobs:
       - name: analyze（error 级硬门禁）
         working-directory: simple_live_app
         run: |
-          flutter analyze > /tmp/an.txt 2>&1 || true
+          # 只分析我们自己维护的目录（排除 rust_builder 等供应商/工具目录的存量错误）
+          flutter analyze lib test tool > /tmp/an.txt 2>&1 || true
           tail -6 /tmp/an.txt
-          if grep -qE '^[[:space:]]*error -' /tmp/an.txt; then
+          # 兼容两种输出分隔符：旧版 "error - …" / 新版 "error • …"
+          if grep -qE '^[[:space:]]*error[[:space:]]*[•-]' /tmp/an.txt; then
             echo "::error::analyze 存在 error —— 门禁未通过"
-            grep -nE '^[[:space:]]*error -' /tmp/an.txt
+            grep -nE '^[[:space:]]*error[[:space:]]*[•-]' /tmp/an.txt
             exit 1
           fi
           echo "✓ analyze 无 error（允许既有 warning/info）"

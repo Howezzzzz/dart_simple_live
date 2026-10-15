@@ -59,7 +59,7 @@ class FollowUserItem extends StatelessWidget {
         ],
       ),
       title: Text(
-        item.remark?.isNotEmpty == true ? item.remark : item.userName,
+        (item.remark ?? '').isNotEmpty ? item.remark! : item.userName,
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
       ),
