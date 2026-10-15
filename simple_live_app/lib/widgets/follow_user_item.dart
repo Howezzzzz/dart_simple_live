@@ -30,11 +30,34 @@ class FollowUserItem extends StatelessWidget {
     var site = Sites.allSites[item.siteId]!;
     return ListTile(
       contentPadding: AppStyle.edgeInsetsL16.copyWith(right: 4),
-      leading: NetImage(
-        item.face,
-        width: 48,
-        height: 48,
-        borderRadius: 24,
+      leading: Stack(
+        children: [
+          NetImage(
+            item.face,
+            width: 48,
+            height: 48,
+            borderRadius: 24,
+          ),
+          // 正在观看：三角图标叠在主播头像上
+          if (playing)
+            Positioned.fill(
+              child: Center(
+                child: Container(
+                  width: 26,
+                  height: 26,
+                  decoration: BoxDecoration(
+                    color: Colors.black.withAlpha(110),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.play_arrow,
+                    color: Colors.white,
+                    size: 18,
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
       title: Text.rich(
         TextSpan(
@@ -145,14 +168,7 @@ class FollowUserItem extends StatelessWidget {
         ],
       ),
       trailing: playing
-          ? const SizedBox(
-              width: 64,
-              child: Center(
-                child: Icon(
-                  Icons.play_arrow,
-                ),
-              ),
-            )
+          ? null
           : (onRemove == null
               ? null
               : IconButton(
