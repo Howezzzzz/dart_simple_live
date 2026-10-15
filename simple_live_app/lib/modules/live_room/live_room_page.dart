@@ -137,16 +137,61 @@ class LiveRoomPage extends GetView<LiveRoomController> {
   Widget buildPageUI() {
     return OrientationBuilder(
       builder: (context, orientation) {
+        final desktop = !(Platform.isAndroid || Platform.isIOS);
+        final tablet = orientation == Orientation.landscape;
+        // 桌面横屏：顶栏叠在画面上（沉浸式）→ 不加 AppBar
+        final overlayBar = desktop && tablet;
         return Scaffold(
-          appBar: AppBar(
-            title: Obx(
-              () => Text(controller.detail.value?.title ?? "直播间"),
-            ),
-            actions: buildAppbarActions(context),
-          ),
-          body: orientation == Orientation.portrait ? buildPhoneUI(context) : buildTabletUI(context),
+          appBar: overlayBar
+              ? null
+              : AppBar(
+                  title: Obx(
+                    () => Text(controller.detail.value?.title ?? "直播间"),
+                  ),
+                  actions: buildAppbarActions(context),
+                ),
+          body: tablet
+              ? buildTabletUI(context, showOverlayBar: overlayBar)
+              : buildPhoneUI(context),
         );
       },
+    );
+  }
+
+  /// 叠在画面顶部的控制栏（返回 / 标题 / 更多），仅桌面横屏使用
+  Widget buildVideoTopBar(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [Colors.black.withAlpha(150), Colors.transparent],
+        ),
+      ),
+      child: Row(
+        children: [
+          IconButton(
+            tooltip: "返回",
+            icon: const Icon(Icons.arrow_back, color: Colors.white),
+            onPressed: () => Get.back(),
+          ),
+          Expanded(
+            child: Obx(
+              () => Text(
+                controller.detail.value?.title ?? "直播间",
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: Colors.white),
+              ),
+            ),
+          ),
+          IconButton(
+            tooltip: "更多",
+            icon: const Icon(Icons.more_horiz, color: Colors.white),
+            onPressed: showMore,
+          ),
+        ],
+      ),
     );
   }
 
@@ -195,28 +240,44 @@ class LiveRoomPage extends GetView<LiveRoomController> {
     );
   }
 
-  Widget buildTabletUI(BuildContext context) {
+  Widget buildTabletUI(BuildContext context, {bool showOverlayBar = false}) {
     return Column(
       children: [
         Expanded(
-          child: Row(
+          child: Stack(
             children: [
-              Expanded(
-                child: buildMediaPlayer(),
+              Row(
+                children: [
+                  Expanded(
+                    child: buildMediaPlayer(),
+                  ),
+                  buildPanelResizeHandle(),
+                  Obx(
+                    () => SizedBox(
+                      width: AppSettingsController
+                          .instance.messagePanelWidth.value,
+                      child: Column(
+                        children: [
+                          buildUserProfile(context),
+                          buildMessageArea(),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
               ),
-              buildPanelResizeHandle(),
-              Obx(
-                () => SizedBox(
-                  width:
-                      AppSettingsController.instance.messagePanelWidth.value,
-                  child: Column(
-                    children: [
-                      buildUserProfile(context),
-                      buildMessageArea(),
-                    ],
+              // 沉浸式：顶栏叠在画面顶部（不覆盖右侧弹幕栏）
+              if (showOverlayBar)
+                Obx(
+                  () => Positioned(
+                    left: 0,
+                    top: 0,
+                    right: AppSettingsController
+                            .instance.messagePanelWidth.value +
+                        8,
+                    child: buildVideoTopBar(context),
                   ),
                 ),
-              ),
             ],
           ),
         ),
