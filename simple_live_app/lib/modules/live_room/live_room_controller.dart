@@ -148,6 +148,16 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     FollowService.instance.resumeUser("${site.id}_$roomId");
     loadData();
 
+    // 兜底：进房时若命中「快照跳过首次刷新」，右侧关注列表（只显示直播中）会空着，
+    // 需要手动刷新才出现——这里延时补刷一次（仅在列表为空且未在刷新时）。
+    Future.delayed(const Duration(seconds: 3), () {
+      if (FollowService.instance.followList.isNotEmpty &&
+          FollowService.instance.liveList.isEmpty &&
+          !FollowService.instance.updating.value) {
+        FollowService.instance.loadData();
+      }
+    });
+
     // 「时长显示」设置切换时即时起/停开播时长计时器（无需重进房间）
     _followTimeModeWorker = ever(AppSettingsController.instance.followTimeMode,
         (_) => startLiveDurationTimer());
