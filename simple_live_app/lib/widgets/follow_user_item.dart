@@ -74,32 +74,41 @@ class FollowUserItem extends StatelessWidget {
           ],
         ),
       ),
-      subtitle: Wrap(
-        runSpacing: 1.0,
+      // 每条信息单独一行：平台 / 时长 / 标签
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Image.asset(
-            site.logo,
-            width: 20,
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Image.asset(
+                site.logo,
+                width: 16,
+              ),
+              AppStyle.hGap4,
+              Text(
+                site.name,
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: Colors.grey,
+                ),
+              ),
+            ],
           ),
-          AppStyle.hGap4,
-          Text(
-            site.name,
-            style: const TextStyle(
-              fontSize: 12,
-              color: Colors.grey,
-            ),
-          ),
-          AppStyle.hGap4,
           Obx(() {
             final mode = AppSettingsController.instance.followTimeMode.value;
             if (mode == FollowTimeMode.watchDuration) {
               // 保持原显示逻辑：watchDuration 仍是活跃写入字段，避免旧数据（watchDurationSec 未回填）显示回退
-              return Text(
-                // ignore: deprecated_member_use_from_same_package
-                item.watchDuration ?? "00:00:00",
-                style: const TextStyle(
-                  fontSize: 12,
-                  color: Colors.grey,
+              return Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Text(
+                  // ignore: deprecated_member_use_from_same_package
+                  item.watchDuration ?? "00:00:00",
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: Colors.grey,
+                  ),
                 ),
               );
             }
@@ -108,24 +117,30 @@ class FollowUserItem extends StatelessWidget {
             if (item.liveStatus.value != 2 || startTime == null) {
               return const SizedBox.shrink();
             }
-            final liveDuration = DateTime.now().difference(DateTime.fromMillisecondsSinceEpoch(startTime * 1000));
-            return Text(
-              liveDuration.toLiveStartedString(),
+            final liveDuration = DateTime.now()
+                .difference(DateTime.fromMillisecondsSinceEpoch(startTime * 1000));
+            return Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text(
+                liveDuration.toLiveStartedString(),
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: Colors.grey,
+                ),
+              ),
+            );
+          }),
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Text(
+              item.tag.length > 8 ? '${item.tag.substring(0, 8)}...' : item.tag,
               style: const TextStyle(
                 fontSize: 12,
                 color: Colors.grey,
               ),
-            );
-          }),
-          AppStyle.hGap4,
-          Text(
-            item.tag.length > 8 ? '${item.tag.substring(0, 8)}...' : item.tag,
-            style: const TextStyle(
-              fontSize: 12,
-              color: Colors.grey,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
           ),
         ],
       ),
