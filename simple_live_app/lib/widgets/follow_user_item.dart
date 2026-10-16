@@ -5,7 +5,7 @@ import 'package:simple_live_app/app/app_style.dart';
 import 'package:simple_live_app/app/constant.dart';
 import 'package:simple_live_app/app/controller/app_settings_controller.dart';
 import 'package:simple_live_app/app/sites.dart';
-import 'package:simple_live_app/app/utils/extensions/duration_2_str_utils.dart';
+import 'package:simple_live_app/app/utils/follow_status_text.dart';
 import 'package:simple_live_app/models/db/follow_user.dart';
 import 'package:simple_live_app/widgets/net_image.dart';
 
@@ -85,12 +85,16 @@ class FollowUserItem extends StatelessWidget {
                     ),
                   ),
                   AppStyle.hGap4,
-                  Text(
-                    getStatusText(item),
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.normal,
-                      color: item.liveStatus.value == 2 ? null : Colors.grey,
+                  Flexible(
+                    child: Text(
+                      getStatusText(item),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.normal,
+                        color: item.liveStatus.value == 2 ? null : Colors.grey,
+                      ),
                     ),
                   ),
                 ],
@@ -162,25 +166,9 @@ class FollowUserItem extends StatelessWidget {
     );
   }
 
-  /// 状态行文案（与状态圆点同行，所以直播/未开播天然等高）：
-  /// - 直播中（开播时长模式）→ 「已开播 X」；无开播时间戳或观看时长模式 → 「直播中」
-  /// - 未开播 → 「未开播」；状态未知 → 「读取中」
-  String getStatusText(FollowUser item) {
-    final status = item.liveStatus.value;
-    if (status == 0) {
-      return "读取中";
-    }
-    if (status != 2) {
-      return "未开播";
-    }
-    if (AppSettingsController.instance.followTimeMode.value == FollowTimeMode.watchDuration) {
-      return "直播中";
-    }
-    final startTime = item.liveStartTime.value;
-    if (startTime == null) {
-      return "直播中";
-    }
-    final liveDuration = DateTime.now().difference(DateTime.fromMillisecondsSinceEpoch(startTime * 1000));
-    return "已开播 ${liveDuration.toLiveStartedString()}";
-  }
+  String getStatusText(FollowUser item) => followStatusText(
+        liveStatus: item.liveStatus.value,
+        liveStartTime: item.liveStartTime.value,
+        watchDurationMode: AppSettingsController.instance.followTimeMode.value == FollowTimeMode.watchDuration,
+      );
 }
