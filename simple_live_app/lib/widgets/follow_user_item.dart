@@ -2,10 +2,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:get/get.dart';
 import 'package:remixicon/remixicon.dart';
 import 'package:simple_live_app/app/app_style.dart';
-import 'package:simple_live_app/app/constant.dart';
-import 'package:simple_live_app/app/controller/app_settings_controller.dart';
 import 'package:simple_live_app/app/sites.dart';
-import 'package:simple_live_app/app/utils/follow_status_text.dart';
 import 'package:simple_live_app/models/db/follow_user.dart';
 import 'package:simple_live_app/widgets/net_image.dart';
 
@@ -15,6 +12,7 @@ class FollowUserItem extends StatelessWidget {
   final Function()? onTap;
   final Function()? onLongPress;
   final bool playing;
+
   const FollowUserItem({
     required this.item,
     this.onRemove,
@@ -27,148 +25,153 @@ class FollowUserItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     var site = Sites.allSites[item.siteId]!;
-    return ListTile(
-      contentPadding: AppStyle.edgeInsetsL16.copyWith(right: 4),
-      leading: Stack(
-        children: [
-          NetImage(
-            item.face,
-            width: 48,
-            height: 48,
-            borderRadius: 24,
-          ),
-          // 正在观看：三角图标叠在主播头像上
-          if (playing)
-            Positioned.fill(
-              child: Center(
-                child: Container(
-                  width: 26,
-                  height: 26,
-                  decoration: BoxDecoration(
-                    color: Colors.black.withAlpha(110),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(
-                    Icons.play_arrow,
-                    color: Colors.white,
-                    size: 18,
-                  ),
-                ),
+    return Container(
+      decoration: BoxDecoration(
+        gradient: playing
+            ? LinearGradient(
+                begin: Alignment.bottomCenter,
+                end: Alignment.topCenter,
+                colors: [
+                  Colors.red.withValues(alpha: 0.06),
+                  Colors.transparent,
+                ],
+              )
+            : null,
+      ),
+      child: ListTile(
+        contentPadding: AppStyle.edgeInsetsL16.copyWith(right: 4),
+        leading: NetImage(
+          item.face,
+          width: 48,
+          height: 48,
+          borderRadius: 24,
+        ),
+        title: Row(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Expanded(
+              child: Text(
+                item.remark?.isNotEmpty == true ? item.remark! : item.userName,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
             ),
-        ],
-      ),
-      title: Text(
-        (item.remark ?? '').isNotEmpty ? item.remark! : item.userName,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-      ),
-      // 每条信息单独一行：状态 / 平台 / 时长 / 标签
-      subtitle: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // 状态行（放在平台上面）：直播中→「已开播 X」、未开播→「未开播」、未知→「读取中」
-          // 两种状态都只占这一行 → 条目天然等高（Howe 2026-10-16 定的方案）
-          Obx(
-            () => Padding(
-              padding: const EdgeInsets.only(bottom: 2),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    width: 8,
-                    height: 8,
-                    decoration: BoxDecoration(
-                      color: item.liveStatus.value == 2 ? Colors.green : Colors.grey,
-                      borderRadius: AppStyle.radius12,
+            Obx(
+              () => Offstage(
+                offstage: item.liveStatus.value == 0,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    AppStyle.hGap12,
+                    Container(
+                      width: 8,
+                      height: 8,
+                      decoration: BoxDecoration(
+                        color: LiveStatus.fromCode(item.liveStatus.value, playing: playing).color,
+                        borderRadius: AppStyle.radius12,
+                      ),
                     ),
-                  ),
-                  AppStyle.hGap4,
-                  Flexible(
-                    child: Text(
-                      getStatusText(item),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                    AppStyle.hGap4,
+                    Text(
+                      LiveStatus.fromCode(item.liveStatus.value, playing: playing).label,
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.normal,
                         color: item.liveStatus.value == 2 ? null : Colors.grey,
                       ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
-          ),
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Image.asset(
-                site.logo,
-                width: 16,
-              ),
-              AppStyle.hGap4,
-              Text(
-                site.name,
-                style: const TextStyle(
-                  fontSize: 12,
-                  color: Colors.grey,
-                ),
-              ),
-            ],
-          ),
-          Obx(() {
-            final mode = AppSettingsController.instance.followTimeMode.value;
-            if (mode != FollowTimeMode.watchDuration) {
-              // 开播时长已并入上方状态行（直播中→「已开播 X」）→ 此处不再单独占行
-              return const SizedBox.shrink();
-            }
-            // 保持原显示逻辑：watchDuration 仍是活跃写入字段，避免旧数据（watchDurationSec 未回填）显示回退
-            return Padding(
-              padding: const EdgeInsets.only(top: 2),
-              child: Text(
-                // ignore: deprecated_member_use_from_same_package
-                item.watchDuration ?? "00:00:00",
-                style: const TextStyle(
-                  fontSize: 12,
-                  color: Colors.grey,
-                ),
-              ),
-            );
-          }),
-          Padding(
-            padding: const EdgeInsets.only(top: 2),
-            child: Text(
-              item.tag.length > 8 ? '${item.tag.substring(0, 8)}...' : item.tag,
+          ],
+        ),
+        subtitle: Wrap(
+          runSpacing: 1.0,
+          children: [
+            Image.asset(
+              site.logo,
+              width: 16,
+            ),
+            AppStyle.hGap4,
+            Text(
+              site.name,
               style: const TextStyle(
                 fontSize: 12,
                 color: Colors.grey,
               ),
+            ),
+            AppStyle.hGap4,
+            Text.rich(
+              TextSpan(
+                children: [
+                  WidgetSpan(
+                    alignment: PlaceholderAlignment.bottom,
+                    child: Icon(Remix.timer_2_line, size: 15, color: Colors.grey),
+                  ),
+                  const TextSpan(text: '_'),
+                  TextSpan(
+                    text: "${(item.watchDurationSec / 3600).toStringAsFixed(1)}h",
+                  ),
+                ],
+              ),
+              style: const TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+            AppStyle.hGap4,
+            Text.rich(
+              TextSpan(
+                children: [
+                  WidgetSpan(
+                    alignment: PlaceholderAlignment.bottom,
+                    child: Icon(Remix.price_tag_3_line, size: 15, color: Colors.grey),
+                  ),
+                  const TextSpan(text: '_'),
+                  TextSpan(text: item.tag),
+                ],
+              ),
+              style: const TextStyle(fontSize: 12, color: Colors.grey),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
-          ),
-        ],
+          ],
+        ),
+        trailing: onRemove == null
+            ? null
+            : IconButton(
+                onPressed: () {
+                  onRemove?.call();
+                },
+                icon: const Icon(Remix.dislike_line),
+              ),
+        onTap: onTap,
+        onLongPress: onLongPress,
       ),
-      trailing: playing
-          ? null
-          : (onRemove == null
-              ? null
-              : IconButton(
-                  onPressed: () {
-                    onRemove?.call();
-                  },
-                  icon: const Icon(Remix.dislike_line),
-                )),
-      onTap: onTap,
-      onLongPress: onLongPress,
     );
   }
+}
 
-  String getStatusText(FollowUser item) => followStatusText(
-        liveStatus: item.liveStatus.value,
-        liveStartTime: item.liveStartTime.value,
-        watchDurationMode: AppSettingsController.instance.followTimeMode.value == FollowTimeMode.watchDuration,
-      );
+enum LiveStatus {
+  reading('读取中', Colors.grey),
+  notLiving('未开播', Colors.grey),
+  living('直播中', Colors.green),
+  watching('观看中', Colors.red);
+
+  const LiveStatus(this.label, this.color);
+
+  final String label;
+  final Color color;
+
+  static LiveStatus fromCode(int status, {bool playing = false}) {
+    if (playing) {
+      return LiveStatus.watching;
+    }
+    if (status == 0) {
+      return LiveStatus.reading;
+    } else if (status == 1) {
+      return LiveStatus.notLiving;
+    } else {
+      return LiveStatus.living;
+    }
+  }
 }

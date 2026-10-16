@@ -22,7 +22,7 @@ class SiteSettingCard extends StatelessWidget {
           ? NetImage(account.avatar!, width: 36, height: 36, borderRadius: 18)
           : Image.asset(site.logo, width: 36, height: 36),
       title: Text(site.name),
-      subtitle: Text(account.userName ?? "未登录"),
+      subtitle: Text(logined ? account.userName ?? '已登录' : "未登录"),
       trailing: logined
           ? Row(
               mainAxisSize: MainAxisSize.min,
