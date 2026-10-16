@@ -33,4 +33,32 @@ void main() {
   test('未知站点返回空列表（不误伤其它 WebView）', () {
     expect(webLoginCookieDomainsFor('nope'), isEmpty);
   });
+
+  // RT-105 / ISS-113：定向清理需要正确的 domain 变体；漏一个就会退号后仍自动登录，
+  // 多一个就可能误伤别的站点。
+  group('cookieDomainVariants', () {
+    test('注册域本身：给出域级（带点/不带点）两个变体', () {
+      expect(cookieDomainVariants('https://bilibili.com'),
+          ['bilibili.com', '.bilibili.com']);
+    });
+
+    test('子域：额外带上原始主机名（host-only Cookie）', () {
+      expect(
+          cookieDomainVariants('https://www.bilibili.com'),
+          containsAll(
+              ['bilibili.com', '.bilibili.com', 'www.bilibili.com']));
+      expect(cookieDomainVariants('https://passport.douyu.com'),
+          containsAll(['douyu.com', '.douyu.com', 'passport.douyu.com']));
+    });
+
+    test('不产生其它站点的域名（不误伤）', () {
+      final variants = cookieDomainVariants('https://www.bilibili.com');
+      expect(variants.any((d) => d.contains('douyu')), isFalse);
+    });
+
+    test('非法输入：返回空而不是抛异常', () {
+      expect(cookieDomainVariants('not a url'), isEmpty);
+      expect(cookieDomainVariants(''), isEmpty);
+    });
+  });
 }

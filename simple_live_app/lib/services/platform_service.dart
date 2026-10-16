@@ -51,25 +51,56 @@ class PlatformService extends GetxService {
     await updateAccount(logout);
     // 同步清掉应用内「网页登录」残留的 Cookie。
     // 否则退号后再点网页登录，登录页会带着旧 Cookie 自动登录，用户无法换号。
-    await clearWebLoginCookies(ac.siteId);
+    final clean = await clearWebLoginCookies(ac.siteId);
+    if (!clean) {
+      Log.e('退号：${ac.siteId} 的网页登录 Cookie 未能完全清理（下次网页登录可能仍为旧账号）',
+          StackTrace.current);
+    }
   }
 
-  /// 清理「应用内网页登录」（InAppWebView）的 Cookie。
+  /// 清理「应用内网页登录」（InAppWebView）的 Cookie——**只清该站点自己的域名**。
   ///
-  /// 只在确实使用网页登录的站点（B站/斗鱼）上触发。
-  /// 用 `deleteAllCookies()`（而非按域名 scoped 删除）：Android 的 CookieManager
-  /// 不暴露 cookie 的 Domain/HttpOnly 属性，scoped 删除清不掉 `Domain=.bilibili.com`、
-  /// HttpOnly 的 SESSDATA 等 → 仍会被旧 Cookie 自动登录。
-  /// 与本仓库迁移前的 BiliBiliAccountService.logout 行为一致（当时亦为 deleteAllCookies）。
-  Future<void> clearWebLoginCookies(String siteId) async {
-    if (webLoginCookieDomainsFor(siteId).isEmpty) {
-      return;
+  /// 旧实现直接用 `deleteAllCookies()`：会把**其它站点**的网页登录态一并清掉
+  /// （例：退 B站 账号 → 斗鱼网页登录也失效），故改为按域名定向清理（ISS-113）。
+  ///
+  /// 每个域名会清三个 domain 变体（注册域 / 带点 / 主机名），以同时覆盖
+  /// Android 的域级 Cookie 与 iOS/macOS 的精确 domain 匹配（依据已核对的插件实现）。
+  /// 清理后**回读一次作为观测点**：仍有残留则记日志（含 Cookie 名）且返回 false，
+  /// 不静默——便于真机定位。
+  Future<bool> clearWebLoginCookies(String siteId) async {
+    final domains = webLoginCookieDomainsFor(siteId);
+    if (domains.isEmpty) {
+      return true;
     }
-    try {
-      await CookieManager.instance().deleteAllCookies();
-    } catch (e) {
-      Log.e('清理 $siteId 网页登录 Cookie 失败: $e', StackTrace.current);
+    final cookieManager = CookieManager.instance();
+    var clean = true;
+    for (final raw in domains) {
+      final url = WebUri(raw);
+      for (final domain in cookieDomainVariants(raw)) {
+        try {
+          await cookieManager.deleteCookies(url: url, domain: domain, path: '/');
+        } catch (e) {
+          clean = false;
+          Log.e('清理 $siteId 网页登录 Cookie 失败（$raw / domain=$domain）: $e',
+              StackTrace.current);
+        }
+      }
     }
+    // 观测点：回读确认（清不掉时用户会看到「退号后仍自动登录」）
+    for (final raw in domains) {
+      try {
+        final left = await cookieManager.getCookies(url: WebUri(raw));
+        if (left.isNotEmpty) {
+          clean = false;
+          Log.e(
+              '⚠️ $siteId 网页登录 Cookie 仍有残留：${left.map((e) => e.name).join(',')}',
+              StackTrace.current);
+        }
+      } catch (e) {
+        Log.e('回读 $siteId 网页登录 Cookie 失败: $e', StackTrace.current);
+      }
+    }
+    return clean;
   }
 
   Future<bool> accountLogin(Account ac) async {
