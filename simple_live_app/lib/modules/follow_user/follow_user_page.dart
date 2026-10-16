@@ -5,6 +5,7 @@ import 'package:remixicon/remixicon.dart';
 import 'package:simple_live_app/app/app_style.dart';
 import 'package:simple_live_app/app/controller/app_settings_controller.dart';
 import 'package:simple_live_app/app/sites.dart';
+import 'package:simple_live_app/app/utils/grid_columns.dart';
 import 'package:simple_live_app/modules/follow_user/follow_user_controller.dart';
 import 'package:simple_live_app/routes/app_navigation.dart';
 import 'package:simple_live_app/routes/route_path.dart';
@@ -21,9 +22,10 @@ class FollowUserPage extends GetView<FollowUserController> {
 
   @override
   Widget build(BuildContext context) {
-    // 紧凑样式（关注条目卡）信息改为逐行竖排后，原 500px/列太宽、右侧大量留白，收窄为 340px/列
-    var count = MediaQuery.of(context).size.width ~/ 340;
-    if (count < 1) count = 1;
+    // 紧凑样式（关注条目卡）列数：ceil 封顶 + 最小列宽夹逼（列宽 ≤340 不拉伸；
+    // 手机竖屏仍 1 列，与旧算法一致）。旧 floor 算法会把列宽拉到接近 2*340，
+    // 且列数随窗口宽微小变化跳变 → 网格整体重排、条目位置漂移。
+    var count = gridColumnsForWidth(MediaQuery.of(context).size.width);
     var c = MediaQuery.of(context).size.width ~/ 200;
     if (c < 2) {
       c = 2;
@@ -192,6 +194,7 @@ class FollowUserPage extends GetView<FollowUserController> {
                   ? PageGridView(
                       crossAxisSpacing: 12,
                       crossAxisCount: count,
+                      alignRows: true,
                       pageController: controller,
                       firstRefresh: true,
                       showPCRefreshButton: false,
