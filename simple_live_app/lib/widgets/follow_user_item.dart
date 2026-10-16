@@ -41,11 +41,34 @@ class FollowUserItem extends StatelessWidget {
       ),
       child: ListTile(
         contentPadding: AppStyle.edgeInsetsL16.copyWith(right: 4),
-        leading: NetImage(
-          item.face,
-          width: 48,
-          height: 48,
-          borderRadius: 24,
+        leading: Stack(
+          children: [
+            NetImage(
+              item.face,
+              width: 48,
+              height: 48,
+              borderRadius: 24,
+            ),
+            // 正在观看：头像上叠一个播放三角
+            if (playing)
+              Positioned.fill(
+                child: Center(
+                  child: Container(
+                    width: 26,
+                    height: 26,
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.43),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.play_arrow,
+                      color: Colors.white,
+                      size: 18,
+                    ),
+                  ),
+                ),
+              ),
+          ],
         ),
         // 主播名独占一行（状态不再与名字同行）
         title: Text(
