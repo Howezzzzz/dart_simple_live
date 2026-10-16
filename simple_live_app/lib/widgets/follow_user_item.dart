@@ -112,9 +112,9 @@ class FollowUserItem extends StatelessWidget {
                 ),
               ),
             ),
-            // 平台 + 标签（观看时长已删除）
-            Wrap(
-              runSpacing: 1.0,
+            // 平台行
+            Row(
+              mainAxisSize: MainAxisSize.min,
               children: [
                 Image.asset(
                   site.logo,
@@ -128,23 +128,26 @@ class FollowUserItem extends StatelessWidget {
                     color: Colors.grey,
                   ),
                 ),
-                AppStyle.hGap4,
-                Text.rich(
-                  TextSpan(
-                    children: [
-                      WidgetSpan(
-                        alignment: PlaceholderAlignment.bottom,
-                        child: Icon(Remix.price_tag_3_line, size: 15, color: Colors.grey),
-                      ),
-                      const TextSpan(text: '_'),
-                      TextSpan(text: item.tag),
-                    ],
-                  ),
-                  style: const TextStyle(fontSize: 12, color: Colors.grey),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
               ],
+            ),
+            // 标签行（另起一行）
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text.rich(
+                TextSpan(
+                  children: [
+                    WidgetSpan(
+                      alignment: PlaceholderAlignment.bottom,
+                      child: Icon(Remix.price_tag_3_line, size: 15, color: Colors.grey),
+                    ),
+                    const TextSpan(text: '_'),
+                    TextSpan(text: item.tag),
+                  ],
+                ),
+                style: const TextStyle(fontSize: 12, color: Colors.grey),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
           ],
         ),
