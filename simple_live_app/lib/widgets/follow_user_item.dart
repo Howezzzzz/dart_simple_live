@@ -68,8 +68,8 @@ class FollowUserItem extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          // 直播状态（放在平台上面）
-          // 固定占一行（状态未知时显示「读取中」）：保证条目等高，避免两列不等高
+          // 状态行（放在平台上面）：直播中→「已开播 X」、未开播→「未开播」、未知→「读取中」
+          // 两种状态都只占这一行 → 条目天然等高（Howe 2026-10-16 定的方案）
           Obx(
             () => Padding(
               padding: const EdgeInsets.only(bottom: 2),
@@ -86,7 +86,7 @@ class FollowUserItem extends StatelessWidget {
                   ),
                   AppStyle.hGap4,
                   Text(
-                    getStatus(item.liveStatus.value),
+                    getStatusText(item),
                     style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.normal,
@@ -116,40 +116,16 @@ class FollowUserItem extends StatelessWidget {
           ),
           Obx(() {
             final mode = AppSettingsController.instance.followTimeMode.value;
-            if (mode == FollowTimeMode.watchDuration) {
-              // 保持原显示逻辑：watchDuration 仍是活跃写入字段，避免旧数据（watchDurationSec 未回填）显示回退
-              return Padding(
-                padding: const EdgeInsets.only(top: 2),
-                child: Text(
-                  // ignore: deprecated_member_use_from_same_package
-                  item.watchDuration ?? "00:00:00",
-                  style: const TextStyle(
-                    fontSize: 12,
-                    color: Colors.grey,
-                  ),
-                ),
-              );
+            if (mode != FollowTimeMode.watchDuration) {
+              // 开播时长已并入上方状态行（直播中→「已开播 X」）→ 此处不再单独占行
+              return const SizedBox.shrink();
             }
-            // 开播时长模式：**非直播中也占一行**（空白占位，样式一致）——
-            // 否则未开播条目少一行，两列高度不等（Howe 2026-10-16 要求等高）
-            final startTime = item.liveStartTime.value;
-            if (item.liveStatus.value != 2 || startTime == null) {
-              return const Padding(
-                padding: EdgeInsets.only(top: 2),
-                child: Text(
-                  " ",
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Colors.grey,
-                  ),
-                ),
-              );
-            }
-            final liveDuration = DateTime.now().difference(DateTime.fromMillisecondsSinceEpoch(startTime * 1000));
+            // 保持原显示逻辑：watchDuration 仍是活跃写入字段，避免旧数据（watchDurationSec 未回填）显示回退
             return Padding(
               padding: const EdgeInsets.only(top: 2),
               child: Text(
-                liveDuration.toLiveStartedString(),
+                // ignore: deprecated_member_use_from_same_package
+                item.watchDuration ?? "00:00:00",
                 style: const TextStyle(
                   fontSize: 12,
                   color: Colors.grey,
@@ -186,13 +162,25 @@ class FollowUserItem extends StatelessWidget {
     );
   }
 
-  String getStatus(int status) {
+  /// 状态行文案（与状态圆点同行，所以直播/未开播天然等高）：
+  /// - 直播中（开播时长模式）→ 「已开播 X」；无开播时间戳或观看时长模式 → 「直播中」
+  /// - 未开播 → 「未开播」；状态未知 → 「读取中」
+  String getStatusText(FollowUser item) {
+    final status = item.liveStatus.value;
     if (status == 0) {
       return "读取中";
-    } else if (status == 1) {
+    }
+    if (status != 2) {
       return "未开播";
-    } else {
+    }
+    if (AppSettingsController.instance.followTimeMode.value == FollowTimeMode.watchDuration) {
       return "直播中";
     }
+    final startTime = item.liveStartTime.value;
+    if (startTime == null) {
+      return "直播中";
+    }
+    final liveDuration = DateTime.now().difference(DateTime.fromMillisecondsSinceEpoch(startTime * 1000));
+    return "已开播 ${liveDuration.toLiveStartedString()}";
   }
 }
