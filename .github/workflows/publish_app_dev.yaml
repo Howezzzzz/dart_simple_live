@@ -124,10 +124,13 @@ jobs:
       - name: Install appdmg
         run: npm install -g appdmg
 
-      # 设置 Fastforge 环境
+      # 设置 Fastforge 环境（git clone github 偶发超时，带重试）
       - name: Install fast-forge
-        run: | 
-          git clone https://github.com/SlotSun/fastforge.git
+        run: |
+          for i in 1 2 3; do
+            if git clone https://github.com/SlotSun/fastforge.git; then break; fi
+            rm -rf fastforge; sleep 15
+          done
           cd fastforge
           dart pub global activate melos
           melos run activate
@@ -223,10 +226,13 @@ jobs:
         run: |
           cd simple_live_app
           flutter pub get
-      # 设置 Fastforge 环境
+      # 设置 Fastforge 环境（git clone github 偶发超时，带重试）
       - name: Install fast-forge
         run: |
-          git clone https://github.com/SlotSun/fastforge.git
+          for i in 1 2 3; do
+            if git clone https://github.com/SlotSun/fastforge.git; then break; fi
+            rm -rf fastforge; sleep 15
+          done
           cd fastforge
           dart pub global activate melos
           melos run activate
@@ -260,6 +266,16 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: master
+      # 预装 yq（flutter-action 依赖；choco 源偶发 504，带重试）
+      - name: Preinstall yq (retry)
+        shell: pwsh
+        run: |
+          for ($i=1; $i -le 3; $i++) {
+            choco install yq -y --no-progress
+            if ($LASTEXITCODE -eq 0) { break }
+            Start-Sleep -Seconds 20
+          }
+          yq --version
       # 设置 Flutter 环境
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -274,10 +290,15 @@ jobs:
           cd simple_live_app
           flutter clean
           flutter pub get
-      # 设置 Fastforge 环境 和 Inno Setup
+      # 设置 Fastforge 环境 和 Inno Setup（git clone github 偶发超时，带重试）
       - name: Install fast-forge and Inno Setup
         run: |
-          git clone https://github.com/SlotSun/fastforge.git
+          for ($i=1; $i -le 3; $i++) {
+            git clone https://github.com/SlotSun/fastforge.git
+            if ($LASTEXITCODE -eq 0) { break }
+            if (Test-Path fastforge) { Remove-Item -Recurse -Force fastforge }
+            Start-Sleep -Seconds 15
+          }
           cd fastforge
           dart pub global activate melos
           melos run activate
