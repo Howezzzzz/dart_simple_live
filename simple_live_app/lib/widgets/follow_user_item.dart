@@ -69,36 +69,31 @@ class FollowUserItem extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           // 直播状态（放在平台上面）
+          // 固定占一行（状态未知时显示「读取中」）：保证条目等高，避免两列不等高
           Obx(
-            () => Offstage(
-              offstage: item.liveStatus.value == 0,
-              child: Padding(
-                padding: const EdgeInsets.only(bottom: 2),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      width: 8,
-                      height: 8,
-                      decoration: BoxDecoration(
-                        color: item.liveStatus.value == 2
-                            ? Colors.green
-                            : Colors.grey,
-                        borderRadius: AppStyle.radius12,
-                      ),
+            () => Padding(
+              padding: const EdgeInsets.only(bottom: 2),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 8,
+                    height: 8,
+                    decoration: BoxDecoration(
+                      color: item.liveStatus.value == 2 ? Colors.green : Colors.grey,
+                      borderRadius: AppStyle.radius12,
                     ),
-                    AppStyle.hGap4,
-                    Text(
-                      getStatus(item.liveStatus.value),
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.normal,
-                        color:
-                            item.liveStatus.value == 2 ? null : Colors.grey,
-                      ),
+                  ),
+                  AppStyle.hGap4,
+                  Text(
+                    getStatus(item.liveStatus.value),
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.normal,
+                      color: item.liveStatus.value == 2 ? null : Colors.grey,
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
           ),
@@ -135,13 +130,22 @@ class FollowUserItem extends StatelessWidget {
                 ),
               );
             }
-            // 开播时长模式：仅直播中且有开播时间戳时显示
+            // 开播时长模式：**非直播中也占一行**（空白占位，样式一致）——
+            // 否则未开播条目少一行，两列高度不等（Howe 2026-10-16 要求等高）
             final startTime = item.liveStartTime.value;
             if (item.liveStatus.value != 2 || startTime == null) {
-              return const SizedBox.shrink();
+              return const Padding(
+                padding: EdgeInsets.only(top: 2),
+                child: Text(
+                  " ",
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.grey,
+                  ),
+                ),
+              );
             }
-            final liveDuration = DateTime.now()
-                .difference(DateTime.fromMillisecondsSinceEpoch(startTime * 1000));
+            final liveDuration = DateTime.now().difference(DateTime.fromMillisecondsSinceEpoch(startTime * 1000));
             return Padding(
               padding: const EdgeInsets.only(top: 2),
               child: Text(
