@@ -19,12 +19,6 @@ class PageGridView extends StatelessWidget {
   final double crossAxisSpacing, mainAxisSpacing;
   final int crossAxisCount;
   final bool showPCRefreshButton;
-
-  /// 是否使用「对齐网格」（AlignedGridView，严格行优先：条目位置只由序号和列数决定，
-  /// 与条目高度无关；同一行自动等高）。
-  /// 默认 false = 原瀑布流（MasonryGridView，最矮列优先，条目高度不齐时位置会漂移）。
-  /// 紧凑关注列表（条目等高）用 true，其余页面不受影响。
-  final bool alignRows;
   const PageGridView({
     required this.itemBuilder,
     required this.pageController,
@@ -35,7 +29,6 @@ class PageGridView extends StatelessWidget {
     this.crossAxisSpacing = 0.0,
     this.mainAxisSpacing = 0.0,
     this.showPCRefreshButton = true,
-    this.alignRows = false,
     required this.crossAxisCount,
     super.key,
   });
@@ -57,23 +50,14 @@ class PageGridView extends StatelessWidget {
             refreshOnStart: firstRefresh,
             onLoad: pageController.loadData,
             onRefresh: pageController.refreshData,
-            child: alignRows
-                ? AlignedGridView.count(
-                    padding: padding,
-                    itemCount: pageController.list.length,
-                    itemBuilder: itemBuilder,
-                    crossAxisCount: crossAxisCount,
-                    crossAxisSpacing: crossAxisSpacing,
-                    mainAxisSpacing: mainAxisSpacing,
-                  )
-                : MasonryGridView.count(
-                    padding: padding,
-                    itemCount: pageController.list.length,
-                    itemBuilder: itemBuilder,
-                    crossAxisCount: crossAxisCount,
-                    crossAxisSpacing: crossAxisSpacing,
-                    mainAxisSpacing: mainAxisSpacing,
-                  ),
+            child: MasonryGridView.count(
+              padding: padding,
+              itemCount: pageController.list.length,
+              itemBuilder: itemBuilder,
+              crossAxisCount: crossAxisCount,
+              crossAxisSpacing: crossAxisSpacing,
+              mainAxisSpacing: mainAxisSpacing,
+            ),
           ),
           Positioned(
             bottom: 0,
