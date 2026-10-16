@@ -21,7 +21,8 @@ class FollowUserPage extends GetView<FollowUserController> {
 
   @override
   Widget build(BuildContext context) {
-    var count = MediaQuery.of(context).size.width ~/ 500;
+    // 紧凑样式（关注条目卡）信息改为逐行竖排后，原 500px/列太宽、右侧大量留白，收窄为 340px/列
+    var count = MediaQuery.of(context).size.width ~/ 340;
     if (count < 1) count = 1;
     var c = MediaQuery.of(context).size.width ~/ 200;
     if (c < 2) {
