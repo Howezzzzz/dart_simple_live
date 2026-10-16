@@ -5,6 +5,7 @@ import 'package:remixicon/remixicon.dart';
 import 'package:simple_live_app/app/app_style.dart';
 import 'package:simple_live_app/app/controller/app_settings_controller.dart';
 import 'package:simple_live_app/app/sites.dart';
+import 'package:simple_live_app/app/utils/grid_columns.dart';
 import 'package:simple_live_app/modules/follow_user/follow_user_controller.dart';
 import 'package:simple_live_app/routes/app_navigation.dart';
 import 'package:simple_live_app/routes/route_path.dart';
@@ -20,8 +21,10 @@ class FollowUserPage extends GetView<FollowUserController> {
 
   @override
   Widget build(BuildContext context) {
-    var count = MediaQuery.of(context).size.width ~/ 350;
-    if (count < 1) count = 1;
+    // 紧凑样式（关注条目卡）列数：ceil 封顶 + 最小列宽夹逼（列宽 ≤340 不拉伸；
+    // 手机竖屏仍 1 列，与旧算法一致）。旧 floor 算法会把列宽拉到接近 2*340，
+    // 且列数随窗口宽微小变化跳变 → 网格整体重排、条目位置漂移。
+    var count = gridColumnsForWidth(MediaQuery.of(context).size.width);
     var c = MediaQuery.of(context).size.width ~/ 200;
     if (c < 2) {
       c = 2;
@@ -200,6 +203,7 @@ class FollowUserPage extends GetView<FollowUserController> {
                     mainAxisSpacing: 12,
                     crossAxisSpacing: 12,
                     crossAxisCount: crossCount,
+                    alignRows: mode,
                     itemBuilder: (_, i) {
                       var item = controller.list[i];
                       var site = Sites.allSites[item.siteId]!;
