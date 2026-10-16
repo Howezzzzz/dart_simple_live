@@ -10,16 +10,17 @@
 /// - 若 ceil 后列宽会小于 [minColumnWidth]（如手机竖屏 390 → 2 列*195 过窄），
 ///   回退到 floor(width / [minColumnWidth]) 列（至少 1 列），避免出现过窄列。
 ///
+/// 目标列宽取 400（2026-10-16 Howe 反馈：340 时列偏窄、长主播名显示不全）：
+/// 1920 宽 → 5 列 × 384（旧 340 目标为 6 列 × 320）。
+///
 /// 不变式（见 test/grid_columns_test.dart RT-107）：
 /// - 任意输入返回 ≥ 1（含 0/负数/NaN/infinity）；
-/// - 列数只会 ≥ 旧 floor 算法（卡片只会更窄，不会更宽）；
+/// - width ≥ 560 时列宽落在 [260, 400]（不超标拉伸、也不过窄）；
 /// - 手机竖屏（360~430）恒为 1 列、768 → 2 列、1024 → 3 列（与旧算法一致，
-///   移动端行为不变）；
-/// - width ≥ 560 时列宽落在 [260, 390] 区间（正常 [260, 340]，
-///   仅在夹逼回退的窄窗口带最多 ~390）。
+///   移动端行为不变）。
 int gridColumnsForWidth(
   double width, {
-  double targetColumnWidth = 340,
+  double targetColumnWidth = 400,
   double minColumnWidth = 260,
 }) {
   if (!width.isFinite || !(width > 0) || !(targetColumnWidth > 0) || !(minColumnWidth > 0)) {
