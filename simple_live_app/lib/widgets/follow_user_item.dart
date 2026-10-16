@@ -3,6 +3,7 @@ import 'package:get/get.dart';
 import 'package:remixicon/remixicon.dart';
 import 'package:simple_live_app/app/app_style.dart';
 import 'package:simple_live_app/app/sites.dart';
+import 'package:simple_live_app/app/utils/follow_status_text.dart';
 import 'package:simple_live_app/models/db/follow_user.dart';
 import 'package:simple_live_app/widgets/net_image.dart';
 
@@ -46,93 +47,81 @@ class FollowUserItem extends StatelessWidget {
           height: 48,
           borderRadius: 24,
         ),
-        title: Row(
+        // 主播名独占一行（状态不再与名字同行）
+        title: Text(
+          item.remark?.isNotEmpty == true ? item.remark! : item.userName,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            Expanded(
-              child: Text(
-                item.remark?.isNotEmpty == true ? item.remark! : item.userName,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
+            // 状态行（在主播名下面一行）：直播中→「开播了X」、未开播→「未开播」、未知→「读取中」
             Obx(
-              () => Offstage(
-                offstage: item.liveStatus.value == 0,
+              () => Padding(
+                padding: const EdgeInsets.only(bottom: 2),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    AppStyle.hGap12,
                     Container(
                       width: 8,
                       height: 8,
                       decoration: BoxDecoration(
-                        color: LiveStatus.fromCode(item.liveStatus.value, playing: playing).color,
+                        color: item.liveStatus.value == 2 ? Colors.green : Colors.grey,
                         borderRadius: AppStyle.radius12,
                       ),
                     ),
                     AppStyle.hGap4,
-                    Text(
-                      LiveStatus.fromCode(item.liveStatus.value, playing: playing).label,
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.normal,
-                        color: item.liveStatus.value == 2 ? null : Colors.grey,
+                    Flexible(
+                      child: Text(
+                        getStatusText(item),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.normal,
+                          color: item.liveStatus.value == 2 ? null : Colors.grey,
+                        ),
                       ),
                     ),
                   ],
                 ),
               ),
             ),
-          ],
-        ),
-        subtitle: Wrap(
-          runSpacing: 1.0,
-          children: [
-            Image.asset(
-              site.logo,
-              width: 16,
-            ),
-            AppStyle.hGap4,
-            Text(
-              site.name,
-              style: const TextStyle(
-                fontSize: 12,
-                color: Colors.grey,
-              ),
-            ),
-            AppStyle.hGap4,
-            Text.rich(
-              TextSpan(
-                children: [
-                  WidgetSpan(
-                    alignment: PlaceholderAlignment.bottom,
-                    child: Icon(Remix.timer_2_line, size: 15, color: Colors.grey),
+            // 平台 + 标签（观看时长已删除）
+            Wrap(
+              runSpacing: 1.0,
+              children: [
+                Image.asset(
+                  site.logo,
+                  width: 16,
+                ),
+                AppStyle.hGap4,
+                Text(
+                  site.name,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: Colors.grey,
                   ),
-                  const TextSpan(text: '_'),
+                ),
+                AppStyle.hGap4,
+                Text.rich(
                   TextSpan(
-                    text: "${(item.watchDurationSec / 3600).toStringAsFixed(1)}h",
+                    children: [
+                      WidgetSpan(
+                        alignment: PlaceholderAlignment.bottom,
+                        child: Icon(Remix.price_tag_3_line, size: 15, color: Colors.grey),
+                      ),
+                      const TextSpan(text: '_'),
+                      TextSpan(text: item.tag),
+                    ],
                   ),
-                ],
-              ),
-              style: const TextStyle(fontSize: 12, color: Colors.grey),
-            ),
-            AppStyle.hGap4,
-            Text.rich(
-              TextSpan(
-                children: [
-                  WidgetSpan(
-                    alignment: PlaceholderAlignment.bottom,
-                    child: Icon(Remix.price_tag_3_line, size: 15, color: Colors.grey),
-                  ),
-                  const TextSpan(text: '_'),
-                  TextSpan(text: item.tag),
-                ],
-              ),
-              style: const TextStyle(fontSize: 12, color: Colors.grey),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 12, color: Colors.grey),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
             ),
           ],
         ),
@@ -149,29 +138,10 @@ class FollowUserItem extends StatelessWidget {
       ),
     );
   }
-}
 
-enum LiveStatus {
-  reading('读取中', Colors.grey),
-  notLiving('未开播', Colors.grey),
-  living('直播中', Colors.green),
-  watching('观看中', Colors.red);
-
-  const LiveStatus(this.label, this.color);
-
-  final String label;
-  final Color color;
-
-  static LiveStatus fromCode(int status, {bool playing = false}) {
-    if (playing) {
-      return LiveStatus.watching;
-    }
-    if (status == 0) {
-      return LiveStatus.reading;
-    } else if (status == 1) {
-      return LiveStatus.notLiving;
-    } else {
-      return LiveStatus.living;
-    }
-  }
+  String getStatusText(FollowUser item) => followStatusText(
+        liveStatus: item.liveStatus.value,
+        liveStartTime: item.liveStartTime.value,
+        watchDurationMode: false,
+      );
 }
