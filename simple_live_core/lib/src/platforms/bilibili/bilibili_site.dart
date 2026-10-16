@@ -591,9 +591,14 @@ class BiliBiliSite implements LiveSite {
 
   @override
   void setSiteAttrs(String data) {
-    final map = jsonDecode(data) as Map<String, dynamic>;
-    if (map.containsKey('cookie')) {
-      cookie = map['cookie'];
+    // 常规入参为 {"cookie": "..."} JSON；兼容旧数据/直接传原始 Cookie 串的调用（不掷异常）
+    try {
+      final map = jsonDecode(data) as Map<String, dynamic>;
+      if (map.containsKey('cookie')) {
+        cookie = map['cookie'];
+      }
+    } catch (_) {
+      cookie = data;
     }
   }
 
@@ -635,7 +640,8 @@ class BiliBiliSite implements LiveSite {
       });
       if (cookies.isNotEmpty) {
         var cookieStr = cookies.join(";");
-        CoreLog.i(cookieStr);
+        // 安全：不把 Cookie 内容写入日志（SESSDATA 等属凭据，日志可导出/上传）
+        CoreLog.i("登录 Cookie 已获取：${cookies.length} 项（内容不落日志）");
         // 统一封装
         String credential = jsonEncode({'cookie': cookieStr});
         qrPollResult.credential = credential;
@@ -659,7 +665,9 @@ class BiliBiliSite implements LiveSite {
       );
       if (result["code"] == 0) {
         BiliBiliUserInfoModel info = BiliBiliUserInfoModel.fromJson(result["data"]);
-        userId = info.mid!; // danmaku_arg needs
+        if (info.mid != null) {
+          userId = info.mid!; // danmaku_arg needs
+        }
         res = res.copyWith(
           name: info.uname,
           avatar: info.face,

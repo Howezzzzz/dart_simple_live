@@ -34,6 +34,12 @@ jobs:
           flutter analyze lib test tool > /tmp/an.txt 2>&1 || true
           tail -6 /tmp/an.txt
           # 兼容两种输出分隔符：旧版 "error - …" / 新版 "error • …"
+          # B7：断言 analyze 真的跑完产出结果（分析器崩溃/超时会让下面静默通过）
+          if ! grep -qE 'issues? found|No issues found' /tmp/an.txt; then
+            echo "::error::analyze 未产出结果（疑分析器崩溃/超时）——门禁视为失败"
+            tail -20 /tmp/an.txt
+            exit 1
+          fi
           if grep -qE '^[[:space:]]*error[[:space:]]*[•-]' /tmp/an.txt; then
             echo "::error::analyze 存在 error —— 门禁未通过"
             grep -nE '^[[:space:]]*error[[:space:]]*[•-]' /tmp/an.txt
