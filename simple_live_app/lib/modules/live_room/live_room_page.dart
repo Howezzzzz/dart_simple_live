@@ -12,6 +12,7 @@ import 'package:simple_live_app/app/app_style.dart';
 import 'package:simple_live_app/app/controller/app_settings_controller.dart';
 import 'package:simple_live_app/app/sites.dart';
 import 'package:simple_live_app/app/utils.dart';
+import 'package:simple_live_app/app/utils/panel_width.dart';
 import 'package:simple_live_app/modules/live_room/danmaku/chat_emoticon_span.dart';
 import 'package:simple_live_app/modules/live_room/live_room_controller.dart';
 import 'package:simple_live_app/modules/live_room/player/player_controls.dart';
@@ -210,7 +211,7 @@ class LiveRoomPage extends GetView<LiveRoomController> {
   }
 
   /// 播放器与右侧消息面板之间的分隔条：
-  /// 横向拖拽调节面板宽度（实时生效，松手时持久化），双击恢复默认 300
+  /// 横向拖拽调节面板宽度（实时生效，松手时持久化），双击恢复默认
   Widget buildPanelResizeHandle() {
     final settings = AppSettingsController.instance;
     return MouseRegion(
@@ -219,13 +220,14 @@ class LiveRoomPage extends GetView<LiveRoomController> {
         behavior: HitTestBehavior.translucent,
         onHorizontalDragUpdate: (d) {
           final w = settings.messagePanelWidth.value - d.delta.dx;
-          settings.messagePanelWidth.value = w.clamp(220.0, 800.0);
+          settings.messagePanelWidth.value =
+              w.clamp(kMessagePanelMinWidth, kMessagePanelMaxWidth);
         },
         onHorizontalDragEnd: (_) {
           settings.saveMessagePanelWidth();
         },
         onDoubleTap: () {
-          settings.setMessagePanelWidth(300.0);
+          settings.setMessagePanelWidth(kMessagePanelDefaultWidth);
         },
         child: Container(
           width: 8,

@@ -8,6 +8,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:simple_live_app/app/constant.dart';
 import 'package:simple_live_app/app/log.dart';
 import 'package:simple_live_app/app/sites.dart';
+import 'package:simple_live_app/app/utils/panel_width.dart';
 import 'package:simple_live_app/app/utils/setting_gen_util.dart';
 import 'package:simple_live_app/models/db/follow_snapshot.dart';
 import 'package:simple_live_app/services/local_storage_service.dart';
@@ -138,7 +139,7 @@ class AppSettingsController extends GetxController {
 
     messagePanelWidth.value = LocalStorageService.instance.getValue(
       LocalStorageService.kMessagePanelWidth,
-      300.0,
+      kMessagePanelDefaultWidth,
     );
 
     volumeNorm.value = LocalStorageService.instance.getValue(
@@ -473,10 +474,11 @@ class AppSettingsController extends GetxController {
   }
 
   /// 桌面端直播间右侧消息面板宽度（拖拽分隔条调节，双击分隔条恢复默认）
-  var messagePanelWidth = 300.0.obs;
+  var messagePanelWidth = kMessagePanelDefaultWidth.obs;
 
   void setMessagePanelWidth(double e) {
-    messagePanelWidth.value = e.clamp(220.0, 800.0);
+    messagePanelWidth.value =
+        e.clamp(kMessagePanelMinWidth, kMessagePanelMaxWidth);
     LocalStorageService.instance.setValue(
         LocalStorageService.kMessagePanelWidth, messagePanelWidth.value);
   }

@@ -22,6 +22,7 @@ import 'package:simple_live_app/app/controller/base_controller.dart';
 import 'package:simple_live_app/app/custom_throttle.dart';
 import 'package:simple_live_app/app/log.dart';
 import 'package:simple_live_app/app/utils.dart';
+import 'package:simple_live_app/app/utils/panel_width.dart';
 import 'package:simple_live_app/services/local_storage_service.dart';
 import 'package:simple_live_app/modules/live_room/danmaku/danmaku_emoticon.dart';
 import 'package:simple_live_core/simple_live_core.dart';
@@ -450,15 +451,15 @@ mixin PlayerSystemMixin on PlayerMixin, PlayerStateMixin, PlayerDanmakuMixin {
       }
       return;
     }
-    const handleWidth = 8.0; // 播放区与面板之间的拖拽条
-    // 播放区高度不变，按比例算它应有的宽度；剩下的留给右侧弹幕栏
-    final desiredPlayerWidth = playerSize.height * (w / h);
-    final desiredPanel = contentWidth - desiredPlayerWidth - handleWidth;
-    if (desiredPanel < 220) {
-      Log.d('fitPanelWidthToVideo 跳过：窗口太窄，无法靠弹幕栏适配 (desiredPanel=$desiredPanel)');
-      return;
-    }
-    final target = desiredPanel.clamp(220.0, 800.0);
+    // 播放区高度不变，按比例算它应有的宽度；余下留给右侧弹幕栏。
+    // 低于下限时仍设为下限（继续自适应、把播放区放到能放到的最大），
+    // 而不是保持旧值不动 —— 详见 app/utils/panel_width.dart。
+    final target = panelWidthForVideo(
+      contentWidth: contentWidth,
+      videoWidth: w.toDouble(),
+      videoHeight: h.toDouble(),
+      playerHeight: playerSize.height,
+    );
     final current = AppSettingsController.instance.messagePanelWidth.value;
     Log.d('fitPanelWidthToVideo[try$attempt] video=${w}x$h player=${playerSize.width}x${playerSize.height} contentW=$contentWidth -> panel $current -> $target');
     if ((target - current).abs() < 4) return;
