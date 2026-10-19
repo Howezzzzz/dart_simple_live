@@ -46,7 +46,14 @@ jobs:
           git config user.email "slive-bot@users.noreply.github.com"
           git add simple_live_app/pubspec.yaml
           git commit -m "chore(version): $NEW+$NUM [skip ci]"
-          git push origin HEAD:master
+          # push 竞态防护：master 若在构建期间被推进，rebase 后重试，避免 non-FF 直接失败
+          ok=0
+          for i in 1 2 3; do
+            if git pull --rebase origin master && git push origin HEAD:master; then ok=1; break; fi
+            git rebase --abort 2>/dev/null || true
+            sleep 5
+          done
+          [ "$ok" = 1 ] || { echo "::error::prepare push 失败（master 并发冲突）"; exit 1; }
           echo "version=$NEW" >> "$GITHUB_OUTPUT"
           echo "version_num=$NUM" >> "$GITHUB_OUTPUT"
 
@@ -513,6 +520,7 @@ jobs:
           open(p, "a", encoding="utf-8").write("\n")
           print("version:", d["version"], num, "| urls:", list(urls), "| desc:", d["version_desc"])
           PY
+          NUM="${V##*+}"
           git config user.name "slive-bot"
           git config user.email "slive-bot@users.noreply.github.com"
           git add assets/app_version.json
@@ -520,5 +528,18 @@ jobs:
             echo "no change"
           else
             git commit -m "chore(release): $TAG manifest [skip ci]"
-            git push origin HEAD:master
+            # push 竞态防护：远端 master 若已写出 >= 本次构建号的清单，跳过不覆盖（新 run 优先）
+            git fetch origin master
+            REMOTE_NUM="$(git show origin/master:assets/app_version.json 2>/dev/null | python3 -c "import json,sys;print(json.load(sys.stdin).get('version_num',0))" 2>/dev/null || echo 0)"
+            if [ "${REMOTE_NUM:-0}" -ge "$NUM" ]; then
+              echo "远端清单已是 >= 本次（$REMOTE_NUM），跳过写入"
+            else
+              ok=0
+              for i in 1 2 3; do
+                if git pull --rebase origin master && git push origin HEAD:master; then ok=1; break; fi
+                git rebase --abort 2>/dev/null || true
+                sleep 5
+              done
+              [ "$ok" = 1 ] || echo "::warning::release manifest push 失败（并发冲突），保留远端清单"
+            fi
           fi

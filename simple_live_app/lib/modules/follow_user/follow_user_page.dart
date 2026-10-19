@@ -25,11 +25,12 @@ class FollowUserPage extends GetView<FollowUserController> {
     // 手机竖屏仍 1 列，与旧算法一致）。旧 floor 算法会把列宽拉到接近 2*340，
     // 且列数随窗口宽微小变化跳变 → 网格整体重排、条目位置漂移。
     var count = gridColumnsForWidth(MediaQuery.of(context).size.width);
+    // 卡片样式列数：floor(width/200) —— 常规宽度下卡宽 ≥200；窄屏被下限强抬到 2 列时
+    // 卡宽可能略 <200（沿用旧行为）；上限 10 收住超宽屏（2560/3840）的无穷铺列。
     var c = MediaQuery.of(context).size.width ~/ 200;
     if (c < 2) {
       c = 2;
     } else if (c > 10) {
-      // 卡宽 ≥200 由 floor 已保证；这里只收住超宽屏（2560/3840）的无穷铺列
       c = 10;
     }
     return Scaffold(
