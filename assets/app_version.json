@@ -1,14 +1,14 @@
 {
-    "version": "1.8.17",
-    "version_num": 10817,
-    "version_desc": "- fix(follow): 卡片模式列数上限 10 + 清理永不触发的 dev push 触发",
+    "version": "1.8.18",
+    "version_num": 10818,
+    "version_desc": "- fix(account): 阶段4 复核修复——host-only 判定走 cookieDeleteDomain(null) + 去重防 O(n^2)",
     "prerelease": false,
     "download_url": "https://github.com/Howezzzzz/dart_simple_live/releases/latest",
     "download_urls": {
-        "android": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.8.17/app-arm64-v8a-release.apk",
-        "windows": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.8.17/Slive-1.8.17+10817-windows-setup.exe",
-        "macos": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.8.17/simple_live_app-1.8.17+10817-macos.dmg",
-        "linux": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.8.17/Slive-x86_64-linux.deb",
-        "linux_flatpak": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.8.17/Slive-x86_64.flatpak"
+        "android": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.8.18/app-arm64-v8a-release.apk",
+        "windows": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.8.18/Slive-1.8.18+10818-windows-setup.exe",
+        "macos": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.8.18/simple_live_app-1.8.18+10818-macos.dmg",
+        "linux": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.8.18/Slive-x86_64-linux.deb",
+        "linux_flatpak": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.8.18/Slive-x86_64.flatpak"
     }
 }
