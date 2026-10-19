@@ -1,13 +1,9 @@
 name: app-build-action-dev
 
 on:
+  # 只手动触发：本仓只有 master，构建一律走 workflow_dispatch。
+  # 原 `push: dev` 触发与全程 checkout master 不一致，且本仓无 dev 分支 → 永不触发，已移除。
   workflow_dispatch:
-  push:
-    branches:
-      - 'dev'
-    paths:
-      - 'simple_live_app/**'
-      - 'simple_live_core/**'
 # If previous workflow is still running, we push again, we will cancel the previous workflow
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref_name }}

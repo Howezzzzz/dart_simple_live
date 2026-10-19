@@ -28,6 +28,9 @@ class FollowUserPage extends GetView<FollowUserController> {
     var c = MediaQuery.of(context).size.width ~/ 200;
     if (c < 2) {
       c = 2;
+    } else if (c > 10) {
+      // 卡宽 ≥200 由 floor 已保证；这里只收住超宽屏（2560/3840）的无穷铺列
+      c = 10;
     }
     return Scaffold(
       appBar: AppBar(
