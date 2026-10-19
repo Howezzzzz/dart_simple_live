@@ -13,11 +13,15 @@ const Map<String, List<String>> kWebLoginCookieDomains = {
     'https://bilibili.com',
     'https://www.bilibili.com',
     'https://passport.bilibili.com',
+    'https://m.bilibili.com',
   ],
   Constant.kDouyu: [
     'https://douyu.com',
     'https://www.douyu.com',
     'https://passport.douyu.com',
+    // 2026-10-19 补：子域 host-only cookie 也要覆盖（Howe 真机：退号后网页登录仍自动登入）
+    'https://m.douyu.com',
+    'https://h5.douyu.com',
   ],
 };
 
@@ -25,8 +29,7 @@ const Map<String, List<String>> kWebLoginCookieDomains = {
 List<String> webLoginCookieDomainsFor(String siteId) =>
     kWebLoginCookieDomains[siteId] ?? const <String>[];
 
-/// 把「网页登录域名」展开为需要清理的 Cookie domain 变体。
-///
+/// 把「网页登录域名」展开为需要清理的 Cookie domain 变体。///
 /// 依据已核对的 flutter_inappwebview 6.2.0-beta.3 各平台实现：
 /// - **Android**：`deleteCookies` 取该 URL 的 Cookie 头（含 HttpOnly）逐个下发
 ///   `Max-Age=-1` 过期 Cookie；**带 Domain 才能命中域级 Cookie**（`Domain=.bilibili.com`），
@@ -45,4 +48,21 @@ List<String> cookieDomainVariants(String url) {
   final base =
       parts.length >= 2 ? parts.sublist(parts.length - 2).join('.') : host;
   return <String>{base, '.$base', host}.toList();
+}
+
+/// 删除某条 cookie 时，应传给 `CookieManager.deleteCookies(domain:)` 的值。
+///
+/// **2026-10-19 真机教训**（安卓退斗鱼号后网页登录仍自动登入）：
+/// 插件 Android 端只有在 `domain` 非空时才拼 `; Domain=<domain>`；而设过 Domain 的 cookie
+/// 其 host_key 是**带前导点**的域（`.douyu.com`），host-only cookie 的 host_key 是主机名
+/// （`www.douyu.com`）——两者不是同一行。若把 host-only 的 `c.domain`（主机名）当 Domain 传进去，
+/// 会落到 `.www.douyu.com` 这一行，**删不掉原 cookie**。
+///
+/// 故：域级 cookie（带前导点）原样传；host-only（不带点 / 为空）传 `null`（插件不追加 Domain
+/// → 按主机名生成 host-only 过期 cookie，命中原行）。
+String? cookieDeleteDomain(String? cookieDomain) {
+  if (cookieDomain == null || cookieDomain.isEmpty) {
+    return null;
+  }
+  return cookieDomain.startsWith('.') ? cookieDomain : null;
 }

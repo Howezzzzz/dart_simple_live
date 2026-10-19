@@ -34,6 +34,16 @@ void main() {
     expect(webLoginCookieDomainsFor('nope'), isEmpty);
   });
 
+  // 2026-10-19（Howe 真机：安卓退斗鱼号后网页登录仍自动登入）
+  // 旧实现只带 Domain= 删 cookie → 删不掉 host-only；且子域 host-only 根本读不到。
+  // 这里守住「子域主机名也进清理列表」。
+  test('子域主机名也在清理列表内（host-only cookie 覆盖）', () {
+    expect(webLoginCookieDomainsFor(Constant.kDouyu),
+        containsAll(['https://m.douyu.com', 'https://h5.douyu.com']));
+    expect(webLoginCookieDomainsFor(Constant.kBiliBili),
+        contains('https://m.bilibili.com'));
+  });
+
   // RT-105 / ISS-113：定向清理需要正确的 domain 变体；漏一个就会退号后仍自动登录，
   // 多一个就可能误伤别的站点。
   group('cookieDomainVariants', () {
@@ -59,6 +69,22 @@ void main() {
     test('非法输入：返回空而不是抛异常', () {
       expect(cookieDomainVariants('not a url'), isEmpty);
       expect(cookieDomainVariants(''), isEmpty);
+    });
+  });
+
+  // 2026-10-19 真机修复：host-only cookie 的 domain 是主机名，当成 Domain 传进去会落到
+  // `.www.douyu.com` 这一行、删不掉原 cookie；必须传 null。
+  group('cookieDeleteDomain', () {
+    test('host-only（不带点 / 空）→ 传 null', () {
+      expect(cookieDeleteDomain('www.douyu.com'), isNull);
+      expect(cookieDeleteDomain('passport.douyu.com'), isNull);
+      expect(cookieDeleteDomain(''), isNull);
+      expect(cookieDeleteDomain(null), isNull);
+    });
+
+    test('域级（带前导点）→ 原样传', () {
+      expect(cookieDeleteDomain('.douyu.com'), '.douyu.com');
+      expect(cookieDeleteDomain('.bilibili.com'), '.bilibili.com');
     });
   });
 }

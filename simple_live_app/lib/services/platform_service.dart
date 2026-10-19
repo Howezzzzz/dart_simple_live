@@ -63,41 +63,97 @@ class PlatformService extends GetxService {
   /// 旧实现直接用 `deleteAllCookies()`：会把**其它站点**的网页登录态一并清掉
   /// （例：退 B站 账号 → 斗鱼网页登录也失效），故改为按域名定向清理（ISS-113）。
   ///
-  /// 每个域名会清三个 domain 变体（注册域 / 带点 / 主机名），以同时覆盖
-  /// Android 的域级 Cookie 与 iOS/macOS 的精确 domain 匹配（依据已核对的插件实现）。
-  /// 清理后**回读一次作为观测点**：仍有残留则记日志（含 Cookie 名）且返回 false，
-  /// 不静默——便于真机定位。
+  /// 每个目标 URL 会：①先 `getCookies(url)` 读出每条，按**每条自身的 domain/path** 精确过期；
+  /// ②再补一次**不带 domain** 的过期（专杀 host-only cookie——见下）；③`flush` 后回读，
+  /// 残留则重试一次；④顺带清该站点的 **Web 存储**（localStorage/sessionStorage，仅该站点 origin）。
+  ///
+  /// 2026-10-19 修（Howe 真机：**Android 退斗鱼号后网页登录仍自动登入**）——
+  /// 旧实现每次都带 `Domain=`，而 Chromium 里带 Domain 的 cookie 其 host_key 带前导点
+  /// （`.douyu.com`），不带 Domain 的 **host-only** cookie host_key 是主机名（`www.douyu.com`）——
+  /// 二者不是同一行，故 host-only 登录态**永远删不掉**。故补「不带 domain」的删除。
   Future<bool> clearWebLoginCookies(String siteId) async {
-    final domains = webLoginCookieDomainsFor(siteId);
-    if (domains.isEmpty) {
+    final urls = webLoginCookieDomainsFor(siteId);
+    if (urls.isEmpty) {
       return true;
     }
     final cookieManager = CookieManager.instance();
     var clean = true;
-    for (final raw in domains) {
-      final url = WebUri(raw);
-      for (final domain in cookieDomainVariants(raw)) {
-        try {
-          await cookieManager.deleteCookies(url: url, domain: domain, path: '/');
-        } catch (e) {
-          clean = false;
-          Log.e('清理 $siteId 网页登录 Cookie 失败（$raw / domain=$domain）: $e',
-              StackTrace.current);
-        }
+
+    Future<void> expire(WebUri url, String? domain, String path) async {
+      try {
+        await cookieManager.deleteCookies(url: url, domain: domain, path: path);
+      } catch (e) {
+        clean = false;
+        Log.e('清理 $siteId 网页登录 Cookie 失败（$url / domain=$domain / path=$path）: $e',
+            StackTrace.current);
       }
     }
-    // 观测点：回读确认（清不掉时用户会看到「退号后仍自动登录」）
-    for (final raw in domains) {
-      try {
-        final left = await cookieManager.getCookies(url: WebUri(raw));
-        if (left.isNotEmpty) {
-          clean = false;
-          Log.e(
-              '⚠️ $siteId 网页登录 Cookie 仍有残留：${left.map((e) => e.name).join(',')}',
-              StackTrace.current);
+
+    Future<void> sweep() async {
+      for (final raw in urls) {
+        final url = WebUri(raw);
+        // 插件 deleteCookies 内部会对该 url 可见的**所有** cookie 名逐个下发过期，
+        // 故同一 (domain,path) 只需调用一次 → 去重避免 O(n²) 次 setCookie/flush。
+        final pairs = <(String?, String)>{};
+        void add(String? domain, String path) =>
+            pairs.add((domain, path.isEmpty ? '/' : path));
+
+        // ① 读现存 → 用 cookieDeleteDomain 判定传 null（host-only）还是带点域；path 用其自身值
+        try {
+          for (final c in await cookieManager.getCookies(url: url)) {
+            add(cookieDeleteDomain(c.domain), c.path ?? '/');
+          }
+        } catch (e) {
+          clean = false; // 读不到 = 无法确认已清，不当成功（不糊弄）
+          Log.e('回读 $siteId 网页登录 Cookie 失败（$raw）: $e', StackTrace.current);
         }
+        // ② 兜底：常见域变体 + 不带 domain（覆盖 getCookies 未列出的 path/子域）
+        for (final d in cookieDomainVariants(raw)) {
+          add(d, '/');
+        }
+        add(null, '/');
+
+        for (final (dom, path) in pairs) {
+          await expire(url, dom, path);
+        }
+      }
+      try {
+        await cookieManager.flush();
+      } catch (_) {}
+    }
+
+    Future<List<String>> leftovers() async {
+      final left = <String>[];
+      for (final raw in urls) {
+        try {
+          final cs = await cookieManager.getCookies(url: WebUri(raw));
+          if (cs.isNotEmpty) {
+            left.add(
+                '$raw: ${cs.map((e) => '${e.name}@${e.domain ?? '-'}${e.path ?? ''}').join(',')}');
+          }
+        } catch (_) {}
+      }
+      return left;
+    }
+
+    await sweep();
+    // 观测点：回读确认；残留（含 setCookie 异步落盘时序）则重试一次
+    var left = await leftovers();
+    if (left.isNotEmpty) {
+      await sweep();
+      left = await leftovers();
+    }
+    if (left.isNotEmpty) {
+      clean = false;
+      Log.e('⚠️ $siteId 网页登录 Cookie 仍有残留：$left', StackTrace.current);
+    }
+
+    // ④ 清该站点的 Web 存储（localStorage/sessionStorage）——只清该站点 origin
+    for (final raw in urls) {
+      try {
+        await WebStorageManager.instance().deleteOrigin(origin: raw);
       } catch (e) {
-        Log.e('回读 $siteId 网页登录 Cookie 失败: $e', StackTrace.current);
+        Log.e('清理 $siteId 网页存储失败（$raw）: $e', StackTrace.current);
       }
     }
     return clean;

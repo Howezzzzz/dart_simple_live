@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:get/get.dart';
+import 'package:simple_live_app/app/constant.dart';
 import 'package:simple_live_app/app/controller/base_controller.dart';
 import 'package:simple_live_app/app/log.dart';
 import 'package:simple_live_app/models/db/account.dart';
@@ -26,9 +27,24 @@ class DouyuWebLoginController extends BaseController {
 
   void onWebViewCreated(InAppWebViewController controller) {
     webViewController = controller;
+    _prepareAndLoad();
+  }
+
+  /// 入口防御：进登录页前**再清一次**该站点网页登录态（兜住退号↔登录之间的时序/落盘）。
+  /// 否则可能带着上一次的 cookie / localStorage 直接以旧账号自动登入
+  /// （Howe 2026-10-19 真机：安卓退号后点网页登录直接登上旧号）。
+  Future<void> _prepareAndLoad() async {
     try {
-      webViewController!
-          .loadUrl(urlRequest: URLRequest(url: WebUri(loginUrl)));
+      await PlatformService.instance.clearWebLoginCookies(Constant.kDouyu);
+    } catch (e) {
+      Log.e("斗鱼登录页入口清理失败: $e", StackTrace.current);
+    }
+    final c = webViewController;
+    if (c == null) {
+      return; // 页面已销毁，别再加载
+    }
+    try {
+      await c.loadUrl(urlRequest: URLRequest(url: WebUri(loginUrl)));
     } catch (e) {
       Log.e("斗鱼登录页加载失败: $e", StackTrace.current);
     }
