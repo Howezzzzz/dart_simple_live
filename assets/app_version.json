@@ -1,7 +1,7 @@
 {
-    "version": "1.8.14",
-    "version_num": 10814,
-    "version_desc": "- fix: 进一步修正douyu断流问题 \n- tips: ios和macos用户请到action更新测试或者下载上游仓库版本",
+    "version": "1.8.15",
+    "version_num": 10815,
+    "version_desc": "- feat(update): 检查更新对接自有构建 + 构建自动升版(patch+1)与 Release 发布",
     "prerelease": false,
-    "download_url": "https://github.com/SlotSun/dart_simple_live/releases"
+    "download_url": "https://github.com/Howezzzzz/dart_simple_live/releases/latest"
 }
