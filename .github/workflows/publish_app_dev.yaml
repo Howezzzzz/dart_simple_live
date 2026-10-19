@@ -15,10 +15,58 @@ concurrency:
 
 jobs:
 
+  # 版本号管理：每次构建 patch +1，回写 pubspec + app_version.json 到 master（供后续 job 检出）
+  # Howe 2026-10-19：每次构建升小版本号（最后一位），不动大/中版本
+  prepare:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.bump.outputs.version }}
+      version_num: ${{ steps.bump.outputs.version_num }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: master
+          fetch-depth: 0
+      - name: Bump version (patch +1) and update app_version.json
+        id: bump
+        run: |
+          set -euo pipefail
+          SUBJECT="$(git log -1 --pretty=%s)"
+          OLD="$(sed -n 's/^version:[[:space:]]*//p' simple_live_app/pubspec.yaml | head -1)"
+          BASE="${OLD%%+*}"
+          IFS='.' read -r MA MI PA <<< "$BASE"
+          MA=$((10#$MA)); MI=$((10#$MI)); PA=$((10#$PA + 1))
+          NEW="$MA.$MI.$PA"
+          NUM=$((MA*10000 + MI*100 + PA))
+          echo "version: $OLD -> $NEW+$NUM"
+          sed -i "s/^version: .*/version: $NEW+$NUM/" simple_live_app/pubspec.yaml
+          python3 - "$NEW" "$NUM" "$SUBJECT" <<'PY'
+          import json, sys
+          new, num, subj = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+          p = "assets/app_version.json"
+          d = json.load(open(p, encoding="utf-8"))
+          d["version"] = new
+          d["version_num"] = num
+          d["version_desc"] = "- " + subj
+          d["download_url"] = "https://github.com/Howezzzzz/dart_simple_live/releases/latest"
+          json.dump(d, open(p, "w", encoding="utf-8"), ensure_ascii=False, indent=4)
+          open(p, "a", encoding="utf-8").write("\n")
+          PY
+          git config user.name "slive-bot"
+          git config user.email "slive-bot@users.noreply.github.com"
+          git add simple_live_app/pubspec.yaml assets/app_version.json
+          git commit -m "chore(version): $NEW+$NUM [skip ci]"
+          git push origin HEAD:master
+          echo "version=$NEW" >> "$GITHUB_OUTPUT"
+          echo "version_num=$NUM" >> "$GITHUB_OUTPUT"
+
   # packing android on ubuntu, macos slowly
   build-android:
     runs-on: ubuntu-latest
     permissions: write-all
+    needs: prepare
 
     steps:
       # 签出代码
@@ -86,6 +134,7 @@ jobs:
   # 打包iOS、Mac
   build-mac-ios:
     runs-on: macos-latest
+    needs: prepare
 
     permissions:
       contents: write
@@ -178,6 +227,7 @@ jobs:
 
   # 打包 Linux
   build-linux:
+    needs: prepare
     strategy:
       matrix:
         include:
@@ -259,6 +309,7 @@ jobs:
   # 打包 Windows
   build-windows:
     runs-on: windows-latest
+    needs: prepare
     permissions:
       contents: write
     steps:
@@ -334,6 +385,7 @@ jobs:
 
   # 打包 Flatpak
   build-flatpak:
+    needs: prepare
     strategy:
       matrix:
         include:
@@ -379,3 +431,93 @@ jobs:
 
       # 完成
       - run: echo "🍏 Flatpak job's status is ${{ job.status }}."
+
+  # 发布：把本次构建的安装包挂到 Release（tag v<版本>），并回写 app_version.json 的分平台直链
+  release:
+    needs: [prepare, build-android, build-mac-ios, build-linux, build-windows, build-flatpak]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: master
+          fetch-depth: 0
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+      - name: List artifacts
+        run: find dist -type f | sort
+      - name: Read version
+        id: ver
+        run: |
+          V="$(sed -n 's/^version:[[:space:]]*//p' simple_live_app/pubspec.yaml | head -1)"
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "base=${V%%+*}" >> "$GITHUB_OUTPUT"
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: v${{ steps.ver.outputs.base }}
+          name: ${{ steps.ver.outputs.base }}
+          body: |
+            自建构建 ${{ steps.ver.outputs.version }}（基于上游 dev）。
+            各平台安装包见下方 Assets。
+          files: |
+            dist/**/*.apk
+            dist/**/*.ipa
+            dist/**/*.dmg
+            dist/**/*.deb
+            dist/**/*.msix
+            dist/**/*.exe
+            dist/**/*.flatpak
+            dist/**/*.zip
+      - name: Update app_version.json download urls
+        run: |
+          set -euo pipefail
+          V="$(sed -n 's/^version:[[:space:]]*//p' simple_live_app/pubspec.yaml | head -1)"
+          TAG="v${V%%+*}"
+          python3 - "$TAG" <<'PY'
+          import json, os, sys
+          tag = sys.argv[1]
+          files = [os.path.basename(os.path.join(r, f)) for r, _, fs in os.walk("dist") for f in fs]
+          def pick(pred):
+              for n in files:
+                  if pred(n):
+                      return n
+              return None
+          urls = {}
+          a = pick(lambda n: "arm64-v8a-release.apk" in n) or pick(lambda n: n.endswith("-release.apk"))
+          if a:
+              urls["android"] = a
+          w = pick(lambda n: n.endswith("-windows-setup.exe"))
+          if w:
+              urls["windows"] = w
+          m = pick(lambda n: n.endswith(".dmg"))
+          if m:
+              urls["macos"] = m
+          i = pick(lambda n: n.endswith(".ipa"))
+          if i:
+              urls["ios"] = i
+          l = pick(lambda n: n.endswith(".deb"))
+          if l:
+              urls["linux"] = l
+          p = "assets/app_version.json"
+          d = json.load(open(p, encoding="utf-8"))
+          base = "https://github.com/Howezzzzz/dart_simple_live/releases/download/" + tag + "/"
+          d["download_urls"] = {k: base + v for k, v in urls.items()}
+          d["download_url"] = "https://github.com/Howezzzzz/dart_simple_live/releases/latest"
+          json.dump(d, open(p, "w", encoding="utf-8"), ensure_ascii=False, indent=4)
+          open(p, "a", encoding="utf-8").write("\n")
+          print("download_urls:", d["download_urls"])
+          PY
+          git config user.name "slive-bot"
+          git config user.email "slive-bot@users.noreply.github.com"
+          git add assets/app_version.json
+          if git diff --cached --quiet; then
+            echo "no change"
+          else
+            git commit -m "chore(release): $TAG installers [skip ci]"
+            git push origin HEAD:master
+          fi
