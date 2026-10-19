@@ -137,10 +137,12 @@ class AppSettingsController extends GetxController {
       Platform.isAndroid ? "mediacodec_embed" : "libmpv",
     );
 
-    messagePanelWidth.value = LocalStorageService.instance.getValue(
-      LocalStorageService.kMessagePanelWidth,
-      kMessagePanelDefaultWidth,
-    );
+    // 旧版本可能存过小于下限的值：装载时就夹逼，避免首次渲染出异常窄面板
+    messagePanelWidth.value = LocalStorageService.instance
+        .getValue(
+            LocalStorageService.kMessagePanelWidth, kMessagePanelDefaultWidth)
+        .clamp(kMessagePanelMinWidth, kMessagePanelMaxWidth)
+        .toDouble();
 
     volumeNorm.value = LocalStorageService.instance.getValue(
       LocalStorageService.kVolumeNorm,
