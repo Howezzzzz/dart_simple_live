@@ -18,7 +18,7 @@ import '../requests/common_request.dart';
 /// 2026-10-20 Howe 定：直链与镜像链接都给，**谁快用谁**；某条线路失败自动切下一条，
 /// 全挂了才回落「用浏览器打开」。
 ///
-/// 2026-10-20 改：进度弹窗/流程编排移出本类（见 `widgets/update_flow_dialog.dart`），
+/// 2026-10-20 改：进度弹窗/流程编排移出本类（见 `modules/update_flow/update_flow_page.dart`），
 /// 本类专注下载引擎 + 打开安装器（平台分支与权限处理）。
 class UpdateDownloader {
   /// Android「允许安装未知应用」检查 / 设置页跳转通道（见 MainActivity.kt）。

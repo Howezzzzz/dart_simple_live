@@ -14,7 +14,7 @@ import 'package:get/get.dart';
 import 'package:simple_live_app/app/log.dart';
 import 'package:simple_live_app/app/utils/permission_handler.dart';
 import 'package:simple_live_app/requests/common_request.dart';
-import 'package:simple_live_app/widgets/update_flow_dialog.dart';
+import 'package:simple_live_app/modules/update_flow/update_flow_page.dart';
 
 typedef TextValidate = bool Function(String text);
 
@@ -535,9 +535,10 @@ class Utils {
       CommonRequest request = CommonRequest();
       var versionInfo = await request.checkUpdate();
       if (versionInfo.versionNum > currentVer) {
-        // 2026-10-20 重构：更新流程统一走单个对话框（确认→下载→安装），
-        // 避免原「Get.back() 关确认框 + microtask 弹新窗」的路由竞争（灰屏问题）
-        Get.dialog(UpdateFlowDialog(version: versionInfo));
+        // 2026-10-20 两轮修复：点「更新」后的下载/安装流程改走**全屏页面**（Get.to）。
+        // 弹窗(Get.dialog)在该 App 与 SmartDialog.observer 叠加时存在内容不渲染问题（灰屏），
+        // 页面 route 与普通页面同一渲染路径，无 barrier/遮罩问题。
+        Get.to(() => UpdateFlowPage(version: versionInfo));
       } else {
         if (showMsg) {
           SmartDialog.showToast("当前已经是最新版本了");
