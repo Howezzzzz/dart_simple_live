@@ -54,12 +54,17 @@ class UpdateDownloader {
   /// 阶段 4 复核 P0 修复：清单里的 `mirror_prefixes` 是**自报字段**，只校验 download_url 而放行它，
   /// 等于给「可信 download_url + 伪造 mirror_prefixes」留了绕过后门——故一律不采信白名单之外的前缀。
   static List<String> effectiveMirrorPrefixes(VersionModel v) {
-    final fromManifest = v.mirrorPrefixes
-        .where(CommonRequest.trustedMirrorPrefixes.contains)
-        .toList();
-    return fromManifest.isEmpty
-        ? CommonRequest.trustedMirrorPrefixes
-        : fromManifest;
+    final norm = <String>[];
+    for (final p in v.mirrorPrefixes) {
+      final t = p.trim();
+      if (t.isEmpty) continue;
+      // 宽容一点：清单里没带结尾 '/' 也算白名单内的同一个前缀（否则会白丢一条线路）
+      final withSlash = t.endsWith('/') ? t : '$t/';
+      if (CommonRequest.trustedMirrorPrefixes.contains(withSlash)) {
+        norm.add(withSlash);
+      }
+    }
+    return norm.isEmpty ? CommonRequest.trustedMirrorPrefixes : norm;
   }
 
   /// 构造候选线路：**直链在前，镜像按前缀依次拼接**；去重、过滤空值。
