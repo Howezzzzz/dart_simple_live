@@ -14,7 +14,7 @@ import 'package:get/get.dart';
 import 'package:simple_live_app/app/log.dart';
 import 'package:simple_live_app/app/utils/permission_handler.dart';
 import 'package:simple_live_app/requests/common_request.dart';
-import 'package:simple_live_app/services/update_downloader.dart';
+import 'package:simple_live_app/widgets/update_flow_dialog.dart';
 
 typedef TextValidate = bool Function(String text);
 
@@ -535,50 +535,9 @@ class Utils {
       CommonRequest request = CommonRequest();
       var versionInfo = await request.checkUpdate();
       if (versionInfo.versionNum > currentVer) {
-        Get.dialog(
-          AlertDialog(
-            title: Text(
-              "发现新版本 ${versionInfo.version}",
-              textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 18),
-            ),
-            content: Text(
-              versionInfo.versionDesc,
-              style: const TextStyle(fontSize: 14, height: 1.4),
-            ),
-            actionsPadding: AppStyle.edgeInsetsH12,
-            actions: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Expanded(
-                    child: TextButton(
-                      onPressed: () {
-                        Get.back();
-                      },
-                      child: const Text("取消"),
-                    ),
-                  ),
-                  AppStyle.hGap12,
-                  Expanded(
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        elevation: 0,
-                      ),
-                      onPressed: () {
-                        Get.back();
-                        // App 内下载（多线路测速择优）→ 完成后直接拉起安装器
-                        Future.microtask(
-                            () => UpdateDownloader.start(versionInfo));
-                      },
-                      child: const Text("更新"),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        );
+        // 2026-10-20 重构：更新流程统一走单个对话框（确认→下载→安装），
+        // 避免原「Get.back() 关确认框 + microtask 弹新窗」的路由竞争（灰屏问题）
+        Get.dialog(UpdateFlowDialog(version: versionInfo));
       } else {
         if (showMsg) {
           SmartDialog.showToast("当前已经是最新版本了");

@@ -43,6 +43,7 @@ dependencies:
   uuid: any
 
   # ffi
+  ffi: ^2.2.0 # ShellExecuteW 拉起安装程序（Windows 前台 + UAC 兼容）
   rust_lib_simple_live_app:
     path: rust_builder
   flutter_rust_bridge: ^2.13.0

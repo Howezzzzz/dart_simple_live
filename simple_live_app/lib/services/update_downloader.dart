@@ -1,13 +1,13 @@
+import 'dart:ffi';
 import 'dart:io';
 
 import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
+import 'package:ffi/ffi.dart';
 import 'package:firebase_analytics/firebase_analytics.dart';
-import 'package:flutter/material.dart';
-import 'package:get/get.dart';
+import 'package:flutter/services.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:url_launcher/url_launcher_string.dart';
 
 import '../app/log.dart';
 import '../models/version_model.dart';
@@ -17,7 +17,12 @@ import '../requests/common_request.dart';
 ///
 /// 2026-10-20 Howe 定：直链与镜像链接都给，**谁快用谁**；某条线路失败自动切下一条，
 /// 全挂了才回落「用浏览器打开」。
+///
+/// 2026-10-20 改：进度弹窗/流程编排移出本类（见 `widgets/update_flow_dialog.dart`），
+/// 本类专注下载引擎 + 打开安装器（平台分支与权限处理）。
 class UpdateDownloader {
+  /// Android「允许安装未知应用」检查 / 设置页跳转通道（见 MainActivity.kt）。
+  static const MethodChannel _installerChannel = MethodChannel('slive/installer');
   UpdateDownloader._();
 
   /// 测速时每条线路试探的字节数（够判断速度，又不浪费流量）。
@@ -138,9 +143,7 @@ class UpdateDownloader {
     String? expectedSha256,
   }) async {
     final dir = await getTemporaryDirectory();
-    var name = Uri.parse(url).pathSegments.isNotEmpty
-        ? Uri.parse(url).pathSegments.last
-        : 'slive_update';
+    var name = Uri.parse(url).pathSegments.isNotEmpty ? Uri.parse(url).pathSegments.last : 'slive_update';
     if (!name.contains('.')) name = '$name.bin';
     final path = '${dir.path}/$name';
     final f = File(path);
@@ -173,8 +176,7 @@ class UpdateDownloader {
     _logEventSafe("update_verify_failed", {"reason": reason});
   }
 
-  static Future<void> _logEventSafe(
-      String name, Map<String, Object> params) async {
+  static Future<void> _logEventSafe(String name, Map<String, Object> params) async {
     try {
       await FirebaseAnalytics.instance.logEvent(name: name, parameters: params);
     } catch (_) {
@@ -190,8 +192,7 @@ class UpdateDownloader {
     if (actual.toLowerCase() != expected.toLowerCase()) {
       reportVerifyFailure("sha256_mismatch");
       await File(path).delete().catchError((_) => File(path));
-      throw const UpdateDownloadException(
-          "安装包校验失败（sha256 不匹配），已丢弃，请重试或改用浏览器下载");
+      throw const UpdateDownloadException("安装包校验失败（sha256 不匹配），已丢弃，请重试或改用浏览器下载");
     }
   }
 
@@ -209,151 +210,85 @@ class UpdateDownloader {
   }
 
   /// 拉起系统安装器打开已下载的安装包（Android .apk / Windows .exe / macOS .dmg / Linux 包）。
+  ///
+  /// - **Windows**：直接调 `ShellExecuteW`（前台进程发起 = 安装程序正常抢前台，且兼容需 UAC
+  ///   提升的安装包）。原 open_filex 走 `cmd /c start` 中转导致安装程序后台弹出不聚焦
+  ///   （2026-10-20 Howe 反馈）；Dart 原生 `Process.start` 是 CreateProcess，对
+  ///   requireAdministrator 的安装包会 740 失败——都不能用。
+  /// - **Android**：先查「允许安装未知应用」，未开则抛 [UpdateInstallPermissionException]
+  ///   （调用方引导去系统设置，用户返回后自动续装）。已开则经 open_filex 拉起 PackageInstaller。
+  /// - **macOS / Linux**：走 open_filex（`open` / `xdg-open`）。
+  /// - 全程检查返回结果，失败抛 [UpdateDownloadException]，绝不静默当作成功。
   static Future<void> openInstaller(String path) async {
-    await OpenFilex.open(path);
+    if (Platform.isWindows) {
+      await _shellExecuteOpen(path);
+      return;
+    }
+    if (Platform.isAndroid) {
+      final can = await canRequestPackageInstalls();
+      if (!can) {
+        throw const UpdateInstallPermissionException();
+      }
+    }
+    final r = await OpenFilex.open(path);
+    if (r.type != ResultType.done) {
+      throw UpdateDownloadException('无法打开安装包（${r.message}）');
+    }
   }
 
-  /// 全流程 + 进度弹窗：测速 → 下载 → 打开安装器；失败回落浏览器。
-  static Future<void> start(VersionModel v) async {
-    final candidates = buildCandidates(v);
-    final status = ValueNotifier<String>('正在挑选最快线路…');
-    final progress = ValueNotifier<double>(-1);
-    final lineName = ValueNotifier<String>('');
-    final failed = ValueNotifier<bool>(false);
-    final cancelToken = CancelToken();
-    var closed = false;
-
-    void safeClose() {
-      if (closed) return;
-      closed = true;
-      Get.back();
-    }
-
-    Get.dialog<void>(
-      barrierDismissible: false,
-      PopScope(
-        canPop: false,
-        child: AlertDialog(
-          title: const Text('正在更新', textAlign: TextAlign.center),
-          content: ValueListenableBuilder<String>(
-            valueListenable: status,
-            builder: (context, msg, _) {
-              return Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(msg, style: const TextStyle(fontSize: 14)),
-                  const SizedBox(height: 12),
-                  ValueListenableBuilder<double>(
-                    valueListenable: progress,
-                    builder: (context, p, _) => LinearProgressIndicator(
-                      value: p < 0 ? null : p,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  ValueListenableBuilder<String>(
-                    valueListenable: lineName,
-                    builder: (context, n, _) => Text(
-                      n,
-                      style: const TextStyle(fontSize: 12, height: 1.4),
-                    ),
-                  ),
-                  ValueListenableBuilder<bool>(
-                    valueListenable: failed,
-                    builder: (context, isFail, _) => isFail
-                        ? const Padding(
-                            padding: EdgeInsets.only(top: 8),
-                            child: Text('可改用浏览器下载',
-                                style: TextStyle(fontSize: 12)),
-                          )
-                        : const SizedBox.shrink(),
-                  ),
-                ],
-              );
-            },
-          ),
-          actionsPadding: const EdgeInsets.symmetric(horizontal: 12),
-          actions: [
-            Row(
-              children: [
-                Expanded(
-                  child: TextButton(
-                    onPressed: () {
-                      if (!cancelToken.isCancelled) cancelToken.cancel();
-                      safeClose();
-                    },
-                    child: const Text('取消'),
-                  ),
-                ),
-                ValueListenableBuilder<bool>(
-                  valueListenable: failed,
-                  builder: (context, isFail, _) => isFail
-                      ? Expanded(
-                          child: TextButton(
-                            onPressed: () => launchUrlString(
-                              resolveDownloadUrl(v),
-                              mode: LaunchMode.externalApplication,
-                            ),
-                            child: const Text('用浏览器下载'),
-                          ),
-                        )
-                      : const SizedBox.shrink(),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-
+  /// Android：是否已允许安装未知来源应用（API 26+ 查询）。
+  /// 非 Android 恒 true；查询失败不拦（由打开结果兜底）。
+  static Future<bool> canRequestPackageInstalls() async {
+    if (!Platform.isAndroid) return true;
     try {
-      // 清单声明了哈希、却没给我们平台的 → 视为异常，拒装（不静默跳过校验）
-      final hashes = v.downloadSha256;
-      final expect = expectedSha256(v);
-      if (expect == null && hashes.isNotEmpty) {
-        reportVerifyFailure("missing_platform_hash");
-        throw const UpdateDownloadException(
-            "清单缺少本平台安装包校验值，已拒绝安装（请改用浏览器下载）");
-      }
-      final ranked = await rankBySpeed(candidates);
-      for (var i = 0; i < ranked.length; i++) {
-        final url = ranked[i];
-        final isDirect = url == candidates.first;
-        lineName.value = '线路 ${i + 1}/${ranked.length}'
-            '${isDirect ? '（官方直链）' : '（镜像）'}';
-        status.value = '正在下载…';
-        progress.value = 0;
-        try {
-          final path = await download(
-            url,
-            cancelToken: cancelToken,
-            expectedSha256: expect,
-            onProgress: (got, total) {
-              if (total > 0) progress.value = got / total;
-            },
-          );
-          progress.value = 1;
-          status.value = '下载完成，正在打开安装器…';
-          await openInstaller(path);
-          safeClose();
-          return;
-        } on DioException catch (e) {
-          if (CancelToken.isCancel(e)) {
-            safeClose();
-            return;
-          }
-          // 该线路失败 → 试下一条
-        } catch (_) {
-          // 非 Dio 异常（如落盘失败）→ 也当作该线路失败，试下一条
-        }
-      }
-      status.value = '下载失败';
-      failed.value = true;
+      final r = await _installerChannel.invokeMethod<bool>('canRequestPackageInstalls');
+      // fail-open：通道正常返回 null（理论不可达）也按「不拦」处理，与 catch 分支语义一致
+      return r ?? true;
     } catch (_) {
-      status.value = '下载失败';
-      failed.value = true;
+      return true;
     }
   }
+
+  /// Android：跳转系统「允许安装未知应用」设置页；**await 返回即用户已从设置页回来**
+  /// （MainActivity 用 startActivityForResult 挂起 result，见 MainActivity.kt）。
+  static Future<void> openUnknownAppSourcesSetting() async {
+    if (!Platform.isAndroid) return;
+    try {
+      await _installerChannel.invokeMethod<bool>('openUnknownAppSourcesSetting');
+    } catch (_) {
+      // 跳转失败不抛：下一次打开安装器会给出明确错误提示
+    }
+  }
+
+  /// Windows：ShellExecuteW 打开安装包（前台 + UAC 兼容）。
+  static Future<void> _shellExecuteOpen(String path) async {
+    final shell32 = DynamicLibrary.open('shell32.dll');
+    final shellExecuteW = shell32.lookupFunction<
+        IntPtr Function(IntPtr hwnd, Pointer<Utf16> operation, Pointer<Utf16> file, Pointer<Utf16> parameters,
+            Pointer<Utf16> directory, Int32 showCmd),
+        int Function(int hwnd, Pointer<Utf16> operation, Pointer<Utf16> file, Pointer<Utf16> parameters,
+            Pointer<Utf16> directory, int showCmd)>('ShellExecuteW');
+    final operation = 'open'.toNativeUtf16();
+    final file = path.toNativeUtf16();
+    try {
+      // nShowCmd = SW_SHOWNORMAL(1)：安装程序前台显示
+      final result = shellExecuteW(0, operation, file, nullptr, nullptr, 1);
+      // 返回值 > 32 表示成功；<= 32 为 SE_ERR_* 错误码
+      if (result <= 32) {
+        throw UpdateDownloadException('启动安装程序失败（错误码 $result）');
+      }
+    } finally {
+      malloc.free(operation);
+      malloc.free(file);
+    }
+  }
+}
+
+/// Android 未开启「允许安装未知应用」：由调用方引导去系统设置开启后自动续装。
+class UpdateInstallPermissionException implements Exception {
+  const UpdateInstallPermissionException();
+  @override
+  String toString() => '未开启“允许安装未知应用”';
 }
 
 /// 下载/校验相关异常（与 CancelToken 取消区分开）。
