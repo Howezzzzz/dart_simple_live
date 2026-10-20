@@ -1,14 +1,19 @@
 {
-    "version": "1.8.18",
-    "version_num": 10818,
-    "version_desc": "- fix(account): 阶段4 复核修复——host-only 判定走 cookieDeleteDomain(null) + 去重防 O(n^2)",
+    "version": "1.8.19",
+    "version_num": 10819,
+    "version_desc": "- feat(update): 更新检测改为多源并发择优（谁先返回用谁）",
     "prerelease": false,
     "download_url": "https://github.com/Howezzzzz/dart_simple_live/releases/latest",
     "download_urls": {
-        "android": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.8.18/app-arm64-v8a-release.apk",
-        "windows": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.8.18/Slive-1.8.18+10818-windows-setup.exe",
-        "macos": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.8.18/simple_live_app-1.8.18+10818-macos.dmg",
-        "linux": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.8.18/Slive-x86_64-linux.deb",
-        "linux_flatpak": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.8.18/Slive-x86_64.flatpak"
-    }
+        "android": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.8.19/app-arm64-v8a-release.apk",
+        "windows": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.8.19/Slive-1.8.19+10819-windows-setup.exe",
+        "macos": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.8.19/simple_live_app-1.8.19+10819-macos.dmg",
+        "linux": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.8.19/Slive-x86_64-linux.deb",
+        "linux_flatpak": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.8.19/Slive-x86_64.flatpak"
+    },
+    "mirror_prefixes": [
+        "https://gh-proxy.com/",
+        "https://ghproxy.net/",
+        "https://ghproxy.cc/"
+    ]
 }
