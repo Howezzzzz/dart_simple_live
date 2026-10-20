@@ -9,6 +9,7 @@ class VersionModel {
     required this.downloadUrl,
     this.downloadUrls = const {},
     this.mirrorPrefixes = const [],
+    this.downloadSha256 = const {},
   });
 
   factory VersionModel.fromJson(Map<String, dynamic> json) => VersionModel(
@@ -18,6 +19,7 @@ class VersionModel {
         downloadUrl: asT<String>(json['download_url'])!,
         downloadUrls: _asStringMap(json['download_urls']),
         mirrorPrefixes: _asStringList(json['mirror_prefixes']),
+        downloadSha256: _asStringMap(json['download_sha256']),
       );
 
   String version;
@@ -30,6 +32,10 @@ class VersionModel {
 
   /// 镜像前缀（前缀式镜像站，如 `https://gh-proxy.com/`）：与直链拼接成候选下载线路。
   List<String> mirrorPrefixes;
+
+  /// 各平台安装包的 sha256（键同 [downloadUrls]，如 android/windows/...）；
+  /// 用于下载后**完整性校验**，防第三方镜像换包。缺失则该平台跳过校验。
+  Map<String, String> downloadSha256;
 
   static Map<String, String> _asStringMap(dynamic v) {
     if (v is Map) {
@@ -65,5 +71,6 @@ class VersionModel {
         'download_url': downloadUrl,
         'download_urls': downloadUrls,
         'mirror_prefixes': mirrorPrefixes,
+        'download_sha256': downloadSha256,
       };
 }

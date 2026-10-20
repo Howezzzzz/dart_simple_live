@@ -313,15 +313,37 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: master
-      # 预装 yq（flutter-action 依赖；choco 源偶发 504，带重试）
-      - name: Preinstall yq (retry)
+      # 预装 yq（flutter-action 依赖）。
+      # 2026-10-20（ISS-153）：改为**优先直下官方二进制**——chocolatey 源曾 503 抖动，
+      # 直接把整条发布链拖挂（release 被跳过，只能重跑）。直下失败再回退 choco。
+      - name: Install yq (direct binary first, choco fallback)
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Continue'
+          $dst = Join-Path $env:RUNNER_TEMP 'yq.exe'
+          $url = 'https://github.com/mikefarah/yq/releases/latest/download/yq_windows_amd64.exe'
+          $ok = $false
           for ($i=1; $i -le 3; $i++) {
-            choco install yq -y --no-progress
-            if ($LASTEXITCODE -eq 0) { break }
-            Start-Sleep -Seconds 20
+            try {
+              Invoke-WebRequest -Uri $url -OutFile $dst -UseBasicParsing -TimeoutSec 120
+              if ((Get-Item $dst).Length -gt 1MB) { $ok = $true; break }
+            } catch { Write-Host "direct download attempt $i failed: $_" }
+            Start-Sleep -Seconds 10
           }
+          if ($ok) {
+            $bin = Join-Path $env:USERPROFILE 'bin'
+            New-Item -ItemType Directory -Force -Path $bin | Out-Null
+            Copy-Item $dst (Join-Path $bin 'yq.exe') -Force
+            $bin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          } else {
+            Write-Host '::warning::yq 直下失败，回退 chocolatey'
+            for ($i=1; $i -le 3; $i++) {
+              choco install yq -y --no-progress
+              if ($LASTEXITCODE -eq 0) { $ok = $true; break }
+              Start-Sleep -Seconds 20
+            }
+          }
+          if (-not $ok) { Write-Host '::error::yq 安装失败（直下与 choco 均失败）'; exit 1 }
           yq --version
       # 设置 Flutter 环境
       - name: Setup Flutter
@@ -479,7 +501,7 @@ jobs:
           # 最近一条「非 bot(chore)」提交作为更新说明，避开上一次的 chore(version) 自引用
           DESC="$(git log --invert-grep --grep='^chore(' -n 1 --pretty=%s || true)"
           python3 - "$TAG" "$V" "$DESC" <<'PY'
-          import json, os, sys
+          import hashlib, json, os, sys
           tag, ver, desc = sys.argv[1], sys.argv[2], sys.argv[3]
           parts = ver.split('+')[0].split('.')
           num = int(parts[0]) * 10000 + int(parts[1]) * 100 + int(parts[2]) if len(parts) == 3 else 0
@@ -516,6 +538,22 @@ jobs:
           d["version_desc"] = ("- " + desc) if desc else d.get("version_desc", "")
           d["download_url"] = "https://github.com/Howezzzzz/dart_simple_live/releases/latest"
           d["download_urls"] = {k: base + v for k, v in urls.items()}
+          # 各平台产物 sha256：App 下载后校验，防第三方镜像换包（2026-10-20 Howe 定）
+          def _sha_of(name):
+              for r, _, fs in os.walk("dist"):
+                  if name in fs:
+                      h = hashlib.sha256()
+                      with open(os.path.join(r, name), "rb") as fh:
+                          for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+                              h.update(chunk)
+                      return h.hexdigest()
+              return None
+          hashes = {k: _sha_of(v) for k, v in urls.items()}
+          missing = [k for k, h in hashes.items() if not h]
+          if missing:
+              print("::error::以下平台产物未能在 dist/ 找到、无法计算 sha256：" + ",".join(missing))
+              sys.exit(1)
+          d["download_sha256"] = hashes
           # 镜像前缀（前缀式）：App 端拿它和直链拼成候选线路，测速择优下载
           d["mirror_prefixes"] = [
               "https://gh-proxy.com/",
@@ -548,4 +586,14 @@ jobs:
               done
               [ "$ok" = 1 ] || echo "::warning::release manifest push 失败（并发冲突），保留远端清单"
             fi
+          fi
+          # 清 CDN 缓存：jsDelivr 对 @master 分支引用默认缓存最长 12h，不清则客户端会读到旧清单
+          # （2026-10-20 踩过：1.8.21 已发布但客户端仍显示「已是最新」）
+          # 无条件执行：含「远端已是更高版本、本次跳过写入」那条分支——那正是故障场景；清单本就是远端最新，幂等无害
+          CODE=$(curl -s -o /tmp/purge.out -w '%{http_code}' --max-time 20 \
+            "https://purge.jsdelivr.net/gh/Howezzzzz/dart_simple_live@master/assets/app_version.json" || echo 000)
+          if [ "$CODE" = "200" ]; then
+            echo "jsDelivr purge ok"
+          else
+            echo "::warning::jsDelivr purge 返回 $CODE（不致命，清单已发布）"
           fi

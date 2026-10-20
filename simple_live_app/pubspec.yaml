@@ -61,6 +61,7 @@ dependencies:
   device_info_plus: ^12.3.0 # 设备信息
   url_launcher: ^6.3.2 # 打开链接
   open_filex: ^5.0.0 # 打开下载好的安装包（拉起系统安装器）
+  crypto: ^3.0.7 # 下载后校验安装包 sha256（防第三方镜像换包）
   share_plus: ^12.0.1 # 分享
   path_provider: ^2.1.6 # 常用路径
   cross_file: ^0.3.5+4 # 跨平台文件

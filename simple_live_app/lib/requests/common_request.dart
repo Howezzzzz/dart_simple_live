@@ -4,43 +4,179 @@ import 'dart:convert';
 import 'package:simple_live_app/models/version_model.dart';
 import 'package:simple_live_app/requests/http_client.dart';
 
+/// 检查更新失败（自定义类型，便于上层区分文案与网络错误）。
+class UpdateCheckException implements Exception {
+  const UpdateCheckException(this.message);
+  final String message;
+  @override
+  String toString() => message;
+}
+
 /// 通用的请求
 class CommonRequest {
-  /// 检查更新：**多源并发择优**（谁先成功返回用谁，其余自然作废）。
+  /// 检查更新。
   ///
-  /// 2026-10-20 Howe 定：检测也上多源择优，避免单一镜像挂掉/变慢拖住整条链路。
-  Future<VersionModel> checkUpdate() async {
-    final sources = updateSources();
-    final completer = Completer<VersionModel>();
-    var pending = sources.length;
-    for (final url in sources) {
-      _fetchVersion(url).then((v) {
-        if (!completer.isCompleted) completer.complete(v);
-      }).catchError((Object e) {
+  /// 2026-10-20 Howe 定（修 CDN 缓存滞后）+ 阶段 4 多轮复核修复：
+  /// ① **全源一次并发**（新鲜源 + CDN 源同时打）；
+  /// ② 宽限窗规则（防「快但旧」抢先截断）：**直连 raw 结果**可直接开窗；其余需**至少 2 个源在同一 version_num 上一致（quorum）**才开窗；CDN 结果不参与开窗；
+  /// ③ 结果过 [isTrustedManifest] 可信校验，再用 [pickNewest] 取 version_num 最大者。
+  Future<VersionModel> checkUpdate({
+    Future<VersionModel> Function(String url)? fetcher,
+    List<String>? sources,
+    Duration perSourceTimeout = const Duration(seconds: 8),
+    Duration graceWindow = const Duration(milliseconds: 1500),
+  }) async {
+    final urls = sources ?? updateSources();
+    if (urls.isEmpty) {
+      throw const UpdateCheckException("检查更新失败：未配置任何更新源");
+    }
+    final freshSet = freshSources().toSet();
+    final f = fetcher ?? _fetchVersion;
+    final byUrl = <String, VersionModel>{};
+    var failed = 0;
+    final done = Completer<void>();
+    Timer? grace;
+    var pending = urls.length;
+
+    void maybeOpenWindow() {
+      if (grace != null || done.isCompleted) return;
+      final entries =
+          byUrl.entries.where((e) => isTrustedManifest(e.value)).toList();
+      if (entries.isEmpty) return;
+      // 真个直连 raw 结果 → 可直接开窗（最可信）
+      final directOk = entries.any((e) => e.key == rawDirectUrl);
+      // 否则要求多数一致：≥2 个**新鲜源**报同一个 version_num
+      // （CDN 结果不参与计票：它们可能命中 12h 旧缓存，两张旧票一致也会开窗 → 原故障复现）
+      final counts = <int, int>{};
+      for (final e in entries) {
+        if (!freshSet.contains(e.key)) continue;
+        counts[e.value.versionNum] = (counts[e.value.versionNum] ?? 0) + 1;
+      }
+      final quorumOk = counts.values.any((c) => c >= 2);
+      if (directOk || quorumOk) {
+        grace = Timer(graceWindow, () {
+          if (!done.isCompleted) done.complete();
+        });
+      }
+    }
+
+    for (final u in urls) {
+      f(u).timeout(perSourceTimeout).then((v) {
+        byUrl[u] = v;
+        // CDN 结果不开窗（可能命中 12h 旧缓存）
+        if (freshSet.contains(u)) maybeOpenWindow();
+      }).catchError((Object _) {
+        failed++;
+      }).whenComplete(() {
         pending--;
-        if (pending == 0 && !completer.isCompleted) {
-          completer.completeError(e);
-        }
+        if (pending == 0 && !done.isCompleted) done.complete();
       });
     }
-    return completer.future;
+
+    await done.future;
+    grace?.cancel();
+
+    final trusted = byUrl.values.where(isTrustedManifest).toList();
+    if (trusted.isEmpty) {
+      throw UpdateCheckException(
+        "检查更新失败：所有源均不可用或内容不可信（失败 $failed/${urls.length}）",
+      );
+    }
+    return pickNewest(trusted);
   }
 
-  /// 更新清单候选源（纯函数，便于单测）：国内镜像在前，官方直连兜底。
-  static List<String> updateSources() => const [
-        // 1) 国内 GitHub 镜像（raw 内容）
-        "https://raw.gitmirror.com/Howezzzzz/dart_simple_live/master/assets/app_version.json",
-        // 2) jsDelivr CDN
-        "https://cdn.jsdelivr.net/gh/Howezzzzz/dart_simple_live@master/assets/app_version.json",
-        // 3) 前缀式代理 → raw
-        "https://gh-proxy.com/https://raw.githubusercontent.com/Howezzzzz/dart_simple_live/master/assets/app_version.json",
-        "https://ghproxy.cc/https://raw.githubusercontent.com/Howezzzzz/dart_simple_live/master/assets/app_version.json",
-        // 4) 官方直连（部分地区需代理，但作最后兑底）
-        "https://raw.githubusercontent.com/Howezzzzz/dart_simple_live/master/assets/app_version.json",
+  /// 可信性校验（纯函数，便于单测）：防第三方代理注入伪造清单。
+  ///
+  /// 规则：`download_url` 与所有 `download_urls` 必须通过 [isTrustedUrl]（我们自己的仓库路径），
+  /// 且 `version_num` 为正。
+  static bool isTrustedManifest(VersionModel v) {
+    if (v.versionNum <= 0 || v.versionNum > 999999) return false;
+    if (!isTrustedUrl(v.downloadUrl)) return false;
+    for (final u in v.downloadUrls.values) {
+      if (!isTrustedUrl(u)) return false;
+    }
+    return true;
+  }
+
+  /// 单条 URL 是否可信（公开，供**下载侧**复用）。
+  ///
+  /// ① 允许被我们可控的镜像前缀包裹；
+  /// ② 剥掉前缀后 host 必须是 `github.com` 或 `raw.githubusercontent.com`；
+  /// ③ 路径必须落在 `/Howezzzzz/dart_simple_live/` 下；
+  /// ④ **拒绝含 `.` / `..` 段的路径**（Uri.parse 不做归一化，防 `.../releases/download/../../evil/x.apk` 这类降格逃逸）。
+  static bool isTrustedUrl(String? raw) {
+    if (raw == null) return false;
+    var s = raw.trim();
+    if (s.isEmpty) return false;
+    for (final p in trustedMirrorPrefixes) {
+      if (s.startsWith(p)) {
+        s = s.substring(p.length);
+        break;
+      }
+    }
+    final uri = Uri.tryParse(s);
+    if (uri == null || uri.host.isEmpty) return false;
+    if (uri.host != "github.com" && uri.host != "raw.githubusercontent.com") {
+      return false;
+    }
+    // 拒绝百分号编码的 '.' / '/'（%2e / %2f）：代理/服务端解码后可能降格逃逸
+    final low = s.toLowerCase();
+    if (low.contains('%2e') || low.contains('%2f')) return false;
+    // 更彻底：路径里出现任何百分号编码或反斜杠一律拒（我们真实 URL 不含这些），
+    // 堵住 %252e 双编码、%5c、反斜杠分隔符等一类逃逸（第四轮复核建议）
+    if (uri.path.contains('%') || s.contains('\\') || uri.path.contains('\\')) {
+      return false;
+    }
+    // 显式（或已解码）的 '.' / '..' 段也拒
+    if (uri.pathSegments.any((x) => x == '.' || x == '..')) return false;
+    final segs = uri.path.split('/');
+    if (segs.any((x) => x == '.' || x == '..')) return false;
+    return uri.path.startsWith("/Howezzzzz/dart_simple_live/");
+  }
+
+  /// 可信镜像前缀（硬编码、不采信清单自报值）：下载/候选 URL 只允许用它拼。
+  static const List<String> trustedMirrorPrefixes = [
+    "https://gh-proxy.com/",
+    "https://ghproxy.net/",
+    "https://ghproxy.cc/",
+  ];
+
+  /// 取版本号最大者（纯函数，便于单测）：防旧缓存盖新版本。
+  /// 空表抛 [ArgumentError]（公开纯函数不做隐式前提）。
+  static VersionModel pickNewest(List<VersionModel> list) {
+    if (list.isEmpty) {
+      throw ArgumentError("pickNewest: list is empty");
+    }
+    var best = list.first;
+    for (final v in list) {
+      if (v.versionNum > best.versionNum) best = v;
+    }
+    return best;
+  }
+
+  /// **新鲜源**（几乎不缓存，优先）：前缀式代理 → raw.githubusercontent.com。
+  static const String rawDirectUrl =
+      "https://raw.githubusercontent.com/Howezzzzz/dart_simple_live/master/assets/app_version.json";
+
+  static List<String> freshSources() => const [
+        "https://gh-proxy.com/$rawDirectUrl",
+        "https://ghproxy.cc/$rawDirectUrl",
+        rawDirectUrl,
       ];
 
-  /// 从单个源拉清单（带时间戳防缓存）。
-  Future<VersionModel> _fetchVersion(String url) async {
+  /// **CDN 源**（可能滞后数小时，与新鲜源同时打、只作为补充）：gitmirror / jsDelivr。
+  static const String _gitMirrorUrl =
+      "https://raw.gitmirror.com/Howezzzzz/dart_simple_live/master/assets/app_version.json";
+  static const String _jsdelivrUrl =
+      "https://cdn.jsdelivr.net/gh/Howezzzzz/dart_simple_live@master/assets/app_version.json";
+
+  static List<String> cdnSources() => const [_gitMirrorUrl, _jsdelivrUrl];
+
+  /// 全部候选源（新鲜在前、CDN 兜底）——供测试与外部引用。
+  static List<String> updateSources() => [...freshSources(), ...cdnSources()];
+
+  /// 从单个源拉清单（带时间戳防缓存）。静态，供 `_fetchAll` 直接引用 + 单测注入。
+  static Future<VersionModel> _fetchVersion(String url) async {
     var result = await HttpClient.instance.getJson(
       url,
       queryParameters: {
@@ -53,13 +189,21 @@ class CommonRequest {
     return VersionModel.fromJson(json.decode(result));
   }
 
-  /// 检查更新（单源：国内镜像 raw.gitmirror）——保留供单独调用/回退。
-  Future<VersionModel> checkUpdateGitMirror() =>
-      _fetchVersion(updateSources()[0]);
+  /// 单源拉取 + **可信校验**（保留给单独调用/回退；同样过校验，不给伪造清单留后门）。
+  Future<VersionModel> _fetchValidated(String url,
+      {Future<VersionModel> Function(String url)? fetcher}) async {
+    final v = await (fetcher ?? _fetchVersion)(url);
+    if (!isTrustedManifest(v)) {
+      throw const UpdateCheckException("该源返回的更新清单不可信");
+    }
+    return v;
+  }
 
-  /// 检查更新（单源：jsDelivr）——保留供单独调用/回退。
-  Future<VersionModel> checkUpdateJsDelivr() =>
-      _fetchVersion(updateSources()[1]);
+  /// 检查更新（单源：国内镜像 raw.gitmirror）——保留供单独调用/回退（已过可信校验）。
+  Future<VersionModel> checkUpdateGitMirror() => _fetchValidated(_gitMirrorUrl);
+
+  /// 检查更新（单源：jsDelivr）——保留供单独调用/回退（已过可信校验）。
+  Future<VersionModel> checkUpdateJsDelivr() => _fetchValidated(_jsdelivrUrl);
 
   /// 拉取虎牙配置
   Future<Map<String, dynamic>> fetchHuyaConfig() async {

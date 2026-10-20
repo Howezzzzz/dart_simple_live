@@ -1,13 +1,17 @@
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
+import 'package:firebase_analytics/firebase_analytics.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 
+import '../app/log.dart';
 import '../models/version_model.dart';
+import '../requests/common_request.dart';
 
 /// 应用内更新下载器：**多线路（官方直链 + 镜像）测速择优 → 下载 → 拉起系统安装器**。
 ///
@@ -22,37 +26,60 @@ class UpdateDownloader {
   /// 单条线路测速超时。
   static const Duration probeTimeout = Duration(seconds: 8);
 
+  /// 当前平台在清单里的键（android/windows/macos/linux/ios）。
+  static String platformKey() {
+    if (Platform.isAndroid) return 'android';
+    if (Platform.isWindows) return 'windows';
+    if (Platform.isMacOS) return 'macos';
+    if (Platform.isLinux) return 'linux';
+    if (Platform.isIOS) return 'ios';
+    return '';
+  }
+
   /// 选出该平台要下载的文件直链：优先分平台直链，缺失则回落 `download_url`（releases 页）。
   static String resolveDownloadUrl(VersionModel v) {
-    final m = v.downloadUrls;
-    if (m.isNotEmpty) {
-      String? pick(bool ok, String key) =>
-          ok && (m[key]?.isNotEmpty ?? false) ? m[key] : null;
-      final platform = pick(Platform.isAndroid, 'android') ??
-          pick(Platform.isWindows, 'windows') ??
-          pick(Platform.isMacOS, 'macos') ??
-          pick(Platform.isLinux, 'linux') ??
-          pick(Platform.isIOS, 'ios');
-      if (platform != null) return platform;
-    }
+    final u = v.downloadUrls[platformKey()];
+    if (u != null && u.isNotEmpty) return u;
     return v.downloadUrl;
+  }
+
+  /// 该平台安装包的预期 sha256（缺失/为空则返回 null → 跳过校验）。
+  static String? expectedSha256(VersionModel v) {
+    final h = v.downloadSha256[platformKey()];
+    return (h != null && h.isNotEmpty) ? h.toLowerCase() : null;
+  }
+
+  /// 实际生效的镜像前缀：**清单自报值与硬编码白名单求交**；交集为空则用白名单。
+  ///
+  /// 阶段 4 复核 P0 修复：清单里的 `mirror_prefixes` 是**自报字段**，只校验 download_url 而放行它，
+  /// 等于给「可信 download_url + 伪造 mirror_prefixes」留了绕过后门——故一律不采信白名单之外的前缀。
+  static List<String> effectiveMirrorPrefixes(VersionModel v) {
+    final fromManifest = v.mirrorPrefixes
+        .where(CommonRequest.trustedMirrorPrefixes.contains)
+        .toList();
+    return fromManifest.isEmpty
+        ? CommonRequest.trustedMirrorPrefixes
+        : fromManifest;
   }
 
   /// 构造候选线路：**直链在前，镜像按前缀依次拼接**；去重、过滤空值。
   ///
-  /// 镜像为「前缀式」（如 `https://gh-proxy.com/https://github.com/...`）。
+  /// 镜像为「前缀式」（如 `https://gh-proxy.com/https://github.com/...`），且只允许白名单内前缀。
   static List<String> buildCandidates(VersionModel v) {
     final direct = resolveDownloadUrl(v);
     final out = <String>[];
     void add(String u) {
-      if (u.isNotEmpty && !out.contains(u)) out.add(u);
+      if (u.isEmpty || out.contains(u)) return;
+      // 下载侧也复检：只有通过可信校验的 URL 才会进候选（防清单来自旁路/缓存时失守）
+      if (!CommonRequest.isTrustedUrl(u)) return;
+      out.add(u);
     }
 
     add(direct);
-    for (final p in v.mirrorPrefixes) {
-      final prefix = p.trim();
-      if (prefix.isEmpty) continue;
-      add(prefix.endsWith('/') ? '$prefix$direct' : '$prefix/$direct');
+    for (final prefix in effectiveMirrorPrefixes(v)) {
+      final p = prefix.trim();
+      if (p.isEmpty) continue;
+      add(p.endsWith('/') ? '$p$direct' : '$p/$direct');
     }
     return out;
   }
@@ -98,11 +125,12 @@ class UpdateDownloader {
     return <String>[...usable, ...unusable];
   }
 
-  /// 下载到临时目录，返回本地文件路径。
+  /// 下载到临时目录；可选 sha256 校验（不匹配则删文件并抛错）。返回本地文件路径。
   static Future<String> download(
     String url, {
     void Function(int received, int total)? onProgress,
     CancelToken? cancelToken,
+    String? expectedSha256,
   }) async {
     final dir = await getTemporaryDirectory();
     var name = Uri.parse(url).pathSegments.isNotEmpty
@@ -124,7 +152,55 @@ class UpdateDownloader {
         receiveTimeout: const Duration(minutes: 30),
       ),
     );
+    if (expectedSha256 != null) {
+      await verifySha256(path, expectedSha256);
+    }
     return path;
+  }
+
+  /// 校验失败上报（本地日志 + Analytics 计数）：便于发现真实的「换包/投毒」事件。
+  ///（第四轮复核建议：没有这个计数，被换包了也只能看到用户「更新失败」。）
+  static void reportVerifyFailure(String reason) {
+    try {
+      Log.w("更新校验失败：$reason", false);
+    } catch (_) {}
+    // 注意：logEvent 返回 Future，异步错误不会被 try/catch 捕获 → 单独包一层
+    _logEventSafe("update_verify_failed", {"reason": reason});
+  }
+
+  static Future<void> _logEventSafe(
+      String name, Map<String, Object> params) async {
+    try {
+      await FirebaseAnalytics.instance.logEvent(name: name, parameters: params);
+    } catch (_) {
+      // 上报失败不影响升级主流程
+    }
+  }
+
+  /// 校验已下载文件的 sha256；不匹配则**删文件并抛错**（调用方不会拿到 path → 不会拉起安装器）。
+  /// [expected] 为 null 时跳过校验（兼容无该字段的旧清单）。
+  static Future<void> verifySha256(String path, String? expected) async {
+    if (expected == null) return;
+    final actual = await sha256OfFile(path);
+    if (actual.toLowerCase() != expected.toLowerCase()) {
+      reportVerifyFailure("sha256_mismatch");
+      await File(path).delete().catchError((_) => File(path));
+      throw const UpdateDownloadException(
+          "安装包校验失败（sha256 不匹配），已丢弃，请重试或改用浏览器下载");
+    }
+  }
+
+  /// 流式算文件 sha256（不把整包读进内存）。
+  static Future<String> sha256OfFile(String path) async {
+    final sink = _DigestSink();
+    final conv = sha256.startChunkedConversion(sink);
+    await for (final chunk in File(path).openRead()) {
+      conv.add(chunk);
+    }
+    conv.close();
+    final d = sink.value;
+    if (d == null) throw const UpdateDownloadException("无法计算安装包校验值");
+    return d.toString();
   }
 
   /// 拉起系统安装器打开已下载的安装包（Android .apk / Windows .exe / macOS .dmg / Linux 包）。
@@ -226,6 +302,14 @@ class UpdateDownloader {
     );
 
     try {
+      // 清单声明了哈希、却没给我们平台的 → 视为异常，拒装（不静默跳过校验）
+      final hashes = v.downloadSha256;
+      final expect = expectedSha256(v);
+      if (expect == null && hashes.isNotEmpty) {
+        reportVerifyFailure("missing_platform_hash");
+        throw const UpdateDownloadException(
+            "清单缺少本平台安装包校验值，已拒绝安装（请改用浏览器下载）");
+      }
       final ranked = await rankBySpeed(candidates);
       for (var i = 0; i < ranked.length; i++) {
         final url = ranked[i];
@@ -238,6 +322,7 @@ class UpdateDownloader {
           final path = await download(
             url,
             cancelToken: cancelToken,
+            expectedSha256: expect,
             onProgress: (got, total) {
               if (total > 0) progress.value = got / total;
             },
@@ -264,4 +349,21 @@ class UpdateDownloader {
       failed.value = true;
     }
   }
+}
+
+/// 下载/校验相关异常（与 CancelToken 取消区分开）。
+class UpdateDownloadException implements Exception {
+  const UpdateDownloadException(this.message);
+  final String message;
+  @override
+  String toString() => message;
+}
+
+/// 只收单个 Digest 的 Sink（配合 sha256.startChunkedConversion 流式算哈希）。
+class _DigestSink implements Sink<Digest> {
+  Digest? value;
+  @override
+  void add(Digest data) => value = data;
+  @override
+  void close() {}
 }
