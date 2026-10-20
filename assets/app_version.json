@@ -1,19 +1,26 @@
 {
-    "version": "1.8.21",
-    "version_num": 10821,
-    "version_desc": "- sync(upstream): 同步上游 dev 2 提交（SC 提醒 / 卡片瀑布流修复）+ 修正设置页时长文案",
+    "version": "1.8.22",
+    "version_num": 10822,
+    "version_desc": "- harden(update): 新鲜源 quorum（计票仅限新鲜源）+ 拒多编码/反斜杠 + 校验失败上报",
     "prerelease": false,
     "download_url": "https://github.com/Howezzzzz/dart_simple_live/releases/latest",
     "download_urls": {
-        "android": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.8.21/app-arm64-v8a-release.apk",
-        "windows": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.8.21/Slive-1.8.21+10821-windows-setup.exe",
-        "macos": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.8.21/simple_live_app-1.8.21+10821-macos.dmg",
-        "linux": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.8.21/Slive-x86_64-linux.deb",
-        "linux_flatpak": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.8.21/Slive-x86_64.flatpak"
+        "android": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.8.22/app-arm64-v8a-release.apk",
+        "windows": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.8.22/Slive-1.8.22+10822-windows-setup.exe",
+        "macos": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.8.22/simple_live_app-1.8.22+10822-macos.dmg",
+        "linux": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.8.22/Slive-x86_64-linux.deb",
+        "linux_flatpak": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.8.22/Slive-x86_64.flatpak"
     },
     "mirror_prefixes": [
         "https://gh-proxy.com/",
         "https://ghproxy.net/",
         "https://ghproxy.cc/"
-    ]
+    ],
+    "download_sha256": {
+        "android": "25663dac01930c67bc5aa99540e6929f50e91bd2ee6aba41ab7637c8529d5693",
+        "windows": "39c2cc0312e807e918d28896c63413796b11512f0c8a636270f8565a82061a95",
+        "macos": "91e84a687083056db55208c4060b29a0ac5204bd8d145efadee1f01e91b75677",
+        "linux": "703d74548ac5890f7b9a7d0218e4c0f315100b4948c3bfbbc2fb2d905422e5a3",
+        "linux_flatpak": "28928de662739858ab3b1fda9289c3a4416938669b4da60272027f4b3446d2dc"
+    }
 }
