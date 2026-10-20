@@ -516,6 +516,12 @@ jobs:
           d["version_desc"] = ("- " + desc) if desc else d.get("version_desc", "")
           d["download_url"] = "https://github.com/Howezzzzz/dart_simple_live/releases/latest"
           d["download_urls"] = {k: base + v for k, v in urls.items()}
+          # 镜像前缀（前缀式）：App 端拿它和直链拼成候选线路，测速择优下载
+          d["mirror_prefixes"] = [
+              "https://gh-proxy.com/",
+              "https://ghproxy.net/",
+              "https://ghproxy.cc/",
+          ]
           json.dump(d, open(p, "w", encoding="utf-8"), ensure_ascii=False, indent=4)
           open(p, "a", encoding="utf-8").write("\n")
           print("version:", d["version"], num, "| urls:", list(urls), "| desc:", d["version_desc"])

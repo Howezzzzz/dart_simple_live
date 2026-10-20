@@ -14,8 +14,7 @@ import 'package:get/get.dart';
 import 'package:simple_live_app/app/log.dart';
 import 'package:simple_live_app/app/utils/permission_handler.dart';
 import 'package:simple_live_app/requests/common_request.dart';
-import 'package:simple_live_app/models/version_model.dart';
-import 'package:url_launcher/url_launcher_string.dart';
+import 'package:simple_live_app/services/update_downloader.dart';
 
 typedef TextValidate = bool Function(String text);
 
@@ -489,10 +488,10 @@ class Utils {
                         elevation: 0,
                       ),
                       onPressed: () {
-                        launchUrlString(
-                          _resolveDownloadUrl(versionInfo),
-                          mode: LaunchMode.externalApplication,
-                        );
+                        Get.back();
+                        // App 内下载（多线路测速择优）→ 完成后直接拉起安装器
+                        Future.microtask(
+                            () => UpdateDownloader.start(versionInfo));
                       },
                       child: const Text("更新"),
                     ),
@@ -513,22 +512,6 @@ class Utils {
         SmartDialog.showToast("检查更新失败");
       }
     }
-  }
-
-  /// 选择更新下载链接：优先按平台取版本文件里的分平台直链，缺失则回落统一链接（releases 页）。
-  static String _resolveDownloadUrl(VersionModel v) {
-    final m = v.downloadUrls;
-    if (m.isNotEmpty) {
-      String? pick(bool ok, String key) =>
-          ok && (m[key]?.isNotEmpty ?? false) ? m[key] : null;
-      final platform = pick(Platform.isAndroid, 'android') ??
-          pick(Platform.isWindows, 'windows') ??
-          pick(Platform.isMacOS, 'macos') ??
-          pick(Platform.isLinux, 'linux') ??
-          pick(Platform.isIOS, 'ios');
-      if (platform != null) return platform;
-    }
-    return v.downloadUrl;
   }
 
   static int parseVersion(String version) {

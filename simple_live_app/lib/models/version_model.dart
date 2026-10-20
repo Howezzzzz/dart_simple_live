@@ -8,6 +8,7 @@ class VersionModel {
     required this.versionDesc,
     required this.downloadUrl,
     this.downloadUrls = const {},
+    this.mirrorPrefixes = const [],
   });
 
   factory VersionModel.fromJson(Map<String, dynamic> json) => VersionModel(
@@ -16,6 +17,7 @@ class VersionModel {
         versionDesc: asT<String>(json['version_desc'])!,
         downloadUrl: asT<String>(json['download_url'])!,
         downloadUrls: _asStringMap(json['download_urls']),
+        mirrorPrefixes: _asStringList(json['mirror_prefixes']),
       );
 
   String version;
@@ -26,6 +28,9 @@ class VersionModel {
   /// 分平台直链（可选）：{android/windows/macos/linux/ios → url}；缺失则回落 [downloadUrl]
   Map<String, String> downloadUrls;
 
+  /// 镜像前缀（前缀式镜像站，如 `https://gh-proxy.com/`）：与直链拼接成候选下载线路。
+  List<String> mirrorPrefixes;
+
   static Map<String, String> _asStringMap(dynamic v) {
     if (v is Map) {
       final out = <String, String>{};
@@ -35,6 +40,17 @@ class VersionModel {
       return out;
     }
     return const {};
+  }
+
+  static List<String> _asStringList(dynamic v) {
+    if (v is List) {
+      return v
+          .whereType<String>()
+          .map((e) => e.trim())
+          .where((e) => e.isNotEmpty)
+          .toList();
+    }
+    return const [];
   }
 
   @override
@@ -48,5 +64,6 @@ class VersionModel {
         'version_desc': versionDesc,
         'download_url': downloadUrl,
         'download_urls': downloadUrls,
+        'mirror_prefixes': mirrorPrefixes,
       };
 }
