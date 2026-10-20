@@ -80,7 +80,9 @@ jobs:
           if [ "$PA" -ge 100 ]; then
             MI=$((MI + 1)); PA=0
           fi
-          NEW="$MA.$MI.$PA"
+          # 2026-10-20 Howe 定：minor/patch 恒两位（段内 9→10 不进位跨点；进位归零补零）。
+          # 例：1.8.24 → 1.08.25；1.9.99 → 1.10.00（major 不补零，与 app 端 formatVersion 一致）
+          NEW="$(printf '%s.%02d.%02d' "$MA" "$MI" "$PA")"
           NUM=$((MA*10000 + MI*100 + PA))
           echo "version: $OLD -> $NEW+$NUM"
           sed -i "s/^version: .*/version: $NEW+$NUM/" simple_live_app/pubspec.yaml
@@ -575,7 +577,10 @@ jobs:
           p = "assets/app_version.json"
           d = json.load(open(p, encoding="utf-8"))
           base = "https://github.com/Howezzzzz/dart_simple_live/releases/download/" + tag + "/"
-          d["version"] = ver.split('+')[0]
+          # 2026-10-20 Howe 定：manifest 版本号 minor/patch 恒两位（与 bump/formatVersion 一致）
+          _vp = ver.split('+')[0].split('.')
+          d["version"] = (f"{_vp[0]}.{int(_vp[1]):02d}.{int(_vp[2]):02d}"
+                           if len(_vp) == 3 else ver.split('+')[0])
           d["version_num"] = num
           d["version_desc"] = ("- " + desc) if desc else d.get("version_desc", "")
           d["download_url"] = "https://github.com/Howezzzzz/dart_simple_live/releases/latest"

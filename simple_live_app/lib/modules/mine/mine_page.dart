@@ -49,7 +49,7 @@ class MinePage extends StatelessWidget {
                   ),
                   applicationName: "Slive",
                   applicationVersion: "我就默默看你表演",
-                  applicationLegalese: "Ver ${Utils.packageInfo.version}",
+                  applicationLegalese: "Ver ${Utils.formatVersion(Utils.packageInfo.version)}",
                 ));
               },
             ),
@@ -251,7 +251,7 @@ class MinePage extends StatelessWidget {
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text("Ver ${Utils.packageInfo.version}"),
+                      Text("Ver ${Utils.formatVersion(Utils.packageInfo.version)}"),
                       AppStyle.hGap4,
                       const Icon(
                         Icons.chevron_right,

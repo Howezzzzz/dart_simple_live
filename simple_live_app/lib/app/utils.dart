@@ -560,6 +560,16 @@ class Utils {
     return int.parse(num);
   }
 
+  /// 版本号显示格式：**major 不补零，minor/patch 恒两位**（2026-10-20 Howe 定）。
+  /// 进位时保持段内两位，不跨点进位：`1.8.24 → 1.08.24`、`1.9.99 → 1.10.00`。
+  /// 兼容带构建号输入（`1.8.24+10824`）与 Flutter 归一化后的版本（`1.10.0 → 1.10.00`）。
+  static String formatVersion(String version) {
+    final build = version.contains('+') ? '+${version.split('+').last}' : '';
+    final sp = version.split('+').first.split('.');
+    if (sp.length != 3) return version;
+    return '${sp[0]}.${sp[1].padLeft(2, '0')}.${sp[2].padLeft(2, '0')}$build';
+  }
+
   static String onlineToString(int num) {
     if (num >= 10000) {
       return "${(num / 10000.0).toStringAsFixed(1)}万";
