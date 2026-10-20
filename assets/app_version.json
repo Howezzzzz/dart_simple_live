@@ -1,15 +1,15 @@
 {
-    "version": "1.8.20",
-    "version_num": 10820,
-    "version_desc": "- feat(update): 更新检测改为多源并发择优（谁先返回用谁）",
+    "version": "1.8.21",
+    "version_num": 10821,
+    "version_desc": "- sync(upstream): 同步上游 dev 2 提交（SC 提醒 / 卡片瀑布流修复）+ 修正设置页时长文案",
     "prerelease": false,
     "download_url": "https://github.com/Howezzzzz/dart_simple_live/releases/latest",
     "download_urls": {
-        "android": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.8.20/app-arm64-v8a-release.apk",
-        "windows": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.8.20/Slive-1.8.20+10820-windows-setup.exe",
-        "macos": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.8.20/simple_live_app-1.8.20+10820-macos.dmg",
-        "linux": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.8.20/Slive-x86_64-linux.deb",
-        "linux_flatpak": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.8.20/Slive-x86_64.flatpak"
+        "android": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.8.21/app-arm64-v8a-release.apk",
+        "windows": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.8.21/Slive-1.8.21+10821-windows-setup.exe",
+        "macos": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.8.21/simple_live_app-1.8.21+10821-macos.dmg",
+        "linux": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.8.21/Slive-x86_64-linux.deb",
+        "linux_flatpak": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.8.21/Slive-x86_64.flatpak"
     },
     "mirror_prefixes": [
         "https://gh-proxy.com/",
