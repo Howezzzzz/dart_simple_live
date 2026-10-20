@@ -299,6 +299,15 @@ extension AppSettingsControllerSettingGen on AppSettingsController {
     verticalDragLock.value = LocalStorageService.instance.getValue(kVerticalDragLock, false);
   }
 
+  void setAutoShowFullSCEnable(bool e) {
+    autoShowFullSCEnable.value = e;
+    LocalStorageService.instance.setValue(kAutoShowFullSCEnable, e);
+  }
+
+  void getAutoShowFullSCEnable() {
+    autoShowFullSCEnable.value = LocalStorageService.instance.getValue(kAutoShowFullSCEnable, false);
+  }
+
   void setPlayerVolume(double e) {
     playerVolume.value = e;
     LocalStorageService.instance.setValue(kPlayerVolume, e);
@@ -604,6 +613,7 @@ const String kPlayerAutoPause = "PlayerAutoPause";
 const String kAutoFullScreen = "AutoFullScreen";
 const String kAutoFitWindowWidth = "AutoFitWindowWidth";
 const String kVerticalDragLock = "VerticalDragLock";
+const String kAutoShowFullSCEnable = 'kAutoShowFullSCEnable';
 const String kPlayerVolume = "PlayerVolume";
 const String kPipHideDanmu = "PIPHideDanmu";
 const String kWindowMaxAuto = "WindowMaxAuto";
