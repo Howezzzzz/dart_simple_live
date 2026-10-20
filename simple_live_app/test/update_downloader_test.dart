@@ -3,7 +3,7 @@ import 'package:simple_live_app/models/version_model.dart';
 import 'package:simple_live_app/services/update_downloader.dart';
 
 VersionModel _model({
-  String downloadUrl = 'https://github.com/o/r/releases/download/v1/x.apk',
+  String downloadUrl = 'https://github.com/Howezzzzz/dart_simple_live/releases/download/v1/x.apk',
   Map<String, String> downloadUrls = const {},
   List<String> mirrorPrefixes = const [],
 }) =>
@@ -18,9 +18,14 @@ VersionModel _model({
 
 void main() {
   group('UpdateDownloader.buildCandidates（直链 + 镜像候选）', () {
-    test('无镜像时只有直链', () {
+    test('清单未给镜像前缀时，回落我们自己的白名单（直链仍在首位）', () {
+      // 2026-10-20 修订：effectiveMirrorPrefixes() 在清单未给前缀（或给了白名单外的）时
+      // 回落硬编码白名单 → 候选 = 直链 + 三个白名单镜像，而不是只有直链。
       expect(UpdateDownloader.buildCandidates(_model()), [
-        'https://github.com/o/r/releases/download/v1/x.apk',
+        'https://github.com/Howezzzzz/dart_simple_live/releases/download/v1/x.apk',
+        'https://gh-proxy.com/https://github.com/Howezzzzz/dart_simple_live/releases/download/v1/x.apk',
+        'https://ghproxy.net/https://github.com/Howezzzzz/dart_simple_live/releases/download/v1/x.apk',
+        'https://ghproxy.cc/https://github.com/Howezzzzz/dart_simple_live/releases/download/v1/x.apk',
       ]);
     });
 
@@ -30,9 +35,9 @@ void main() {
         'https://ghproxy.net',
       ]));
       expect(c, [
-        'https://github.com/o/r/releases/download/v1/x.apk',
-        'https://gh-proxy.com/https://github.com/o/r/releases/download/v1/x.apk',
-        'https://ghproxy.net/https://github.com/o/r/releases/download/v1/x.apk',
+        'https://github.com/Howezzzzz/dart_simple_live/releases/download/v1/x.apk',
+        'https://gh-proxy.com/https://github.com/Howezzzzz/dart_simple_live/releases/download/v1/x.apk',
+        'https://ghproxy.net/https://github.com/Howezzzzz/dart_simple_live/releases/download/v1/x.apk',
       ]);
     });
 
@@ -44,7 +49,7 @@ void main() {
         'https://gh-proxy.com/',
       ]));
       expect(c.length, 2);
-      expect(c.first, 'https://github.com/o/r/releases/download/v1/x.apk');
+      expect(c.first, 'https://github.com/Howezzzzz/dart_simple_live/releases/download/v1/x.apk');
     });
 
     test('直链永远排第一位（测速失败兜底顺序也保持）', () {
@@ -52,7 +57,7 @@ void main() {
         'https://m1/',
         'https://m2/',
       ]));
-      expect(c.first, 'https://github.com/o/r/releases/download/v1/x.apk');
+      expect(c.first, 'https://github.com/Howezzzzz/dart_simple_live/releases/download/v1/x.apk');
     });
   });
 
@@ -62,7 +67,7 @@ void main() {
         'version': '1.8.19',
         'version_num': 10819,
         'version_desc': '- x',
-        'download_url': 'https://github.com/o/r/releases/latest',
+        'download_url': 'https://github.com/Howezzzzz/dart_simple_live/releases/latest',
         'download_urls': <String, dynamic>{'linux': 'L'},
         'mirror_prefixes': <dynamic>['https://gh-proxy.com/', '', 42, '  '],
       });
@@ -75,7 +80,7 @@ void main() {
         'version': '1.8.18',
         'version_num': 10818,
         'version_desc': '- x',
-        'download_url': 'https://github.com/o/r/releases/latest',
+        'download_url': 'https://github.com/Howezzzzz/dart_simple_live/releases/latest',
       });
       expect(m.mirrorPrefixes, isEmpty);
     });

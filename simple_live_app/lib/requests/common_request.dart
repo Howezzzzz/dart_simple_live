@@ -127,6 +127,8 @@ class CommonRequest {
     if (uri.path.contains('%') || s.contains('\\') || uri.path.contains('\\')) {
       return false;
     }
+    // 原文里的 '.' / '..' 段一律拒（Dart 的 Uri.parse 会归一化，但代理/服务器可能按字面解析）
+    if (s.split('/').any((x) => x == '.' || x == '..')) return false;
     // 显式（或已解码）的 '.' / '..' 段也拒
     if (uri.pathSegments.any((x) => x == '.' || x == '..')) return false;
     final segs = uri.path.split('/');
