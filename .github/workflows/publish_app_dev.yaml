@@ -11,9 +11,51 @@ concurrency:
 
 jobs:
 
+  # 发版门禁（2026-10-20 · ISS-154）：原 build 流水线**不跑 tests**，导致「测试红灯也能发 Release」
+  # （v1.8.22 即如此：test job 挂了、Release 照发）。这里先跑 analyze(error 级) + 单测；
+  # 不过就不进 prepare → 不出包、不发布。口径与 check.yml / test.yml 保持一致。
+  test-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: master
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version-file: simple_live_app/pubspec.yaml
+          cache: true
+
+      - name: pub get
+        working-directory: simple_live_app
+        run: flutter pub get
+
+      - name: analyze（error 级硬门禁）
+        working-directory: simple_live_app
+        run: |
+          flutter analyze lib test tool > /tmp/an.txt 2>&1 || true
+          tail -6 /tmp/an.txt
+          if ! grep -qE 'issues? found|No issues found' /tmp/an.txt; then
+            echo "::error::analyze 未产出结果（疑分析器崩溃/超时）——门禁视为失败"
+            tail -20 /tmp/an.txt
+            exit 1
+          fi
+          if grep -qE '^[[:space:]]*error[[:space:]]*[•-]' /tmp/an.txt; then
+            echo "::error::analyze 存在 error —— 门禁未通过"
+            grep -nE '^[[:space:]]*error[[:space:]]*[•-]' /tmp/an.txt
+            exit 1
+          fi
+
+      - name: flutter test（发版前必须全绿）
+        working-directory: simple_live_app
+        run: flutter test --concurrency=1
+
   # 版本号管理：每次构建 patch +1（到 100 进位 minor）；只回写 pubspec 到 master。
   # app_version.json 改由 release job 在 Release 建成后写（避免先宣告一个不存在的 Release）
   prepare:
+    needs: test-gate
     runs-on: ubuntu-latest
     permissions:
       contents: write
