@@ -81,6 +81,10 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
   /// 覆盖式判定的**滞回记忆**（普通字段，**不要**用 Rx：页面在 build 期写入，Rx 会触发无限重建）。
   /// 由 `buildTabletUI` 的单帧派生写入（见 app/utils/panel_width.dart:computePanelLayout）。
   bool panelOverlayActive = false;
+
+  /// 面板分隔条**正在被拖拽**（普通字段）：拖拽期间挂起滞回判定，
+  /// 让「拖到可用空间上限即 dock 成 分栏」精确可期（见 buildPanelResizeHandle）。
+  bool panelDragActive = false;
   RxList<LiveSuperChatMessage> superChats = RxList<LiveSuperChatMessage>();
 
   /// 直播已开播时长文本（HH:mm:ss，每秒刷新；未激活为空串）
@@ -1345,6 +1349,7 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
   void resetRoom(Site site, String roomId) async {
     // 切房/重进：复位"视频分辨率 + 覆盖式滞回记忆"，避免沿用上一房的值（切房不走 onInit）
     panelOverlayActive = false;
+    panelDragActive = false;
     panelOverlayOpen.value = false; // 覆盖层展开中切房 → 新房不要带着展开态
     videoWidthRx.value = 0;
     videoHeightRx.value = 0;

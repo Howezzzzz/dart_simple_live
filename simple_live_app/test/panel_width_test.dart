@@ -132,66 +132,8 @@ void main() {
     });
   });
 
-  // RISK-17 方案 B（2026-10-21 Howe 定）：按面板设定宽能否完整放下 → 极窄则覆盖式。
-  group('panelNeedsOverlay（RISK-17 方案 B）', () {
-    // 播放区高 900、视频 16:9 → 播放区应有宽 = 900 * 16/9 = 1600
-    test('窗口够宽 → 分栏（false）：1920 宽、面板 300', () {
-      // available = 1920 - 1600 - 8 = 312 ≥ 300
-      expect(
-        panelNeedsOverlay(contentWidth: 1920, videoWidth: 1920, videoHeight: 1080, playerHeight: 900, panelWidth: 300),
-        isFalse,
-      );
-    });
-
-    test('窗口偏窄 → 覆盖式（true）：1700 宽、面板 300', () {
-      // available = 1700 - 1600 - 8 = 92 < 300
-      expect(
-        panelNeedsOverlay(contentWidth: 1700, videoWidth: 1920, videoHeight: 1080, playerHeight: 900, panelWidth: 300),
-        isTrue,
-      );
-    });
-
-    test('面板拖窄后更容易分栏：同样 1700 宽、面板 80 → 分栏', () {
-      // available = 92 ≥ 80
-      expect(
-        panelNeedsOverlay(contentWidth: 1700, videoWidth: 1920, videoHeight: 1080, playerHeight: 900, panelWidth: 80),
-        isFalse,
-      );
-    });
-
-    test('边界：available 恰等于面板宽 → 分栏', () {
-      // contentWidth = 1600 + 8 + 300 = 1908
-      expect(
-        panelNeedsOverlay(contentWidth: 1908, videoWidth: 1920, videoHeight: 1080, playerHeight: 900, panelWidth: 300),
-        isFalse,
-      );
-      expect(
-        panelNeedsOverlay(
-            contentWidth: 1907.9, videoWidth: 1920, videoHeight: 1080, playerHeight: 900, panelWidth: 300),
-        isTrue,
-      );
-    });
-
-    test('尺寸/参数未就绪 → 不折叠（false，保守）', () {
-      expect(
-        panelNeedsOverlay(contentWidth: 0, videoWidth: 1920, videoHeight: 1080, playerHeight: 900, panelWidth: 300),
-        isFalse,
-      );
-      expect(
-        panelNeedsOverlay(contentWidth: 1920, videoWidth: 0, videoHeight: 1080, playerHeight: 900, panelWidth: 300),
-        isFalse,
-      );
-      expect(
-        panelNeedsOverlay(contentWidth: 1920, videoWidth: 1920, videoHeight: 1080, playerHeight: 900, panelWidth: 0),
-        isFalse,
-      );
-      expect(
-        panelNeedsOverlay(
-            contentWidth: double.nan, videoWidth: 1920, videoHeight: 1080, playerHeight: 900, panelWidth: 300),
-        isFalse,
-      );
-    });
-  });
+  // panelNeedsOverlay 已于 2026-10-21 移除（其「意图宽放不下即覆盖式」语义与现行规则矛盾：
+  // 现行 = 面板宽 ≥180 且窗口放得下 180 即分栏，渲染宽夹到 avail；该函数此前已无生产引用）。
 
   group('computePanelLayout（单帧派生：判定与渲染同源，2026-10-21 rev.5）', () {
     PanelLayout lay({
@@ -225,9 +167,10 @@ void main() {
         expect(r.overlay, isTrue);
         expect(r.renderW.isFinite, isTrue);
       }
-      final r2 = lay(manual: double.nan); // NaN → 按默认 300 处理（该窗口放不下 300 → 覆盖式）
-      expect(r2.overlay, isTrue);
+      final r2 = lay(manual: double.nan); // NaN → 按默认 300 处理；avail≈195 ≥ 180 → 分栏（渲染夹到 avail）
+      expect(r2.overlay, isFalse);
       expect(r2.renderW.isFinite, isTrue);
+      expect(r2.renderW, closeTo(lay().available, 0.05));
       final r3 = lay(aspectByUser: double.nan, scale: 5);
       expect(r3.renderW.isFinite, isTrue);
     });
@@ -240,10 +183,14 @@ void main() {
       expect(normal.renderW, lessThanOrEqualTo(1706 + 0.001));
     });
 
-    test('数值：1706×850 + 16:9 + 手动 300 → 覆盖式（available≈187）', () {
+    test('数值：1706×850 + 16:9 + 手动 300 → 分栏（意图宽放不下时渲染夹到 avail≈195；Howe 2026-10-21）', () {
       final r = lay();
       expect(r.available, closeTo(194.89, 0.05));
-      expect(r.overlay, isTrue);
+      expect(r.overlay, isFalse);
+      expect(r.renderW, closeTo(194.89, 0.05)); // auto → avail
+      final m = lay(auto: false);
+      expect(m.overlay, isFalse);
+      expect(m.renderW, closeTo(194.89, 0.05)); // 手动 300 也夹到 avail，不溢出
     });
 
     test('数值：手动 180 时 available≥180 → 分栏，且 renderW ≤ available', () {
@@ -268,12 +215,13 @@ void main() {
       expect(lay(manual: 180).overlay, isFalse);
     });
 
-    test('滞回：已在覆盖式时，需多 24px 才退出', () {
-      // available ≈ 187+24=211 时仍覆盖；≈ 300+24=324 时退出
-      final stay = lay(cw: 1800, active: true); // available≈288.9 < 300+24 → 保持覆盖
-      final leave = lay(cw: 1840, active: true); // available≈328.9 ≥ 324 → 退出覆盖
+    test('滞回：已在覆盖式时，需 avail ≥ 180+24=204 才退出（no-room 边界防闪烁）', () {
+      // avail = cw - 850*16/9；cw=1710 → 198.9 ∈ [180,204) → 保持覆盖；cw=1730 → 218.9 ≥ 204 → 退出
+      final stay = lay(cw: 1710, active: true);
+      final leave = lay(cw: 1730, active: true);
+      expect(stay.available, closeTo(198.89, 0.05));
       expect(stay.overlay, isTrue);
-      expect(leave.available, greaterThanOrEqualTo(300 + 24 - 0.001));
+      expect(leave.available, greaterThanOrEqualTo(180 + 24 - 0.001));
       expect(leave.overlay, isFalse);
     });
 

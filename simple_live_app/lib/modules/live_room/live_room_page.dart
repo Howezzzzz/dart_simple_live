@@ -209,7 +209,7 @@ class LiveRoomPage extends GetView<LiveRoomController> {
 
   /// 播放器与右侧消息面板之间的分隔条：
   /// 横向拖拽调节面板宽度（实时生效，松手时持久化），双击恢复默认
-  Widget buildPanelResizeHandle(BuildContext context, {bool wide = false}) {
+  Widget buildPanelResizeHandle(BuildContext context, {bool wide = false, double? dragCap}) {
     final settings = AppSettingsController.instance;
     return MouseRegion(
       cursor: SystemMouseCursors.resizeColumn,
@@ -220,27 +220,30 @@ class LiveRoomPage extends GetView<LiveRoomController> {
           if (settings.autoFitWindowWidth.value) {
             settings.setAutoFitWindowWidth(false);
           }
+          // 覆盖式拖拽：挂起滞回判定（computePanelLayout 的 overlayActive 参数），
+          // 拖到可用空间上限即可 dock 成分栏；否则滞回 +24 会让分栏带窄成一条缝
+          if (dragCap != null) controller.panelDragActive = true;
         },
         onHorizontalDragUpdate: (d) {
-          // 范围放宽到 0~800：0 = 收起面板（走覆盖式）；<180 视为"要更窄"（同样覆盖式）
+          // 范围 0~800：0 = 收起面板（走覆盖式）；<180 视为"要更窄"（同样覆盖式）
+          // 覆盖式拖拽时上限钳到「本次可用的空间」：向左加宽必然 dock 成分栏，不会拖过头又弹回覆盖式
+          final maxW = dragCap ?? kMessagePanelMaxWidth;
           final w = settings.messagePanelWidth.value - d.delta.dx;
-          settings.messagePanelWidth.value = w.isFinite ? w.clamp(0.0, kMessagePanelMaxWidth) : 0.0;
+          settings.messagePanelWidth.value = w.isFinite ? w.clamp(0.0, maxW < 0 ? 0.0 : maxW) : 0.0;
         },
         onHorizontalDragEnd: (_) {
+          controller.panelDragActive = false;
           settings.saveMessagePanelWidth();
           final w = settings.messagePanelWidth.value;
+          // 拖完仍停在覆盖式（dragCap != null）= 窗口放不下 → 提示拉宽；否则正常提示
           showPanelHint(
             context,
-            w < kMessagePanelMinWidth
-                ? '面板宽度 ${w.round()} · <180 保持覆盖式（面板宽度 ≥180 才会并排显示）'
+            (dragCap != null || w < kMessagePanelMinWidth)
+                ? '面板宽度 ${w.round()} · 窗口放不下分栏，保持覆盖式（拉宽后 ≥180 即并排）'
                 : '面板宽度 ${w.round()} · 已切「手动宽度」（双击分隔条恢复默认）',
           );
         },
-        onDoubleTap: () {
-          settings.setMessagePanelWidth(kMessagePanelDefaultWidth);
-          settings.setAutoFitWindowWidth(true);
-          showPanelHint(context, '已恢复默认：面板宽 300 + 按分辨率自适应');
-        },
+        onDoubleTap: () => _restoreDefaultPanel(context),
         child: Container(
           width: wide ? 16 : 8,
           color: Colors.transparent,
@@ -269,6 +272,23 @@ class LiveRoomPage extends GetView<LiveRoomController> {
     );
   }
 
+  /// 「回到分栏/恢复默认」：恢复 300 + 按分辨率自适应，并**显式退出滞回记忆**
+  /// （否则 avail 在 [180,204) 区间时会被滞回按在覆盖式，双击/点「分栏」像没反应）。
+  /// 下一帧重建后 `panelOverlayActive` 已反映新布局：false=已回分栏、true=窗口仍放不下。
+  /// （2026-10-21 Howe：双击恢复 300 后仍是覆盖式；要求 ≥180 且窗口放得下就分栏）
+  void _restoreDefaultPanel(BuildContext context) {
+    final settings = AppSettingsController.instance;
+    controller.panelOverlayActive = false;
+    settings.setMessagePanelWidth(kMessagePanelDefaultWidth);
+    settings.setAutoFitWindowWidth(true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      showPanelHint(
+        context,
+        controller.panelOverlayActive ? '窗口太窄，无法分栏，请拉宽窗口' : '已恢复默认：面板宽 300 + 按分辨率自适应',
+      );
+    });
+  }
+
   /// 极窄窗口的**覆盖式弹幕面板**（RISK-17 方案 B，2026-10-21 Howe 定）：
   /// 默认收起、右缘一个展开按钮；点开后以覆盖层从右侧滑出（不挤压播放区）。
   Widget _buildOverlayPanel(BuildContext context, double panelW) {
@@ -277,25 +297,26 @@ class LiveRoomPage extends GetView<LiveRoomController> {
       return Stack(
         children: [
           if (!open)
+            // 展开按钮：内移 6px（不贴边）、加大命中区（~38×54）、圆角描边更显眼；
+            // 图标用左箭头（从右往左展开的直觉）。2026-10-21 Howe：原按钮太小太靠右点不到。
             Positioned(
-              right: 0,
+              right: 6,
               top: 0,
               bottom: 0,
               child: Center(
                 child: GestureDetector(
+                  behavior: HitTestBehavior.translucent,
                   onTap: () => controller.panelOverlayOpen.value = true,
                   child: Tooltip(
                     message: "展开弹幕",
                     child: Container(
-                      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
+                      padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
                       decoration: BoxDecoration(
-                        color: Colors.black.withAlpha(90),
-                        borderRadius: const BorderRadius.only(
-                          topLeft: Radius.circular(6),
-                          bottomLeft: Radius.circular(6),
-                        ),
+                        color: Colors.black.withAlpha(110),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.white.withAlpha(60)),
                       ),
-                      child: const Icon(Icons.chat_bubble_outline, size: 16, color: Colors.white),
+                      child: const Icon(Icons.chevron_left, size: 22, color: Colors.white),
                     ),
                   ),
                 ),
@@ -317,6 +338,16 @@ class LiveRoomPage extends GetView<LiveRoomController> {
                       const SizedBox(width: 8),
                       const Text("弹幕", style: TextStyle(fontSize: 13)),
                       const Spacer(),
+                      // 明确的「回到分栏」按钮（Howe 2026-10-21：覆盖式打开后没有返回分栏的入口）
+                      TextButton.icon(
+                        onPressed: () => _restoreDefaultPanel(context),
+                        icon: const Icon(Icons.vertical_split, size: 15),
+                        label: const Text("分栏", style: TextStyle(fontSize: 12)),
+                        style: TextButton.styleFrom(
+                          visualDensity: VisualDensity.compact,
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                        ),
+                      ),
                       IconButton(
                         icon: const Icon(Icons.close, size: 18),
                         onPressed: () => controller.panelOverlayOpen.value = false,
@@ -351,7 +382,7 @@ class LiveRoomPage extends GetView<LiveRoomController> {
                     videoHeight: controller.videoHeightRx.value.toDouble(),
                     manualWidth: settings.messagePanelWidth.value,
                     autoMode: settings.autoFitWindowWidth.value,
-                    overlayActive: controller.panelOverlayActive,
+                    overlayActive: controller.panelOverlayActive && !controller.panelDragActive,
                     scaleMode: settings.scaleMode.value,
                     aspectByUser: settings.aspectByUser.value,
                   );
@@ -391,6 +422,19 @@ class LiveRoomPage extends GetView<LiveRoomController> {
                             ),
                         ],
                       ),
+                      // 覆盖层展开时，点击画面空白处直接收起弹幕栏（Howe 2026-10-21）：
+                      // 置于顶栏之前（不挡顶栏按钮）、只在视频区（覆盖层左侧）生效；收起后恢复正常点击
+                      if (overlay && openOverlay)
+                        Positioned(
+                          left: 0,
+                          top: 0,
+                          bottom: 0,
+                          right: layout.overlayW,
+                          child: GestureDetector(
+                            behavior: HitTestBehavior.translucent,
+                            onTap: () => controller.panelOverlayOpen.value = false,
+                          ),
+                        ),
                       // 沉浸式：顶栏叠在画面顶部（不覆盖右侧弹幕栏）
                       if (showOverlayBar)
                         AnimatedPositioned(
@@ -415,7 +459,12 @@ class LiveRoomPage extends GetView<LiveRoomController> {
                         right: !overlay ? renderW : (openOverlay ? layout.overlayW : 0),
                         top: 0,
                         bottom: 0,
-                        child: buildPanelResizeHandle(context, wide: overlay),
+                        child: buildPanelResizeHandle(
+                          context,
+                          wide: overlay,
+                          // available=0（尺寸未就绪）时不钳制，避免误把宽度拖成 0
+                          dragCap: (overlay && layout.available > 0) ? layout.available : null,
+                        ),
                       ),
                     ],
                   );

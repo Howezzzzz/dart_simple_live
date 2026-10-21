@@ -67,39 +67,6 @@ double panelWidthForVideo({
   return desiredPanel.clamp(kMessagePanelMinWidth, kMessagePanelMaxWidth);
 }
 
-/// 是否改用**覆盖式弹幕面板**（极窄时自动折叠分栏）。
-///
-/// 2026-10-21 Howe 定（RISK-17 方案 B）：按用户当前的**面板设定宽度**判定——
-/// - 若「播放区按比例应有的宽 + 拖拽条 + 面板设定宽」能放下（面板可完整显示）→ **分栏**（左画面右面板）；
-/// - 放不下（若要分栏面板就会被压到不足其设定宽 = 显示不全）→ **覆盖式**（面板收起，点开时覆盖在画面右侧）。
-/// 「手动拖过的宽度」自然参与判定：拖宽了更容易转覆盖式，拖窄了更容易分栏。
-///
-/// 尺寸/参数未就绪时返回 false（不折叠，保守）。
-bool panelNeedsOverlay({
-  required double contentWidth,
-  required double videoWidth,
-  required double videoHeight,
-  required double playerHeight,
-  required double panelWidth,
-  double handleWidth = kPanelResizeHandleWidth,
-}) {
-  if (!contentWidth.isFinite ||
-      !videoWidth.isFinite ||
-      !videoHeight.isFinite ||
-      !playerHeight.isFinite ||
-      !panelWidth.isFinite ||
-      contentWidth <= 0 ||
-      videoWidth <= 0 ||
-      videoHeight <= 0 ||
-      playerHeight <= 0 ||
-      panelWidth <= 0) {
-    return false;
-  }
-  final desiredPlayerWidth = playerHeight * (videoWidth / videoHeight);
-  final availableForPanel = contentWidth - desiredPlayerWidth - handleWidth;
-  return availableForPanel < panelWidth;
-}
-
 /// 覆盖式判定的**滞回带宽**（px）：退出覆盖式要比进入多这么多余量，避免窗口边界反复穿越时闪跳。
 const double kPanelOverlayHysteresis = 24.0;
 
@@ -218,7 +185,8 @@ PanelLayout computePanelLayout({
   final double avail = availRaw.isFinite ? math.max(0.0, availRaw) : 0.0;
   final String baseReason = noLetterbox ? 'fill-cover' : 'ready';
 
-  // ④ 判定（含滞回）
+  // ④ 判定（2026-10-21 Howe 定：**面板宽 ≥ 180 且窗口放得下 180 → 一律分栏**，
+  //    不再因「意图宽放不下」整个切覆盖式；覆盖式只剩两种：用户收起（<180）/窗口物理放不下（avail<180））
   bool overlay;
   String reason;
   if (userW < kMessagePanelMinWidth) {
@@ -228,11 +196,11 @@ PanelLayout computePanelLayout({
     overlay = true;
     reason = 'no-room';
   } else if (overlayActive) {
-    overlay = avail < userW + kPanelOverlayHysteresis;
+    overlay = avail < kMessagePanelMinWidth + kPanelOverlayHysteresis;
     reason = 'hysteresis';
   } else {
-    overlay = avail < userW;
-    reason = 'normal';
+    overlay = false;
+    reason = 'fits';
   }
   // 保真：把"基准"信息保留在 reason 里（否则 ready / fill-cover 永远看不到）
   if (baseReason != 'ready') {
@@ -240,9 +208,11 @@ PanelLayout computePanelLayout({
   }
 
   // ⑤ 渲染宽（与判定同源；恒 ≤ 可放下的宽度）
+  //    意图宽放不下时**夹逼到 avail**（不再切覆盖式）：如意图 300、avail 195 → 分栏渲染 195。
   final double rawRender = autoMode ? avail : userW;
   double renderW = rawRender.clamp(kMessagePanelMinWidth, kMessagePanelMaxWidth);
   renderW = math.min(renderW, maxPanelByWindow);
+  renderW = math.min(renderW, avail);
   if (renderW < kMessagePanelMinWidth) {
     overlay = true;
     reason = 'no-room';
