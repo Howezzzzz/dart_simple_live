@@ -519,20 +519,35 @@ jobs:
           echo "version=$V" >> "$GITHUB_OUTPUT"
           echo "base=${V%%+*}" >> "$GITHUB_OUTPUT"
       - name: Generate release notes
+        id: notes
         run: |
           set -euo pipefail
-          PREV="$(git tag --list 'v*' --sort=-v:refname | head -1 || true)"
-          echo "prev tag: ${PREV:-<none>}"
+          BASE="${{ steps.ver.outputs.base }}"
+          # 1) 优先取仓库内 CHANGELOG.md 中该版本的小节（人话更新记录）
+          NOTES="$(awk -v want="$BASE" '
+            /^## / {
+              if (insec) exit
+              v=$0; sub(/^## +/, "", v); sub(/[（(].*$/, "", v); gsub(/[ \t]+$/, "", v)
+              if (v == want) { insec=1 }
+              next
+            }
+            insec { print }
+          ' CHANGELOG.md 2>/dev/null || true)"
+          if [ -z "$(printf '%s' "$NOTES" | tr -d '[:space:]')" ]; then
+            echo "::warning::CHANGELOG.md 未找到 $BASE 小节，回退按提交生成（最多 30 条）"
+            PREV="$(git tag --list 'v*' --sort=-v:refname | head -1 || true)"
+            if [ -n "$PREV" ]; then
+              NOTES="$(git log "${PREV}..HEAD" --no-merges --pretty='- %s' | grep -v '^- chore(' | head -30 || true)"
+            else
+              NOTES="$(git log --no-merges -n 30 --pretty='- %s' | grep -v '^- chore(' || true)"
+            fi
+          fi
           {
             echo "自建构建 ${{ steps.ver.outputs.version }}（基于上游 dev）。"
             echo
             echo "## 本次更新"
             echo
-            if [ -n "$PREV" ]; then
-              git log "${PREV}..HEAD" --no-merges --pretty='- %s' | grep -v '^- chore(' || echo "- （无新增提交）"
-            else
-              git log --no-merges -n 20 --pretty='- %s' | grep -v '^- chore(' || echo "- （无新增提交）"
-            fi
+            printf '%s\n' "${NOTES:-（无记录）}"
             echo
             echo "## 说明"
             echo
@@ -540,6 +555,7 @@ jobs:
             echo "各平台安装包见下方 Assets。"
           } > release_body.md
           cat release_body.md
+          { echo 'notes<<__NOTES_EOF__'; printf '%s\n' "${NOTES:-}"; echo '__NOTES_EOF__'; } >> "$GITHUB_OUTPUT"
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v3
         with:
@@ -559,12 +575,18 @@ jobs:
       # app_version.json 在 Release 建成后再写：version / version_num / desc + 分平台直链
       # （原实现由 prepare 先写，构建失败/被 cancel 时会宣告一个不存在的 Release）
       - name: Update app_version.json (after Release built)
+        env:
+          NOTES: ${{ steps.notes.outputs.notes }}
         run: |
           set -euo pipefail
           V="$(sed -n 's/^version:[[:space:]]*//p' simple_live_app/pubspec.yaml | head -1)"
           TAG="v${V%%+*}"
           # 最近一条「非 bot(chore)」提交作为更新说明，避开上一次的 chore(version) 自引用
-          DESC="$(git log --invert-grep --grep='^chore(' -n 1 --pretty=%s || true)"
+          # 更新说明：优先取 CHANGELOG 最新一节（最多 6 行、每行 120 字），退化为最近一条非 chore 提交
+          DESC="$(printf '%s\n' "${NOTES:-}" | sed -n '1,6p' | cut -c1-120)"
+          if [ -z "$(printf '%s' "$DESC" | tr -d '[:space:]')" ]; then
+            DESC="$(git log --invert-grep --grep='^chore(' -n 1 --pretty=%s || true)"
+          fi
           python3 - "$TAG" "$V" "$DESC" <<'PY'
           import hashlib, json, os, sys
           tag, ver, desc = sys.argv[1], sys.argv[2], sys.argv[3]
@@ -603,7 +625,13 @@ jobs:
           d["version"] = (f"{_vp[0]}.{int(_vp[1]):02d}.{int(_vp[2]):02d}"
                            if len(_vp) == 3 else ver.split('+')[0])
           d["version_num"] = num
-          d["version_desc"] = ("- " + desc) if desc else d.get("version_desc", "")
+          _lines = [l for l in desc.splitlines() if l.strip()]
+          if _lines:
+              if not all(l.lstrip().startswith('-') for l in _lines):
+                  _lines = ['- ' + l.lstrip('- ').strip() for l in _lines]
+              d["version_desc"] = "\n".join(_lines)
+          else:
+              d["version_desc"] = d.get("version_desc", "")
           """releases 列表页：不能用 releases/latest（GitHub 的 latest 会排除测试版，而我们发版即测试版）"""
           d["download_url"] = "https://github.com/Howezzzzz/dart_simple_live/releases"
           d["download_urls"] = {k: base + v for k, v in urls.items()}
