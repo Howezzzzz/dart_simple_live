@@ -587,13 +587,13 @@ jobs:
           NOTES: ${{ steps.notes.outputs.notes }}
         run: |
           set -euo pipefail
-          # 强制 UTF-8：cut -c1-120 需按字符截中文（非 UTF-8 locale 会按字节截断 → 乱码/Python 解码异常）
-          export LC_ALL=C.UTF-8
           V="$(sed -n 's/^version:[[:space:]]*//p' simple_live_app/pubspec.yaml | head -1)"
           TAG="v${V%%+*}"
-          # 最近一条「非 bot(chore)」提交作为更新说明，避开上一次的 chore(version) 自引用
           # 更新说明：优先取 CHANGELOG 最新一节（最多 6 行、每行 120 字），退化为最近一条非 chore 提交
-          DESC="$(printf '%s\n' "${NOTES:-}" | sed -n '1,6p' | cut -c1-120)"
+          # 截断必须字节安全、不依赖 locale：runner 上 LC_ALL=C.UTF-8 曾不生效 → cut 按字节截中文
+          # → 半截字符进 python argv（surrogateescape）→ json.dump 抛 surrogates not allowed
+          # （2026-10-21 v1.08.28 发版实战踩坑；复现签名：position 51-52）
+          DESC="$(printf '%s\n' "${NOTES:-}" | python3 -c 'import sys; d=sys.stdin.buffer.read().decode("utf-8","replace"); sys.stdout.buffer.write(("\n".join(l[:120] for l in d.splitlines()[:6])).encode("utf-8"))')"
           if [ -z "$(printf '%s' "$DESC" | tr -d '[:space:]')" ]; then
             DESC="$(git log --invert-grep --grep='^chore(' -n 1 --pretty=%s || true)"
           fi
