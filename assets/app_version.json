@@ -1,15 +1,15 @@
 {
-    "version": "1.08.27",
-    "version_num": 10827,
-    "version_desc": "- 更新流程改全屏进度页，修复灰屏\n- 修复斗鱼网页登录页空白、退号清理卡死\n- 退号清理提速（Windows）\n- 关注页卡片列数统一；极窄窗口改覆盖式弹幕面板\n- 外链加固：虎牙 UA、字体下载多源兜底",
+    "version": "1.08.28",
+    "version_num": 10828,
+    "version_desc": "- **弹幕面板宽度可拖到 0**（= 收起面板，走覆盖式）；宽度 <180 也直接走覆盖式，不再出现窄缝分栏\n- 拖动分隔条会**自动切到「手动宽度」**（设置页开关可见、双击分隔条恢复默认 300 + 自适应），拖动/双击有轻提示\n- 修复：**覆盖式弹幕面板不触发**（判定与渲染改为同帧同源，堵掉两处溢出/NaN 崩溃路径）\n- 关注页**卡片样式列数收紧**（大屏一行不再塞太多）：4K+225% 缩放 9→7 列、1280 宽 7→5 列、1920 宽 10→8 列；卡片更宽更好认，手机竖屏仍 2 列\n- 修复：**极窄窗口的覆盖式弹幕面板不触发**（视频分辨率没被记录，判定一直按“放得下”处理 → 永远分栏、右侧看不到展开气泡）\n- iOS 提示优化：本平台无安装包时不误报『拒绝安装』，改为引导用浏览器打开下载页",
     "prerelease": true,
     "download_url": "https://github.com/Howezzzzz/dart_simple_live/releases",
     "download_urls": {
-        "android": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.27/app-arm64-v8a-release.apk",
-        "windows": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.27/Slive-1.08.27+10827-windows-setup.exe",
-        "macos": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.27/simple_live_app-1.08.27+10827-macos.dmg",
-        "linux": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.27/Slive-x86_64-linux.deb",
-        "linux_flatpak": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.27/Slive-x86_64.flatpak"
+        "android": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.28/app-arm64-v8a-release.apk",
+        "windows": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.28/Slive-1.08.28+10828-windows-setup.exe",
+        "macos": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.28/simple_live_app-1.08.28+10828-macos.dmg",
+        "linux": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.28/Slive-x86_64-linux.deb",
+        "linux_flatpak": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.28/Slive-x86_64.flatpak"
     },
     "mirror_prefixes": [
         "https://gh-proxy.com/",
@@ -17,10 +17,10 @@
         "https://ghproxy.cc/"
     ],
     "download_sha256": {
-        "android": "6ee16dcab4c77ac26bdeb75c2506a97ad50aa0b82f596935421eb1e80d57e98d",
-        "windows": "69ba549d8a0918122982ed790c3561215c6cabbe9db1e4ba0378e10b604dca1f",
-        "macos": "cfd565f889f8b24ed16212bc4b0d7483701673618b332850abba90f1f2bd7a46",
-        "linux": "f1a11cb4c2c6f8eb31b7126db3d21dc8f98530ddd60bff37e4ea599cfefad983",
-        "linux_flatpak": "646790537c7265f8cc673288f6b77273ba4edabc64ce6b094fc13b21b8f445fc"
+        "android": "2a8ac29facbba06e8ebe07001dd3017cfae1e28224b777ca85bcf762c6990ba2",
+        "windows": "c5841c48d4a94cb072c05b6885dda08928689b9af4b9a5c1fb603472c9742660",
+        "macos": "c4b09a10d482f129472a1a87620fceb83e5674c53c717b8e30a7e086ab22cbca",
+        "linux": "e36c73364b34b1efa266813755be0ea09659e2f49df7b0a50ab61aea789bbc5b",
+        "linux_flatpak": "9540a46ffb8dc04176bf28bcacf98e5e9973adba1766ed51aa26acedd24284d0"
     }
 }
