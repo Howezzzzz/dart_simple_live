@@ -207,12 +207,13 @@ PanelLayout computePanelLayout({
     reason = '$baseReason|$reason';
   }
 
-  // ⑤ 渲染宽（与判定同源；恒 ≤ 可放下的宽度）
-  //    意图宽放不下时**夹逼到 avail**（不再切覆盖式）：如意图 300、avail 195 → 分栏渲染 195。
+  // ⑤ 渲染宽（与判定同源；恒 ≤ 窗口内容宽）
+  //    auto 模式：恒 = avail（视频保比例、面板吃余量）；
+  //    手动模式：按意图宽渲染（视频让位/留黑边）——只受 [180,800] 与窗口宽度约束、**不钳到 avail**，
+  //    否则拖宽面板会被钳住、看起来「拖了不变」（2026-10-21 Howe 反馈）。
   final double rawRender = autoMode ? avail : userW;
   double renderW = rawRender.clamp(kMessagePanelMinWidth, kMessagePanelMaxWidth);
   renderW = math.min(renderW, maxPanelByWindow);
-  renderW = math.min(renderW, avail);
   if (renderW < kMessagePanelMinWidth) {
     overlay = true;
     reason = 'no-room';

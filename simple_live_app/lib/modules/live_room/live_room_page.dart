@@ -139,9 +139,10 @@ class LiveRoomPage extends GetView<LiveRoomController> {
       builder: (context, orientation) {
         final desktop = !(Platform.isAndroid || Platform.isIOS);
         final tablet = orientation == Orientation.landscape;
-        // 桌面横屏：顶栏叠在画面上（沉浸式）→ 不加 AppBar
-        final overlayBar = desktop && tablet;
-        return Scaffold(
+        // 桌面横屏 + 安卓横屏：顶栏叠在画面上（沉浸式）→ 不加 AppBar。
+        // （2026-10-21 Howe：安卓端顶栏也要半透明 + 界面延伸到系统状态栏）
+        final overlayBar = tablet && (desktop || Platform.isAndroid);
+        final scaffold = Scaffold(
           appBar: overlayBar
               ? null
               : AppBar(
@@ -152,12 +153,24 @@ class LiveRoomPage extends GetView<LiveRoomController> {
                 ),
           body: tablet ? buildTabletUI(context, showOverlayBar: overlayBar) : buildPhoneUI(context),
         );
+        // 沉浸式（视频延伸到状态栏后）：浅色状态栏图标；非沉浸式保持主题/全局设置不动
+        if (!overlayBar) return scaffold;
+        return AnnotatedRegion<SystemUiOverlayStyle>(
+          value: SystemUiOverlayStyle.light.copyWith(
+            statusBarColor: Colors.transparent,
+            systemNavigationBarColor: Colors.transparent,
+            systemNavigationBarIconBrightness: Brightness.light,
+          ),
+          child: scaffold,
+        );
       },
     );
   }
 
-  /// 叠在画面顶部的控制栏（返回 / 标题 / 更多），仅桌面横屏使用
+  /// 叠在画面顶部的控制栏（返回 / 标题 / 更多）：桌面横屏 + 安卓横屏（沉浸式）使用。
+  /// 背景半透明渐变延伸到状态栏后面，内容用状态栏高度垫开（安卓）；桌面无状态栏不受影响。
   Widget buildVideoTopBar(BuildContext context) {
+    final topPad = MediaQuery.paddingOf(context).top;
     return Container(
       decoration: BoxDecoration(
         gradient: LinearGradient(
@@ -166,29 +179,32 @@ class LiveRoomPage extends GetView<LiveRoomController> {
           colors: [Colors.black.withAlpha(150), Colors.transparent],
         ),
       ),
-      child: Row(
-        children: [
-          IconButton(
-            tooltip: "返回",
-            icon: const Icon(Icons.arrow_back, color: Colors.white),
-            onPressed: () => Get.back(),
-          ),
-          Expanded(
-            child: Obx(
-              () => Text(
-                controller.detail.value?.title ?? "直播间",
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: Colors.white),
+      child: Padding(
+        padding: EdgeInsets.only(top: topPad),
+        child: Row(
+          children: [
+            IconButton(
+              tooltip: "返回",
+              icon: const Icon(Icons.arrow_back, color: Colors.white),
+              onPressed: () => Get.back(),
+            ),
+            Expanded(
+              child: Obx(
+                () => Text(
+                  controller.detail.value?.title ?? "直播间",
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: Colors.white),
+                ),
               ),
             ),
-          ),
-          IconButton(
-            tooltip: "更多",
-            icon: const Icon(Icons.more_horiz, color: Colors.white),
-            onPressed: showMore,
-          ),
-        ],
+            IconButton(
+              tooltip: "更多",
+              icon: const Icon(Icons.more_horiz, color: Colors.white),
+              onPressed: showMore,
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -209,7 +225,7 @@ class LiveRoomPage extends GetView<LiveRoomController> {
 
   /// 播放器与右侧消息面板之间的分隔条：
   /// 横向拖拽调节面板宽度（实时生效，松手时持久化），双击恢复默认
-  Widget buildPanelResizeHandle(BuildContext context, {bool wide = false, double? dragCap}) {
+  Widget buildPanelResizeHandle(BuildContext context, {bool wide = false, double? dragCap, double? dockFrom}) {
     final settings = AppSettingsController.instance;
     return MouseRegion(
       cursor: SystemMouseCursors.resizeColumn,
@@ -219,6 +235,10 @@ class LiveRoomPage extends GetView<LiveRoomController> {
         onHorizontalDragStart: (_) {
           if (settings.autoFitWindowWidth.value) {
             settings.setAutoFitWindowWidth(false);
+            // auto → 手动切换：把意图宽同步成当前渲染宽，避免第一帧从旧意图值跳变（Howe 2026-10-21）
+            if (dockFrom != null) {
+              settings.setMessagePanelWidth(dockFrom);
+            }
           }
           // 覆盖式拖拽：挂起滞回判定（computePanelLayout 的 overlayActive 参数），
           // 拖到可用空间上限即可 dock 成分栏；否则滞回 +24 会让分栏带窄成一条缝
@@ -439,7 +459,9 @@ class LiveRoomPage extends GetView<LiveRoomController> {
                       if (showOverlayBar)
                         AnimatedPositioned(
                           left: 0,
-                          top: (controller.showControlsState.value && !controller.lockControlsState.value) ? 0 : -64.0,
+                          top: (controller.showControlsState.value && !controller.lockControlsState.value)
+                              ? 0
+                              : -(64 + MediaQuery.paddingOf(context).top),
                           right: overlay ? 0.0 : (renderW + 8),
                           duration: const Duration(milliseconds: 200),
                           child: MouseRegion(
@@ -464,6 +486,8 @@ class LiveRoomPage extends GetView<LiveRoomController> {
                           wide: overlay,
                           // available=0（尺寸未就绪）时不钳制，避免误把宽度拖成 0
                           dragCap: (overlay && layout.available > 0) ? layout.available : null,
+                          // auto 分栏时把当前渲染宽传给拖拽起点（防切手动第一帧跳变）
+                          dockFrom: (!overlay && settings.autoFitWindowWidth.value) ? layout.renderW : null,
                         ),
                       ),
                     ],

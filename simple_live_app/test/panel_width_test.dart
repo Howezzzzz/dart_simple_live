@@ -183,14 +183,14 @@ void main() {
       expect(normal.renderW, lessThanOrEqualTo(1706 + 0.001));
     });
 
-    test('数值：1706×850 + 16:9 + 手动 300 → 分栏（意图宽放不下时渲染夹到 avail≈195；Howe 2026-10-21）', () {
-      final r = lay();
-      expect(r.available, closeTo(194.89, 0.05));
-      expect(r.overlay, isFalse);
-      expect(r.renderW, closeTo(194.89, 0.05)); // auto → avail
+    test('数值：1706×850 + 16:9：auto → 渲染 avail≈195（视频保比例）；手动 300 → 分栏渲染 300（视频让位；Howe 2026-10-21）', () {
+      final a = lay();
+      expect(a.available, closeTo(194.89, 0.05));
+      expect(a.overlay, isFalse);
+      expect(a.renderW, closeTo(194.89, 0.05)); // auto → avail
       final m = lay(auto: false);
       expect(m.overlay, isFalse);
-      expect(m.renderW, closeTo(194.89, 0.05)); // 手动 300 也夹到 avail，不溢出
+      expect(m.renderW, closeTo(300, 0.001)); // 手动按意图宽渲染，不再被 avail 鉗住
     });
 
     test('数值：手动 180 时 available≥180 → 分栏，且 renderW ≤ available', () {
@@ -238,7 +238,7 @@ void main() {
       expect(rBad.available, closeTo(lay(scale: 0).available, 1.0));
     });
 
-    test('不变式：分栏时 180 ≤ renderW ≤ available；覆盖式时 renderW = 0', () {
+    test('不变式：分栏时 180 ≤ renderW ≤ 窗口宽；auto 且分栏时 renderW ≤ available；覆盖式时 renderW = 0', () {
       for (var cw = 200.0; cw <= 4000; cw += 37.0) {
         for (final manual in [0.0, 180.0, 300.0, 800.0]) {
           for (final auto in [true, false]) {
@@ -248,8 +248,10 @@ void main() {
               expect(r.renderW, 0, reason: 'cw=$cw manual=$manual auto=$auto');
             } else {
               expect(r.renderW, greaterThanOrEqualTo(180 - 0.001), reason: 'cw=$cw manual=$manual');
-              expect(r.renderW, lessThanOrEqualTo(r.available + 0.001), reason: 'cw=$cw manual=$manual');
-              expect(r.renderW, lessThanOrEqualTo(cw - 8 + 0.001), reason: 'cw=$cw manual=$manual');
+              expect(r.renderW, lessThanOrEqualTo(cw + 0.001), reason: 'cw=$cw manual=$manual');
+              if (auto) {
+                expect(r.renderW, lessThanOrEqualTo(r.available + 0.001), reason: 'cw=$cw manual=$manual');
+              }
             }
           }
         }
