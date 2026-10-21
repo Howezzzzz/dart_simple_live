@@ -8,8 +8,7 @@ import 'package:simple_live_app/models/version_model.dart';
 import 'package:simple_live_app/requests/common_request.dart';
 import 'package:simple_live_app/services/update_downloader.dart';
 
-const String _ownUrl =
-    'https://github.com/Howezzzzz/dart_simple_live/releases/latest';
+const String _ownUrl = 'https://github.com/Howezzzzz/dart_simple_live/releases/latest';
 
 VersionModel _v(
   int num, {
@@ -83,12 +82,21 @@ void main() {
     test('自家 Release 链接 → 可信', () {
       expect(CommonRequest.isTrustedManifest(_v(10821)), isTrue);
     });
+    test('自家 releases 列表页链接（发版即测试版，故不用 /latest）→ 可信', () {
+      expect(
+        CommonRequest.isTrustedManifest(
+            _v(10821, downloadUrl: 'https://github.com/Howezzzzz/dart_simple_live/releases')),
+        isTrue,
+      );
+    });
     test('带我们镜像前缀的自家链接 → 可信', () {
       expect(
         CommonRequest.isTrustedManifest(_v(
           10821,
           downloadUrl: 'https://gh-proxy.com/$_ownUrl',
-          urls: {'android': 'https://ghproxy.cc/https://github.com/Howezzzzz/dart_simple_live/releases/download/v1/app.apk'},
+          urls: {
+            'android': 'https://ghproxy.cc/https://github.com/Howezzzzz/dart_simple_live/releases/download/v1/app.apk'
+          },
         )),
         isTrue,
       );
@@ -144,8 +152,7 @@ void main() {
           if (u == 'slow') {
             await Future<void>.delayed(const Duration(seconds: 2));
           }
-          return _v(u == 'slow' ? 10821 : 10820,
-              downloadUrl: 'https://gh-proxy.com/$_ownUrl');
+          return _v(u == 'slow' ? 10821 : 10820, downloadUrl: 'https://gh-proxy.com/$_ownUrl');
         },
       );
       expect(r.versionNum, 10820);
@@ -247,8 +254,7 @@ void main() {
       );
       sw.stop();
       expect(r.versionNum, 10821);
-      expect(sw.elapsedMilliseconds < 1500, isTrue,
-          reason: '不应死等慢源/死源，实测 ${sw.elapsedMilliseconds}ms');
+      expect(sw.elapsedMilliseconds < 1500, isTrue, reason: '不应死等慢源/死源，实测 ${sw.elapsedMilliseconds}ms');
     });
 
     test('单个代理源（无 quorum）不早退——等到多数一致/全部返回（第五轮加固）', () async {
@@ -269,8 +275,7 @@ void main() {
       );
       sw.stop();
       expect(r.versionNum, 10821);
-      expect(sw.elapsedMilliseconds >= 800, isTrue,
-          reason: '无 quorum 之前不应早退，实测 ${sw.elapsedMilliseconds}ms');
+      expect(sw.elapsedMilliseconds >= 800, isTrue, reason: '无 quorum 之前不应早退，实测 ${sw.elapsedMilliseconds}ms');
     });
   });
 
@@ -297,7 +302,8 @@ void main() {
   group('isTrustedUrl（下载侧复检 + 路径逃逸）', () {
     test('自家 Release / latest 链接 → 可信', () {
       expect(CommonRequest.isTrustedUrl(_ownUrl), isTrue);
-      expect(CommonRequest.isTrustedUrl('https://github.com/Howezzzzz/dart_simple_live/releases/download/v1/a.apk'), isTrue);
+      expect(CommonRequest.isTrustedUrl('https://github.com/Howezzzzz/dart_simple_live/releases/download/v1/a.apk'),
+          isTrue);
     });
 
     test('镜像前缀包裹的自家链接 → 可信', () {
@@ -305,19 +311,32 @@ void main() {
     });
 
     test('`..` / `.` 路径逃逸 → 拒绝', () {
-      expect(CommonRequest.isTrustedUrl('https://github.com/Howezzzzz/dart_simple_live/releases/download/../../evil/x.apk'), isFalse);
+      expect(
+          CommonRequest.isTrustedUrl(
+              'https://github.com/Howezzzzz/dart_simple_live/releases/download/../../evil/x.apk'),
+          isFalse);
       expect(CommonRequest.isTrustedUrl('https://github.com/Howezzzzz/dart_simple_live/../../../evil/x.apk'), isFalse);
     });
 
     test('百分号编码的 `..` / `/` → 拒绝（防代理解码后逃逸）', () {
-      expect(CommonRequest.isTrustedUrl('https://github.com/Howezzzzz/dart_simple_live/releases/download/%2e%2e/%2e%2e/evil/x.apk'), isFalse);
-      expect(CommonRequest.isTrustedUrl('https://github.com/Howezzzzz/dart_simple_live/releases%2f..%2f..%2fevil/x.apk'), isFalse);
-      expect(CommonRequest.isTrustedUrl('https://gh-proxy.com/https://github.com/Howezzzzz/dart_simple_live/%2E%2E/evil/x.apk'), isFalse);
+      expect(
+          CommonRequest.isTrustedUrl(
+              'https://github.com/Howezzzzz/dart_simple_live/releases/download/%2e%2e/%2e%2e/evil/x.apk'),
+          isFalse);
+      expect(
+          CommonRequest.isTrustedUrl('https://github.com/Howezzzzz/dart_simple_live/releases%2f..%2f..%2fevil/x.apk'),
+          isFalse);
+      expect(
+          CommonRequest.isTrustedUrl(
+              'https://gh-proxy.com/https://github.com/Howezzzzz/dart_simple_live/%2E%2E/evil/x.apk'),
+          isFalse);
     });
 
     test('双编码 / 反斜杠 → 拒绝（第五轮加固）', () {
-      expect(CommonRequest.isTrustedUrl('https://github.com/Howezzzzz/dart_simple_live/%252e%252e/evil/x.apk'), isFalse);
-      expect(CommonRequest.isTrustedUrl('https://github.com/Howezzzzz/dart_simple_live/a%5cb%5c..%5cevil.apk'), isFalse);
+      expect(
+          CommonRequest.isTrustedUrl('https://github.com/Howezzzzz/dart_simple_live/%252e%252e/evil/x.apk'), isFalse);
+      expect(
+          CommonRequest.isTrustedUrl('https://github.com/Howezzzzz/dart_simple_live/a%5cb%5c..%5cevil.apk'), isFalse);
       expect(CommonRequest.isTrustedUrl('https://github.com/Howezzzzz/dart_simple_live\\..\\evil.apk'), isFalse);
     });
 

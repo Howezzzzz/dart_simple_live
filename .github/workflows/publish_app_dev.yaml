@@ -518,14 +518,35 @@ jobs:
           V="$(sed -n 's/^version:[[:space:]]*//p' simple_live_app/pubspec.yaml | head -1)"
           echo "version=$V" >> "$GITHUB_OUTPUT"
           echo "base=${V%%+*}" >> "$GITHUB_OUTPUT"
+      - name: Generate release notes
+        run: |
+          set -euo pipefail
+          PREV="$(git tag --list 'v*' --sort=-v:refname | head -1 || true)"
+          echo "prev tag: ${PREV:-<none>}"
+          {
+            echo "自建构建 ${{ steps.ver.outputs.version }}（基于上游 dev）。"
+            echo
+            echo "## 本次更新"
+            echo
+            if [ -n "$PREV" ]; then
+              git log "${PREV}..HEAD" --no-merges --pretty='- %s' | grep -v '^- chore(' || echo "- （无新增提交）"
+            else
+              git log --no-merges -n 20 --pretty='- %s' | grep -v '^- chore(' || echo "- （无新增提交）"
+            fi
+            echo
+            echo "## 说明"
+            echo
+            echo "本 Release 为**测试版**（dev 自建构建），App 内「检查更新」会把它当作最新发行版。"
+            echo "各平台安装包见下方 Assets。"
+          } > release_body.md
+          cat release_body.md
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v3
         with:
           tag_name: v${{ steps.ver.outputs.base }}
           name: ${{ steps.ver.outputs.base }}
-          body: |
-            自建构建 ${{ steps.ver.outputs.version }}（基于上游 dev）。
-            各平台安装包见下方 Assets。
+          prerelease: true
+          body_path: release_body.md
           files: |
             dist/**/*.apk
             dist/**/*.ipa
@@ -583,7 +604,8 @@ jobs:
                            if len(_vp) == 3 else ver.split('+')[0])
           d["version_num"] = num
           d["version_desc"] = ("- " + desc) if desc else d.get("version_desc", "")
-          d["download_url"] = "https://github.com/Howezzzzz/dart_simple_live/releases/latest"
+          """releases 列表页：不能用 releases/latest（GitHub 的 latest 会排除测试版，而我们发版即测试版）"""
+          d["download_url"] = "https://github.com/Howezzzzz/dart_simple_live/releases"
           d["download_urls"] = {k: base + v for k, v in urls.items()}
           # 各平台产物 sha256：App 下载后校验，防第三方镜像换包（2026-10-20 Howe 定）
           def _sha_of(name):
