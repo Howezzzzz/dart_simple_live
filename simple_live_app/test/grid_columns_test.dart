@@ -95,8 +95,11 @@ void main() {
       expect(card(double.infinity), 1);
     });
 
-    test('maxColumns 缺省（0）= 不封顶：3840 宽应超过 10 列', () {
-      expect(gridColumnsForWidth(3840), greaterThan(10));
+    test('maxColumns 缺省（0）= 不封顶：4400 宽应超过 10 列', () {
+      // 3840 时 ceil(3840/400)=10，本就到不了 >10，故取 4400（ceil=11）
+      expect(gridColumnsForWidth(4400), greaterThan(10));
+      // 同宽带 maxColumns:10 时应被封顶 —— 反证「封顶只在传参时生效」契约
+      expect(card(4400), 10);
     });
   });
 }
