@@ -231,10 +231,11 @@ class LiveRoomPage extends GetView<LiveRoomController> {
       cursor: SystemMouseCursors.resizeColumn,
       child: GestureDetector(
         behavior: HitTestBehavior.translucent,
-        // 拖拽即表示"我要手动宽度" → 关掉自动撑满（设置页开关同步显示为关，可随时切回）
+        // 拖拽 = 本次房间手动宽度：不再动「按分辨率自适应」开关（2026-10-21 Howe：
+        // 此前拖一下开关就被关掉且持久化、之后进房都不再自适应）；运行时标记覆盖 auto 派生，切房即恢复。
         onHorizontalDragStart: (_) {
-          if (settings.autoFitWindowWidth.value) {
-            settings.setAutoFitWindowWidth(false);
+          if (settings.autoFitWindowWidth.value && !controller.panelManualOverride) {
+            controller.panelManualOverride = true;
             // auto → 手动切换：把意图宽同步成当前渲染宽，避免第一帧从旧意图值跳变（Howe 2026-10-21）
             if (dockFrom != null) {
               settings.setMessagePanelWidth(dockFrom);
@@ -260,7 +261,7 @@ class LiveRoomPage extends GetView<LiveRoomController> {
             context,
             (dragCap != null || w < kMessagePanelMinWidth)
                 ? '面板宽度 ${w.round()} · 窗口放不下分栏，保持覆盖式（拉宽后 ≥180 即并排）'
-                : '面板宽度 ${w.round()} · 已切「手动宽度」（双击分隔条恢复默认）',
+                : '面板宽度 ${w.round()} · 本次房间手动宽度（双击分隔条恢复自适应默认）',
           );
         },
         onDoubleTap: () => _restoreDefaultPanel(context),
@@ -299,6 +300,7 @@ class LiveRoomPage extends GetView<LiveRoomController> {
   void _restoreDefaultPanel(BuildContext context) {
     final settings = AppSettingsController.instance;
     controller.panelOverlayActive = false;
+    controller.panelManualOverride = false; // 手动宽度只作用于当前房间，双击/「分栏」即恢复
     settings.setMessagePanelWidth(kMessagePanelDefaultWidth);
     settings.setAutoFitWindowWidth(true);
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -401,7 +403,7 @@ class LiveRoomPage extends GetView<LiveRoomController> {
                     videoWidth: controller.videoWidthRx.value.toDouble(),
                     videoHeight: controller.videoHeightRx.value.toDouble(),
                     manualWidth: settings.messagePanelWidth.value,
-                    autoMode: settings.autoFitWindowWidth.value,
+                    autoMode: settings.autoFitWindowWidth.value && !controller.panelManualOverride,
                     overlayActive: controller.panelOverlayActive && !controller.panelDragActive,
                     scaleMode: settings.scaleMode.value,
                     aspectByUser: settings.aspectByUser.value,
@@ -594,19 +596,7 @@ class LiveRoomPage extends GetView<LiveRoomController> {
     }
     return Stack(
       children: [
-        Video(
-          key: controller.globalPlayerKey,
-          controller: controller.videoController,
-          pauseUponEnteringBackgroundMode: AppSettingsController.instance.playerAutoPause.value,
-          resumeUponEnteringForegroundMode: AppSettingsController.instance.playerAutoPause.value,
-          controls: (state) {
-            return playerControls(state, controller);
-          },
-          aspectRatio: aspectRatio,
-          fit: boxFit,
-          // 自己实现
-          wakelock: false,
-        ),
+        _buildAlignedVideo(boxFit: boxFit, aspectRatio: aspectRatio),
         Obx(
           () => Visibility(
             visible: !controller.liveStatus.value,
@@ -620,6 +610,44 @@ class LiveRoomPage extends GetView<LiveRoomController> {
         ),
       ],
     );
+  }
+
+  /// 视频控件（media_kit）。安卓 + contain 类模式：上下黑边时画面**贴底**——
+  /// 用实际比例夹出视频框 + Align(bottomCenter) 沉底，上面留黑边、下部不留（Howe 2026-10-21）。
+  /// fill/cover 无黑边、桌面保持原“居中”行为不变。
+  Widget _buildAlignedVideo({required BoxFit boxFit, double? aspectRatio}) {
+    // 安卓且 contain：视频比例夹框后再沉底；取不到尺寸（未就绪）或强制满铺模式不夹
+    double? bottomAlignAspect;
+    if (Platform.isAndroid && boxFit == BoxFit.contain) {
+      if (aspectRatio != null && aspectRatio > 0) {
+        bottomAlignAspect = aspectRatio; // 3/4/5 强制比例
+      } else {
+        final vw = controller.videoWidthRx.value.toDouble();
+        final vh = controller.videoHeightRx.value.toDouble();
+        if (vw > 0 && vh > 0) bottomAlignAspect = vw / vh;
+      }
+    }
+    Widget video = Video(
+      key: controller.globalPlayerKey,
+      controller: controller.videoController,
+      pauseUponEnteringBackgroundMode: AppSettingsController.instance.playerAutoPause.value,
+      resumeUponEnteringForegroundMode: AppSettingsController.instance.playerAutoPause.value,
+      controls: (state) {
+        return playerControls(state, controller);
+      },
+      // 夹框时由 AspectRatio 外层强制比例，Video 内部不再设（避免双重处理）
+      aspectRatio: bottomAlignAspect != null ? null : aspectRatio,
+      fit: boxFit,
+      // 自己实现
+      wakelock: false,
+    );
+    if (bottomAlignAspect != null) {
+      video = Align(
+        alignment: Alignment.bottomCenter,
+        child: AspectRatio(aspectRatio: bottomAlignAspect, child: video),
+      );
+    }
+    return video;
   }
 
   Widget buildUserProfile(BuildContext context) {

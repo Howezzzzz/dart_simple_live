@@ -85,6 +85,11 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
   /// 面板分隔条**正在被拖拽**（普通字段）：拖拽期间挂起滞回判定，
   /// 让「拖到可用空间上限即 dock 成 分栏」精确可期（见 buildPanelResizeHandle）。
   bool panelDragActive = false;
+
+  /// 本房间**手动宽度覆盖**（普通字段，切房重置）：拖分隔条时置位，让 auto 派生让位于
+  /// 用户拖的宽度；**不触碰「按分辨率自适应」开关**（2026-10-21 Howe：拖一下开关就被
+  /// 关掉并持久化、之后进房都不自适应，属意外行为）。切房/双击恢复后自动清除。
+  bool panelManualOverride = false;
   RxList<LiveSuperChatMessage> superChats = RxList<LiveSuperChatMessage>();
 
   /// 直播已开播时长文本（HH:mm:ss，每秒刷新；未激活为空串）
@@ -1350,6 +1355,7 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     // 切房/重进：复位"视频分辨率 + 覆盖式滞回记忆"，避免沿用上一房的值（切房不走 onInit）
     panelOverlayActive = false;
     panelDragActive = false;
+    panelManualOverride = false; // 手动宽度只作用于当前房间，换房恢复自适应
     panelOverlayOpen.value = false; // 覆盖层展开中切房 → 新房不要带着展开态
     videoWidthRx.value = 0;
     videoHeightRx.value = 0;
