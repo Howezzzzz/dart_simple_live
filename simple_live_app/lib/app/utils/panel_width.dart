@@ -64,3 +64,36 @@ double panelWidthForVideo({
   final desiredPanel = contentWidth - desiredPlayerWidth - handleWidth;
   return desiredPanel.clamp(kMessagePanelMinWidth, kMessagePanelMaxWidth);
 }
+
+/// 是否改用**覆盖式弹幕面板**（极窄时自动折叠分栏）。
+///
+/// 2026-10-21 Howe 定（RISK-17 方案 B）：按用户当前的**面板设定宽度**判定——
+/// - 若「播放区按比例应有的宽 + 拖拽条 + 面板设定宽」能放下（面板可完整显示）→ **分栏**（左画面右面板）；
+/// - 放不下（若要分栏面板就会被压到不足其设定宽 = 显示不全）→ **覆盖式**（面板收起，点开时覆盖在画面右侧）。
+/// 「手动拖过的宽度」自然参与判定：拖宽了更容易转覆盖式，拖窄了更容易分栏。
+///
+/// 尺寸/参数未就绪时返回 false（不折叠，保守）。
+bool panelNeedsOverlay({
+  required double contentWidth,
+  required double videoWidth,
+  required double videoHeight,
+  required double playerHeight,
+  required double panelWidth,
+  double handleWidth = kPanelResizeHandleWidth,
+}) {
+  if (!contentWidth.isFinite ||
+      !videoWidth.isFinite ||
+      !videoHeight.isFinite ||
+      !playerHeight.isFinite ||
+      !panelWidth.isFinite ||
+      contentWidth <= 0 ||
+      videoWidth <= 0 ||
+      videoHeight <= 0 ||
+      playerHeight <= 0 ||
+      panelWidth <= 0) {
+    return false;
+  }
+  final desiredPlayerWidth = playerHeight * (videoWidth / videoHeight);
+  final availableForPanel = contentWidth - desiredPlayerWidth - handleWidth;
+  return availableForPanel < panelWidth;
+}

@@ -2,7 +2,6 @@ import 'dart:convert';
 
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:get/get.dart';
-import 'package:simple_live_app/app/constant.dart';
 import 'package:simple_live_app/app/controller/base_controller.dart';
 import 'package:simple_live_app/app/log.dart';
 import 'package:simple_live_app/models/db/account.dart';
@@ -27,27 +26,27 @@ class DouyuWebLoginController extends BaseController {
 
   void onWebViewCreated(InAppWebViewController controller) {
     webViewController = controller;
-    _prepareAndLoad();
+    _loadLoginPage();
   }
 
-  /// 入口防御：进登录页前**再清一次**该站点网页登录态（兜住退号↔登录之间的时序/落盘）。
-  /// 否则可能带着上一次的 cookie / localStorage 直接以旧账号自动登入
-  /// （Howe 2026-10-19 真机：安卓退号后点网页登录直接登上旧号）。
-  Future<void> _prepareAndLoad() async {
-    try {
-      await PlatformService.instance.clearWebLoginCookies(Constant.kDouyu);
-    } catch (e) {
-      Log.e("斗鱼登录页入口清理失败: $e", StackTrace.current);
-    }
+  /// 加载斗鱼登录页：**进入即加载，不在加载前做任何 await 清理**。
+  ///
+  /// 2026-10-20 Howe 真机报「点网页登录是空白」→ 根因：本页曾在 v1.8.18 于加载前
+  /// `await clearWebLoginCookies(...)`（入口冗余清理）。该清理要串行读/删 Cookie + flush +
+  /// 清 Web 存储（Android 端这些是主线程同步调用，Windows 端部分 API 未实现会抛错/耗时），
+  /// 使 `loadUrl` 被长时间推迟乃至阻塞 → 登录页迟迟不出现（看即空白）。
+  /// **证据：B 站登录页无此入口清理、直接加载，一直正常**（见 bilibili/web_login_controller.dart）。
+  /// 故与 B 站对齐，**进入即加载**；「退号后自动登入」的防线仍在退号侧
+  /// （accountLogout → clearWebLoginCookies，含 host-only 补删 + 回读重试 + 清 Web 存储）。
+  void _loadLoginPage() {
     final c = webViewController;
     if (c == null) {
       return; // 页面已销毁，别再加载
     }
-    try {
-      await c.loadUrl(urlRequest: URLRequest(url: WebUri(loginUrl)));
-    } catch (e) {
+    Log.d('[斗鱼登录] 开始加载登录页: $loginUrl');
+    c.loadUrl(urlRequest: URLRequest(url: WebUri(loginUrl))).catchError((e) {
       Log.e("斗鱼登录页加载失败: $e", StackTrace.current);
-    }
+    });
   }
 
   /// 是否已离开登录页、落到斗鱼主站（此时尝试抓取 Cookie）。
@@ -74,8 +73,7 @@ class DouyuWebLoginController extends BaseController {
     }
     _checking = true;
     try {
-      var cookies =
-          await cookieManager.getCookies(url: WebUri("https://www.douyu.com"));
+      var cookies = await cookieManager.getCookies(url: WebUri("https://www.douyu.com"));
       if (cookies.isEmpty) {
         return false;
       }
@@ -87,8 +85,7 @@ class DouyuWebLoginController extends BaseController {
         // 未登录（游客）不保存，继续等待用户完成登录
         return false;
       }
-      var cookieStr =
-          cookies.map((e) => "${e.name}=${e.value}").join("; ");
+      var cookieStr = cookies.map((e) => "${e.name}=${e.value}").join("; ");
       // 不把 Cookie 明文写日志（含 acf_jwt_token/LTP0 等敏感项），只记录字段清单
       Log.i("斗鱼网页登录成功，已获取 Cookie 字段：${cookieMap.keys.join(',')}");
       var did = cookieMap["dy_did"] ?? "";
@@ -99,8 +96,7 @@ class DouyuWebLoginController extends BaseController {
         'LTP0': ltp0,
       });
       // 账号体系统一入口：写入 credential 并做一次有效性校验（刷新 cookie）
-      await PlatformService.instance
-          .accountLogin(account.copyWith(credential: credential));
+      await PlatformService.instance.accountLogin(account.copyWith(credential: credential));
       _saved = true;
       Get.back();
       return true;
@@ -115,8 +111,10 @@ class DouyuWebLoginController extends BaseController {
   /// onLoadStop 兜底：某些机型 shouldOverrideUrlLoading 不触发时也能抓取。
   void onLoadStop(InAppWebViewController controller, Uri? uri) {
     if (uri == null) {
+      Log.d('[斗鱼登录] onLoadStop uri=null');
       return;
     }
+    Log.d('[斗鱼登录] 页面加载完成: $uri');
     if (shouldIntercept(uri)) {
       logined();
     }

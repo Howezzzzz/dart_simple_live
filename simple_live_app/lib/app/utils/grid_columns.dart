@@ -15,13 +15,17 @@
 ///
 /// 不变式（见 test/grid_columns_test.dart RT-107）：
 /// - 任意输入返回 ≥ 1（含 0/负数/NaN/infinity）；
-/// - width ≥ 560 时列宽落在 [260, 400]（不超标拉伸、也不过窄）；
+/// - width ≥ 560 且未设上限时，列宽落在 [260, 400]（不超标拉伸、也不过窄）；
 /// - 手机竖屏（360~430）恒为 1 列、768 → 2 列、1024 → 3 列（与旧算法一致，
 ///   移动端行为不变）。
+///
+/// 2026-10-21 Howe 定：加 [maxColumns]（0 = 不限），使「卡片样式」复用同一口径又能保留
+/// 「超宽屏最多 10 列」旧约束——从此紧凑/卡片两样式共用一套算法（消除口径不一致）。
 int gridColumnsForWidth(
   double width, {
   double targetColumnWidth = 400,
   double minColumnWidth = 260,
+  int maxColumns = 0,
 }) {
   if (!width.isFinite || !(width > 0) || !(targetColumnWidth > 0) || !(minColumnWidth > 0)) {
     return 1;
@@ -33,5 +37,7 @@ int gridColumnsForWidth(
       n = maxByMin;
     }
   }
-  return n < 1 ? 1 : n;
+  if (n < 1) n = 1;
+  if (maxColumns > 0 && n > maxColumns) n = maxColumns;
+  return n;
 }

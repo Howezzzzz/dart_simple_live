@@ -131,4 +131,65 @@ void main() {
       }
     });
   });
+
+  // RISK-17 方案 B（2026-10-21 Howe 定）：按面板设定宽能否完整放下 → 极窄则覆盖式。
+  group('panelNeedsOverlay（RISK-17 方案 B）', () {
+    // 播放区高 900、视频 16:9 → 播放区应有宽 = 900 * 16/9 = 1600
+    test('窗口够宽 → 分栏（false）：1920 宽、面板 300', () {
+      // available = 1920 - 1600 - 8 = 312 ≥ 300
+      expect(
+        panelNeedsOverlay(contentWidth: 1920, videoWidth: 1920, videoHeight: 1080, playerHeight: 900, panelWidth: 300),
+        isFalse,
+      );
+    });
+
+    test('窗口偏窄 → 覆盖式（true）：1700 宽、面板 300', () {
+      // available = 1700 - 1600 - 8 = 92 < 300
+      expect(
+        panelNeedsOverlay(contentWidth: 1700, videoWidth: 1920, videoHeight: 1080, playerHeight: 900, panelWidth: 300),
+        isTrue,
+      );
+    });
+
+    test('面板拖窄后更容易分栏：同样 1700 宽、面板 80 → 分栏', () {
+      // available = 92 ≥ 80
+      expect(
+        panelNeedsOverlay(contentWidth: 1700, videoWidth: 1920, videoHeight: 1080, playerHeight: 900, panelWidth: 80),
+        isFalse,
+      );
+    });
+
+    test('边界：available 恰等于面板宽 → 分栏', () {
+      // contentWidth = 1600 + 8 + 300 = 1908
+      expect(
+        panelNeedsOverlay(contentWidth: 1908, videoWidth: 1920, videoHeight: 1080, playerHeight: 900, panelWidth: 300),
+        isFalse,
+      );
+      expect(
+        panelNeedsOverlay(
+            contentWidth: 1907.9, videoWidth: 1920, videoHeight: 1080, playerHeight: 900, panelWidth: 300),
+        isTrue,
+      );
+    });
+
+    test('尺寸/参数未就绪 → 不折叠（false，保守）', () {
+      expect(
+        panelNeedsOverlay(contentWidth: 0, videoWidth: 1920, videoHeight: 1080, playerHeight: 900, panelWidth: 300),
+        isFalse,
+      );
+      expect(
+        panelNeedsOverlay(contentWidth: 1920, videoWidth: 0, videoHeight: 1080, playerHeight: 900, panelWidth: 300),
+        isFalse,
+      );
+      expect(
+        panelNeedsOverlay(contentWidth: 1920, videoWidth: 1920, videoHeight: 1080, playerHeight: 900, panelWidth: 0),
+        isFalse,
+      );
+      expect(
+        panelNeedsOverlay(
+            contentWidth: double.nan, videoWidth: 1920, videoHeight: 1080, playerHeight: 900, panelWidth: 300),
+        isFalse,
+      );
+    });
+  });
 }

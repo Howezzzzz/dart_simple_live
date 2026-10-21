@@ -21,18 +21,19 @@ class FollowUserPage extends GetView<FollowUserController> {
 
   @override
   Widget build(BuildContext context) {
-    // 紧凑样式（关注条目卡）列数：ceil 封顶 + 最小列宽夹逼（列宽 ≤340 不拉伸；
-    // 手机竖屏仍 1 列，与旧算法一致）。旧 floor 算法会把列宽拉到接近 2*340，
+    // 紧凑样式（关注条目卡）列数：ceil 封顶 + 最小列宽夹逼（列宽 ≤400 不拉伸；
+    // 手机竖屏仍 1 列，与旧算法一致）。旧 floor 算法会把列宽拉到接近 2*400，
     // 且列数随窗口宽微小变化跳变 → 网格整体重排、条目位置漂移。
     var count = gridColumnsForWidth(MediaQuery.of(context).size.width);
-    // 卡片样式列数：floor(width/200) —— 常规宽度下卡宽 ≥200；窄屏被下限强抬到 2 列时
-    // 卡宽可能略 <200（沿用旧行为）；上限 10 收住超宽屏（2560/3840）的无穷铺列。
-    var c = MediaQuery.of(context).size.width ~/ 200;
-    if (c < 2) {
-      c = 2;
-    } else if (c > 10) {
-      c = 10;
-    }
+    // 卡片样式列数：**与紧凑同口径**（ceil 封顶 + 最小列宽夹逼），目标列宽 200、最小 180，
+    // 并保留「超宽屏最多 10 列」上限。2026-10-21 Howe 定：两种样式共用一套算法，
+    // 消除原「卡片 = width ~/ 200」与紧凑两套算法口径不一致的问题。
+    var c = gridColumnsForWidth(
+      MediaQuery.of(context).size.width,
+      targetColumnWidth: 200,
+      minColumnWidth: 180,
+      maxColumns: 10,
+    );
     return Scaffold(
       appBar: AppBar(
         title: const Text("关注用户"),

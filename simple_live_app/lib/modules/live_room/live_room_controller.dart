@@ -73,6 +73,10 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
   var online = 0.obs;
   var followed = false.obs;
   var liveStatus = false.obs;
+
+  /// 极窄窗口下的**覆盖式弹幕面板是否展开**（RISK-17 方案 B，2026-10-21 Howe 定）。
+  /// 仅当分栏放不下时使用：默认收起，点右缘按钮以覆盖层展开。
+  var panelOverlayOpen = false.obs;
   RxList<LiveSuperChatMessage> superChats = RxList<LiveSuperChatMessage>();
 
   /// 直播已开播时长文本（HH:mm:ss，每秒刷新；未激活为空串）
@@ -153,18 +157,15 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     loadData();
 
     // 「时长显示」设置切换时即时起/停开播时长计时器（无需重进房间）
-    _followTimeModeWorker = ever(AppSettingsController.instance.followTimeMode,
-        (_) => startLiveDurationTimer());
+    _followTimeModeWorker = ever(AppSettingsController.instance.followTimeMode, (_) => startLiveDurationTimer());
 
     // 斗鱼弹幕过滤：按其设置决定是否只显示粉丝发言（默认显示全部，对齐网页端）；并按等级精确过滤
     _applyDouyuDanmakuConfig();
-    _douyuDanmakuWorker = ever(
-        AppSettingsController.instance.douyuShowAllDanmaku, (v) {
+    _douyuDanmakuWorker = ever(AppSettingsController.instance.douyuShowAllDanmaku, (v) {
       final danmaku = liveDanmaku;
       if (danmaku is DouyuDanmaku) danmaku.showAll = v;
     });
-    _douyuDanmakuMinLevelWorker = ever(
-        AppSettingsController.instance.douyuDanmakuMinLevel, (v) {
+    _douyuDanmakuMinLevelWorker = ever(AppSettingsController.instance.douyuDanmakuMinLevel, (v) {
       final danmaku = liveDanmaku;
       if (danmaku is DouyuDanmaku) danmaku.minLevel = v;
     });
@@ -500,8 +501,7 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     liveDurationTimer?.cancel();
     liveDurationTimer = null;
     liveDurationText.value = "";
-    if (AppSettingsController.instance.followTimeMode.value !=
-        FollowTimeMode.liveStartTime) {
+    if (AppSettingsController.instance.followTimeMode.value != FollowTimeMode.liveStartTime) {
       return;
     }
     final detail = this.detail.value;
@@ -1333,10 +1333,8 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
   void _applyDouyuDanmakuConfig() {
     final danmaku = liveDanmaku;
     if (danmaku is DouyuDanmaku) {
-      danmaku.showAll =
-          AppSettingsController.instance.douyuShowAllDanmaku.value;
-      danmaku.minLevel =
-          AppSettingsController.instance.douyuDanmakuMinLevel.value;
+      danmaku.showAll = AppSettingsController.instance.douyuShowAllDanmaku.value;
+      danmaku.minLevel = AppSettingsController.instance.douyuDanmakuMinLevel.value;
     }
   }
 

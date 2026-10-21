@@ -42,6 +42,11 @@ mixin PlayerMixin {
   GlobalKey<VideoState> globalPlayerKey = GlobalKey<VideoState>();
   GlobalKey globalDanmuKey = GlobalKey();
 
+  /// 当前视频分辨率（供布局判定「覆盖式面板」实时刷新，2026-10-21 RISK-17）。
+  /// 由 fitPanelWidthToVideo 更新；页面 Obx 读取以触发重建。
+  var videoWidthRx = 0.obs;
+  var videoHeightRx = 0.obs;
+
   /// 播放器实例
   late final player = Player(
     configuration: PlayerConfiguration(
@@ -430,6 +435,9 @@ mixin PlayerSystemMixin on PlayerMixin, PlayerStateMixin, PlayerDanmakuMixin {
     final w = player.state.width ?? 0;
     final h = player.state.height ?? 0;
     if (w <= 0 || h <= 0) return;
+    // 供页面判定覆盖式面板（分辨率变化时也能刷新；RISK-17）
+    videoWidthRx.value = w;
+    videoHeightRx.value = h;
     Size? playerSize;
     double? contentWidth;
     try {
@@ -439,15 +447,11 @@ mixin PlayerSystemMixin on PlayerMixin, PlayerStateMixin, PlayerDanmakuMixin {
     } catch (e) {
       Log.d('fitPanelWidthToVideo 取尺寸异常: $e');
     }
-    if (playerSize == null ||
-        playerSize.height < 50 ||
-        playerSize.width < 50 ||
-        contentWidth == null) {
+    if (playerSize == null || playerSize.height < 50 || playerSize.width < 50 || contentWidth == null) {
       Log.d('fitPanelWidthToVideo[try$attempt] 未就绪: video=${w}x$h playerSize=$playerSize contentWidth=$contentWidth');
       // 分辨率事件常常早于首帧布局 → 稍后重试几次
       if (attempt < 12) {
-        Future.delayed(const Duration(milliseconds: 400),
-            () => fitPanelWidthToVideo(attempt: attempt + 1));
+        Future.delayed(const Duration(milliseconds: 400), () => fitPanelWidthToVideo(attempt: attempt + 1));
       }
       return;
     }
@@ -461,7 +465,8 @@ mixin PlayerSystemMixin on PlayerMixin, PlayerStateMixin, PlayerDanmakuMixin {
       playerHeight: playerSize.height,
     );
     final current = AppSettingsController.instance.messagePanelWidth.value;
-    Log.d('fitPanelWidthToVideo[try$attempt] video=${w}x$h player=${playerSize.width}x${playerSize.height} contentW=$contentWidth -> panel $current -> $target');
+    Log.d(
+        'fitPanelWidthToVideo[try$attempt] video=${w}x$h player=${playerSize.width}x${playerSize.height} contentW=$contentWidth -> panel $current -> $target');
     if ((target - current).abs() < 4) return;
     _fittingWindowByResolution = true;
     try {

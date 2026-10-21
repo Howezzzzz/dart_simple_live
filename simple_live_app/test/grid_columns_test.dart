@@ -59,4 +59,44 @@ void main() {
       }
     });
   });
+
+  // 2026-10-21 Howe 定：卡片样式改用与紧凑同一算法（target 200 / min 180 + 上限 10）。
+  group('卡片样式列数（与紧凑同口径 + 上限 10）', () {
+    int card(double w) => gridColumnsForWidth(w, targetColumnWidth: 200, minColumnWidth: 180, maxColumns: 10);
+
+    test('常用桌面宽：1280→7、1920→10', () {
+      expect(card(1280), 7);
+      expect(card(1920), 10);
+    });
+
+    test('超宽屏封顶 10 列：2560 / 3840 → 10', () {
+      expect(card(2560), 10);
+      expect(card(3840), 10);
+    });
+
+    test('窄屏/平板：390→2、768→4、800→4', () {
+      expect(card(390), 2);
+      expect(card(768), 4);
+      expect(card(800), 4);
+    });
+
+    test('不变式：列数恒在 [1, 10]', () {
+      for (var w = 200.0; w <= 5000; w += 13.7) {
+        final n = card(w);
+        expect(n, greaterThanOrEqualTo(1), reason: 'width=$w');
+        expect(n, lessThanOrEqualTo(10), reason: 'width=$w');
+      }
+    });
+
+    test('边界：异常输入统一返回 1（卡片参数）', () {
+      expect(card(0), 1);
+      expect(card(-100), 1);
+      expect(card(double.nan), 1);
+      expect(card(double.infinity), 1);
+    });
+
+    test('maxColumns 缺省（0）= 不封顶：3840 宽应超过 10 列', () {
+      expect(gridColumnsForWidth(3840), greaterThan(10));
+    });
+  });
 }

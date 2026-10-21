@@ -11,7 +11,6 @@ import 'package:remixicon/remixicon.dart';
 import 'package:simple_live_app/app/app_style.dart';
 import 'package:simple_live_app/app/controller/app_settings_controller.dart';
 import 'package:simple_live_app/app/sites.dart';
-import 'package:simple_live_app/app/utils.dart';
 import 'package:simple_live_app/app/utils/panel_width.dart';
 import 'package:simple_live_app/modules/live_room/danmaku/chat_emoticon_span.dart';
 import 'package:simple_live_app/modules/live_room/live_room_controller.dart';
@@ -109,8 +108,7 @@ class LiveRoomPage extends GetView<LiveRoomController> {
             fillPage = Focus(
               autofocus: true,
               onKeyEvent: (node, event) {
-                if (event is KeyDownEvent &&
-                    event.logicalKey == LogicalKeyboardKey.escape) {
+                if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.escape) {
                   controller.exitWindowFill();
                   return KeyEventResult.handled;
                 }
@@ -151,9 +149,7 @@ class LiveRoomPage extends GetView<LiveRoomController> {
                   ),
                   actions: buildAppbarActions(context),
                 ),
-          body: tablet
-              ? buildTabletUI(context, showOverlayBar: overlayBar)
-              : buildPhoneUI(context),
+          body: tablet ? buildTabletUI(context, showOverlayBar: overlayBar) : buildPhoneUI(context),
         );
       },
     );
@@ -220,8 +216,7 @@ class LiveRoomPage extends GetView<LiveRoomController> {
         behavior: HitTestBehavior.translucent,
         onHorizontalDragUpdate: (d) {
           final w = settings.messagePanelWidth.value - d.delta.dx;
-          settings.messagePanelWidth.value =
-              w.clamp(kMessagePanelMinWidth, kMessagePanelMaxWidth);
+          settings.messagePanelWidth.value = w.clamp(kMessagePanelMinWidth, kMessagePanelMaxWidth);
         },
         onHorizontalDragEnd: (_) {
           settings.saveMessagePanelWidth();
@@ -242,56 +237,142 @@ class LiveRoomPage extends GetView<LiveRoomController> {
     );
   }
 
+  /// 极窄窗口的**覆盖式弹幕面板**（RISK-17 方案 B，2026-10-21 Howe 定）：
+  /// 默认收起、右缘一个展开按钮；点开后以覆盖层从右侧滑出（不挤压播放区）。
+  Widget _buildOverlayPanel(BuildContext context, double panelW) {
+    return Obx(() {
+      final open = controller.panelOverlayOpen.value;
+      return Stack(
+        children: [
+          if (!open)
+            Positioned(
+              right: 0,
+              top: 0,
+              bottom: 0,
+              child: Center(
+                child: GestureDetector(
+                  onTap: () => controller.panelOverlayOpen.value = true,
+                  child: Tooltip(
+                    message: "展开弹幕",
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withAlpha(90),
+                        borderRadius: const BorderRadius.only(
+                          topLeft: Radius.circular(6),
+                          bottomLeft: Radius.circular(6),
+                        ),
+                      ),
+                      child: const Icon(Icons.chat_bubble_outline, size: 16, color: Colors.white),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          AnimatedPositioned(
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeOut,
+            right: open ? 0 : -panelW,
+            top: 0,
+            bottom: 0,
+            width: panelW,
+            child: Container(
+              color: Theme.of(context).cardColor,
+              child: Column(
+                children: [
+                  Row(
+                    children: [
+                      const SizedBox(width: 8),
+                      const Text("弹幕", style: TextStyle(fontSize: 13)),
+                      const Spacer(),
+                      IconButton(
+                        icon: const Icon(Icons.close, size: 18),
+                        onPressed: () => controller.panelOverlayOpen.value = false,
+                      ),
+                    ],
+                  ),
+                  Expanded(child: buildMessageArea()),
+                ],
+              ),
+            ),
+          ),
+        ],
+      );
+    });
+  }
+
   Widget buildTabletUI(BuildContext context, {bool showOverlayBar = false}) {
     return Column(
       children: [
         Expanded(
-          child: Stack(
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: buildMediaPlayer(),
-                  ),
-                  buildPanelResizeHandle(),
-                  Obx(
-                    () => SizedBox(
-                      width: AppSettingsController
-                          .instance.messagePanelWidth.value,
-                      child: Column(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              return Obx(
+                () {
+                  final panelW = AppSettingsController.instance.messagePanelWidth.value;
+                  // 极窄 → 覆盖式（放不下则折叠分栏）；否则照旧分栏。RISK-17 方案 B。
+                  final vw = controller.videoWidthRx.value;
+                  final vh = controller.videoHeightRx.value;
+                  final overlay = panelNeedsOverlay(
+                    contentWidth: constraints.maxWidth,
+                    videoWidth: vw.toDouble(),
+                    videoHeight: vh.toDouble(),
+                    playerHeight: constraints.maxHeight,
+                    panelWidth: panelW,
+                  );
+                  if (!overlay && controller.panelOverlayOpen.value) {
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      controller.panelOverlayOpen.value = false;
+                    });
+                  }
+                  return Stack(
+                    children: [
+                      Row(
                         children: [
-                          buildUserProfile(context),
-                          buildMessageArea(),
+                          Expanded(
+                            child: buildMediaPlayer(),
+                          ),
+                          if (!overlay) ...[
+                            buildPanelResizeHandle(),
+                            SizedBox(
+                              width: panelW,
+                              child: Column(
+                                children: [
+                                  buildUserProfile(context),
+                                  buildMessageArea(),
+                                ],
+                              ),
+                            ),
+                          ],
                         ],
                       ),
-                    ),
-                  ),
-                ],
-              ),
-              // 沉浸式：顶栏叠在画面顶部，与底栏同一套自动隐藏逻辑（不覆盖右侧弹幕栏）
-              if (showOverlayBar)
-                Obx(
-                  () => AnimatedPositioned(
-                    left: 0,
-                    top: (controller.showControlsState.value &&
-                            !controller.lockControlsState.value)
-                        ? 0
-                        : -64.0,
-                    right: AppSettingsController
-                            .instance.messagePanelWidth.value +
-                        8,
-                    duration: const Duration(milliseconds: 200),
-                    child: MouseRegion(
-                      // 鼠标移到顶栏上等同移到画面上：唤出并重新计时
-                      onHover: (_) => controller.showControls(),
-                      child: GestureDetector(
-                        onTap: controller.onTap,
-                        child: buildVideoTopBar(context),
-                      ),
-                    ),
-                  ),
-                ),
-            ],
+                      // 沉浸式：顶栏叠在画面顶部（不覆盖右侧弹幕栏）
+                      if (showOverlayBar)
+                        AnimatedPositioned(
+                          left: 0,
+                          top: (controller.showControlsState.value && !controller.lockControlsState.value) ? 0 : -64.0,
+                          right: overlay ? 0.0 : (panelW + 8),
+                          duration: const Duration(milliseconds: 200),
+                          child: MouseRegion(
+                            // 鼠标移到顶栏上等同移到画面上：唤出并重新计时
+                            onHover: (_) => controller.showControls(),
+                            child: GestureDetector(
+                              onTap: controller.onTap,
+                              child: buildVideoTopBar(context),
+                            ),
+                          ),
+                        ),
+                      // 覆盖层置于顶栏之后（否则顶栏会压住其关闭按钮）；宽度夹逼防遮满画面
+                      if (overlay)
+                        _buildOverlayPanel(
+                          context,
+                          panelW > constraints.maxWidth * 0.85 ? constraints.maxWidth * 0.85 : panelW,
+                        ),
+                    ],
+                  );
+                },
+              );
+            },
           ),
         ),
         Container(
@@ -906,36 +987,24 @@ class LiveRoomPage extends GetView<LiveRoomController> {
                 () => SettingsSwitch(
                   title: "按分辨率自适应",
                   subtitle: "进入直播间后保持窗口不变、按直播流分辨率调整右侧弹幕栏宽度（最大化时同样生效）",
-                  value:
-                      AppSettingsController.instance.autoFitWindowWidth.value,
-                  onChanged: (e) => AppSettingsController
-                      .instance
-                      .setAutoFitWindowWidth(e),
+                  value: AppSettingsController.instance.autoFitWindowWidth.value,
+                  onChanged: (e) => AppSettingsController.instance.setAutoFitWindowWidth(e),
                 ),
               ),
               AppStyle.divider,
               Obx(
                 () => IgnorePointer(
                   // 能力不支持时真正禁用（不可点击），而非仅仅视觉弱化
-                  ignoring: AppSettingsController
-                          .instance.volumeNormSupported.value ==
-                      false,
+                  ignoring: AppSettingsController.instance.volumeNormSupported.value == false,
                   child: Opacity(
-                    opacity: AppSettingsController
-                                .instance.volumeNormSupported.value ==
-                            false
-                        ? 0.5
-                        : 1.0,
+                    opacity: AppSettingsController.instance.volumeNormSupported.value == false ? 0.5 : 1.0,
                     child: SettingsSwitch(
                       title: "音量均衡",
-                      subtitle: AppSettingsController
-                                  .instance.volumeNormSupported.value ==
-                              false
+                      subtitle: AppSettingsController.instance.volumeNormSupported.value == false
                           ? "当前播放核心不支持（需定制 libmpv 构建）"
                           : "自动抬升小音量/压低大音量（EBU R128）",
                       value: AppSettingsController.instance.volumeNorm.value,
-                      onChanged: (e) =>
-                          AppSettingsController.instance.setVolumeNorm(e),
+                      onChanged: (e) => AppSettingsController.instance.setVolumeNorm(e),
                     ),
                   ),
                 ),

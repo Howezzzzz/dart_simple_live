@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:simple_live_app/app/log.dart';
 import 'package:simple_live_app/models/version_model.dart';
 import 'package:simple_live_app/requests/http_client.dart';
 
@@ -40,8 +41,7 @@ class CommonRequest {
 
     void maybeOpenWindow() {
       if (grace != null || done.isCompleted) return;
-      final entries =
-          byUrl.entries.where((e) => isTrustedManifest(e.value)).toList();
+      final entries = byUrl.entries.where((e) => isTrustedManifest(e.value)).toList();
       if (entries.isEmpty) return;
       // 真个直连 raw 结果 → 可直接开窗（最可信）
       final directOk = entries.any((e) => e.key == rawDirectUrl);
@@ -192,8 +192,7 @@ class CommonRequest {
   }
 
   /// 单源拉取 + **可信校验**（保留给单独调用/回退；同样过校验，不给伪造清单留后门）。
-  Future<VersionModel> _fetchValidated(String url,
-      {Future<VersionModel> Function(String url)? fetcher}) async {
+  Future<VersionModel> _fetchValidated(String url, {Future<VersionModel> Function(String url)? fetcher}) async {
     final v = await (fetcher ?? _fetchVersion)(url);
     if (!isTrustedManifest(v)) {
       throw const UpdateCheckException("该源返回的更新清单不可信");
@@ -207,31 +206,53 @@ class CommonRequest {
   /// 检查更新（单源：jsDelivr）——保留供单独调用/回退（已过可信校验）。
   Future<VersionModel> checkUpdateJsDelivr() => _fetchValidated(_jsdelivrUrl);
 
-  /// 拉取虎牙配置
+  /// ===== 虎牙 SDK UA 配置 =====
+  ///
+  /// 2026-10-21 Howe 定：加**我们自己的兜底源**（放在上游源之后）+ 内容校验，
+  /// 摆脱对上游仓库/第三方代理的硬依赖。该文件随「每日上游同步」自动进入我们仓库
+  /// （fork 自带 + 上游更新即同步），故我们的源既可控又新鲜，但按语义作**兜底**（最后）。
+  static const String _huyaConfigSelfUrl =
+      "https://gh-proxy.com/https://raw.githubusercontent.com/Howezzzzz/dart_simple_live/master/assets/huya_config.json";
+  static const String _huyaConfigSelfRawUrl =
+      "https://raw.githubusercontent.com/Howezzzzz/dart_simple_live/master/assets/huya_config.json";
+  static const String _huyaConfigGitMirrorUrl =
+      "https://raw.gitmirror.com/slotsun/dart_simple_live/master/assets/huya_config.json";
+  static const String _huyaConfigJsDelivrUrl =
+      "https://cdn.jsdelivr.net/gh/slotsun/dart_simple_live@master/assets/huya_config.json";
+
+  /// 拉取虎牙配置：**上游源优先**（权威/最新），**我们自己的源兜底**（上游不可达时仍可用）。
+  /// （Howe 2026-10-21 定：既然是兜底，就放最后。）
+  /// 返回的 hysdk_ua 做**内容校验**（防第三方代理注入任意 UA，与清单可信校验同源哲学）。
   Future<Map<String, dynamic>> fetchHuyaConfig() async {
-    try {
-      return await _fetchHuyaConfigGitMirror();
-    } catch (e) {
-      return await _fetchHuyaConfigJsDelivr();
+    final urls = <String>[
+      _huyaConfigGitMirrorUrl, // ① 上游（原第一源）
+      _huyaConfigJsDelivrUrl, // ② 上游
+      _huyaConfigSelfUrl, // ③ 我们自己的（兜底，gh-proxy）
+      _huyaConfigSelfRawUrl, // ④ 我们自己的（兜底，raw 直连）
+    ];
+    Object? lastError;
+    for (final url in urls) {
+      try {
+        final cfg = await _fetchHuyaConfigFrom(url);
+        final ua = cfg['hysdk_ua'];
+        if (ua is! String || !ua.startsWith("HYSDK(") || ua.length > 512) {
+          lastError = "返回的 hysdk_ua 不合法（来源：$url）";
+          Log.w("虎牙配置内容不可信：$url");
+          continue; // 换下一源
+        }
+        return cfg;
+      } catch (e) {
+        lastError = e;
+        Log.w("拉取虎牙配置失败（$url）：$e");
+      }
     }
+    Log.e("拉取虎牙配置失败（所有源均不可用）：$lastError", StackTrace.current);
+    throw Exception("拉取虎牙配置失败，请稍后重试");
   }
 
-  Future<Map<String, dynamic>> _fetchHuyaConfigGitMirror() async {
+  Future<Map<String, dynamic>> _fetchHuyaConfigFrom(String url) async {
     var result = await HttpClient.instance.getJson(
-      "https://raw.gitmirror.com/slotsun/dart_simple_live/master/assets/huya_config.json",
-      queryParameters: {
-        "ts": DateTime.now().millisecondsSinceEpoch,
-      },
-    );
-    if (result is Map) {
-      return result as Map<String, dynamic>;
-    }
-    return json.decode(result) as Map<String, dynamic>;
-  }
-
-  Future<Map<String, dynamic>> _fetchHuyaConfigJsDelivr() async {
-    var result = await HttpClient.instance.getJson(
-      "https://cdn.jsdelivr.net/gh/slotsun/dart_simple_live@master/assets/huya_config.json",
+      url,
       queryParameters: {
         "ts": DateTime.now().millisecondsSinceEpoch,
       },

@@ -83,6 +83,15 @@ class AppStyleSettingController extends GetxController {
     }
   }
 
+  /// 字体下载源（2026-10-21 Howe 定：加国内可达源兜底，摆脱单点）。
+  /// 字体仓库很大、单个字体文件 ~23MB（**超出 jsDelivr 单文件上限，实测该源返回 403**），
+  /// 故 gh-proxy / ghproxy.cc 直连 raw 在前（实测 206 可下），jsDelivr 仅作小文件兑底。
+  static const List<String> _fontBaseUrls = [
+    "https://gh-proxy.com/https://raw.githubusercontent.com/SlotSun/fonts/master/",
+    "https://ghproxy.cc/https://raw.githubusercontent.com/SlotSun/fonts/master/",
+    "https://gcore.jsdelivr.net/gh/SlotSun/fonts@master/",
+  ];
+
   Future<void> downloadFont() async {
     final dbPath = AppSettingsController.instance.dbPath;
     var fontName = curFontModel.value!.id;
@@ -91,38 +100,44 @@ class AppStyleSettingController extends GetxController {
       await fontDir.create(recursive: true);
     }
     Log.d("开始下载----$fontName");
-    const baseUrl = "https://gcore.jsdelivr.net/gh/SlotSun/fonts@master/";
     fontState.value = DownloadState.downloading;
+    var allOk = true;
     for (var filePath in curFontModel.value!.files) {
       final fileName = filePath.split('/').last;
       final file = File("${fontDir.path}/$fileName");
-
-      if (!await file.exists()) {
-        int retryCount = 0;
-        const maxRetries = 3;
-        while (retryCount < maxRetries) {
-          try {
-            // Download if not exists
-            await HttpClient.instance.download(
-              "$baseUrl$filePath",
-              file.path,
-            );
-            break; // Success
-          } catch (e, s) {
-            retryCount++;
-            if (retryCount >= maxRetries) {
-              Log.e("Failed to download font file after $maxRetries attempts: $filePath\n$e", s);
-              fontState.value = DownloadState.notDownloaded;
-              SmartDialog.showToast("下载失败，请检查网络后重试");
-            }
-            Log.w("Download failed, retrying ($retryCount/$maxRetries): $fileName");
-            await Future.delayed(const Duration(seconds: 1));
-          }
-        }
+      if (await file.exists()) continue; // 已存在则跳过（保留原语义）
+      final ok = await _downloadFontFile(filePath, file.path);
+      if (!ok) {
+        allOk = false;
+        Log.e("字体文件下载失败（所有源）：$filePath", StackTrace.current);
+        break; // 单个文件全源失败 → 中止，不加载残缺字体
       }
+    }
+    if (!allOk) {
+      fontState.value = DownloadState.notDownloaded;
+      SmartDialog.showToast("下载失败，请检查网络后重试");
+      return;
     }
     fontState.value = DownloadState.downloaded;
     await loadFont(fontName);
+  }
+
+  /// 多源依次尝试下载单个字体文件（首个成功即用）；失败源清理 .part 残留。
+  Future<bool> _downloadFontFile(String filePath, String savePath) async {
+    for (final baseUrl in _fontBaseUrls) {
+      try {
+        await HttpClient.instance.download("$baseUrl$filePath", savePath);
+        return true;
+      } catch (e) {
+        Log.w("字体源失败（$baseUrl）：$filePath -> $e");
+        // HttpClient.download 先写 $savePath.part、成功后 rename；失败时清掉 .part 残留
+        try {
+          final part = File("$savePath.part");
+          if (await part.exists()) await part.delete();
+        } catch (_) {}
+      }
+    }
+    return false;
   }
 
   Future<void> userFontInit() async {
@@ -166,11 +181,27 @@ class AppStyleSettingController extends GetxController {
     Log.d('已加载$fontName 词库');
   }
 
+  /// 字体是否「完整下载」（供 UI 状态与启动加载判断）。
+  /// 2026-10-21 加固：已知期望文件数时要求文件齐全，避免「部分下载」被误判为已下载
+  /// → 下次启动 loadFont 加载残缺字族（复核 P2）。取不到期望数时退回原「≥1 文件」语义。
   Future<bool> fontDownloadCheck(String fontName) async {
     final dbPath = AppSettingsController.instance.dbPath;
     final fontDir = Directory("$dbPath/fonts/$fontName");
-    bool fontDownload = await fontDir.exists() && await fontDir.list().length >= 1;
-    return fontDownload;
+    if (!await fontDir.exists()) return false;
+    final ttfCount = await fontDir.list().where((e) => e is File && e.path.endsWith('.ttf')).length;
+    if (ttfCount == 0) return false;
+    final expected = _expectedFontFileCount(fontName);
+    return expected <= 0 || ttfCount >= expected;
+  }
+
+  /// 该字体的期望文件数（从已加载字体清单取；取不到返回 0 = 不校验）。
+  int _expectedFontFileCount(String fontName) {
+    for (final f in fontMap.keys) {
+      if (f.id == fontName) return f.files.length;
+    }
+    final cur = curFontModel.value;
+    if (cur != null && cur.id == fontName) return cur.files.length;
+    return 0;
   }
 
   Future<void> fetchFonts() async {
