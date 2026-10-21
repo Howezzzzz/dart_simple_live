@@ -25,12 +25,14 @@ class FollowUserPage extends GetView<FollowUserController> {
     // 手机竖屏仍 1 列，与旧算法一致）。旧 floor 算法会把列宽拉到接近 2*400，
     // 且列数随窗口宽微小变化跳变 → 网格整体重排、条目位置漂移。
     var count = gridColumnsForWidth(MediaQuery.of(context).size.width);
-    // 卡片样式列数：**与紧凑同口径**（ceil 封顶 + 最小列宽夹逼），目标列宽 200、最小 180，
+    // 卡片样式列数：**与紧凑同口径**（ceil 封顶 + 最小列宽夹逼），目标列宽 260、最小 180，
     // 并保留「超宽屏最多 10 列」上限。2026-10-21 Howe 定：两种样式共用一套算法，
     // 消除原「卡片 = width ~/ 200」与紧凑两套算法口径不一致的问题。
+    // 2026-10-21 调整：目标 200 → 260（Howe 反馈 4K+225% 缩放下 9 列过多）——4K/225% 9→7 列、
+    // 1280 7→5、1920 10→8；手机竖屏仍 2 列（最小列宽未动，避免窄屏退化成 1 列）。
     var c = gridColumnsForWidth(
       MediaQuery.of(context).size.width,
-      targetColumnWidth: 200,
+      targetColumnWidth: 260,
       minColumnWidth: 180,
       maxColumns: 10,
     );

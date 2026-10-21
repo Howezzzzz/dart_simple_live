@@ -48,6 +48,13 @@ class UpdateDownloader {
     return v.downloadUrl;
   }
 
+  /// 清单是否声明了本平台直链：没有 = 本平台不支持自动更新（如 iOS 未签名包），
+  /// 应引导用浏览器打开 Releases 页，而不是把列表页 HTML 当安装包下载。
+  static bool hasPlatformDirectLink(VersionModel v) {
+    final u = v.downloadUrls[platformKey()];
+    return u != null && u.isNotEmpty;
+  }
+
   /// 该平台安装包的预期 sha256（缺失/为空则返回 null → 跳过校验）。
   static String? expectedSha256(VersionModel v) {
     final h = v.downloadSha256[platformKey()];

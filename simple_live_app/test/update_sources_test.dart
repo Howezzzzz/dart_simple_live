@@ -424,4 +424,25 @@ void main() {
       await dir.delete(recursive: true);
     });
   });
+
+  group('UpdateDownloader 平台直链判定（无直链 = 不支持自动更新）', () {
+    test('清单无本平台直链 → 不支持（iOS 未签名包场景）', () {
+      final v = _v(10828,
+          urls: {'other-platform': 'https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.0.0/a.apk'});
+      expect(UpdateDownloader.hasPlatformDirectLink(v), isFalse);
+    });
+
+    test('清单含本平台直链 → 支持', () {
+      final v = _v(10828, urls: {
+        UpdateDownloader.platformKey(): 'https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.0.0/x.deb'
+      });
+      expect(UpdateDownloader.hasPlatformDirectLink(v), isTrue);
+    });
+
+    test('无本平台直链时 resolveDownloadUrl 回落 download_url（列表页）', () {
+      final v = _v(10828,
+          urls: {'other-platform': 'https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.0.0/a.apk'});
+      expect(UpdateDownloader.resolveDownloadUrl(v), _ownUrl);
+    });
+  });
 }

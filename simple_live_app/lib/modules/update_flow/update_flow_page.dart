@@ -68,6 +68,14 @@ class _UpdateFlowPageState extends State<UpdateFlowPage> {
     final cancelToken = _cancelToken!;
     Log.d('[更新] 开始下载流程 v${_v.version}（version_num=${_v.versionNum}）');
 
+    // 清单没有本平台直链（如 iOS 未签名包）→ 本平台不支持自动更新：引导用浏览器打开 Releases 页
+    if (!UpdateDownloader.hasPlatformDirectLink(_v)) {
+      _status.value = '本平台暂不支持自动更新，请用浏览器打开下载页';
+      _stage.value = _Stage.failed;
+      Log.d('[更新] 本平台无直链（${UpdateDownloader.platformKey()}），引导浏览器');
+      return;
+    }
+
     // 清单声明了哈希、却没给我们平台的 → 视为异常，拒装（不静默跳过校验）
     final expect = UpdateDownloader.expectedSha256(_v);
     if (expect == null && _v.downloadSha256.isNotEmpty) {

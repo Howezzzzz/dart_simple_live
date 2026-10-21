@@ -62,11 +62,11 @@ void main() {
 
   // 2026-10-21 Howe 定：卡片样式改用与紧凑同一算法（target 200 / min 180 + 上限 10）。
   group('卡片样式列数（与紧凑同口径 + 上限 10）', () {
-    int card(double w) => gridColumnsForWidth(w, targetColumnWidth: 200, minColumnWidth: 180, maxColumns: 10);
+    int card(double w) => gridColumnsForWidth(w, targetColumnWidth: 260, minColumnWidth: 180, maxColumns: 10);
 
-    test('常用桌面宽：1280→7、1920→10', () {
-      expect(card(1280), 7);
-      expect(card(1920), 10);
+    test('常用桌面宽：1280→5、1920→8（目标列宽 260）', () {
+      expect(card(1280), 5);
+      expect(card(1920), 8);
     });
 
     test('超宽屏封顶 10 列：2560 / 3840 → 10', () {
@@ -74,9 +74,9 @@ void main() {
       expect(card(3840), 10);
     });
 
-    test('窄屏/平板：390→2、768→4、800→4', () {
+    test('窄屏/平板：390→2（手机竖屏不退化成 1 列）、768→3、800→4', () {
       expect(card(390), 2);
-      expect(card(768), 4);
+      expect(card(768), 3);
       expect(card(800), 4);
     });
 

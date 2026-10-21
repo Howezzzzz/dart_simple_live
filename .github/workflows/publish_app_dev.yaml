@@ -524,22 +524,30 @@ jobs:
           set -euo pipefail
           BASE="${{ steps.ver.outputs.base }}"
           # 1) 优先取仓库内 CHANGELOG.md 中该版本的小节（人话更新记录）
-          NOTES="$(awk -v want="$BASE" '
-            /^## / {
-              if (insec) exit
-              v=$0; sub(/^## +/, "", v); sub(/[（(].*$/, "", v); gsub(/[ \t]+$/, "", v)
-              if (v == want) { insec=1 }
-              next
-            }
-            insec { print }
-          ' CHANGELOG.md 2>/dev/null || true)"
+          #    仅对「文件不存在」降噪：awk 真实语法错误不吞（2>/dev/null 会掩盖脚本 bug）
+          if [ -f CHANGELOG.md ]; then
+            NOTES="$(awk -v want="$BASE" '
+              /^## / {
+                if (insec) exit
+                v=$0; sub(/^## +/, "", v); sub(/[（(].*$/, "", v); gsub(/[ \t]+$/, "", v)
+                if (v == want) { insec=1 }
+                next
+              }
+              insec { print }
+            ' CHANGELOG.md || true)"
+          else
+            echo "::warning::CHANGELOG.md 不存在，回退按提交生成（最多 30 条）"
+            NOTES=""
+          fi
           if [ -z "$(printf '%s' "$NOTES" | tr -d '[:space:]')" ]; then
-            echo "::warning::CHANGELOG.md 未找到 $BASE 小节，回退按提交生成（最多 30 条）"
+            # 发版前忘补 CHANGELOG 小节属流程失误：error 红字提示（不硬失败——prepare 已 bump 版本，失败重跑会再 bump 跳号）
+            echo "::error::CHANGELOG.md 未找到 $BASE 小节，回退按提交生成——发版前记得在 CHANGELOG.md 顶部补一节"
             PREV="$(git tag --list 'v*' --sort=-v:refname | head -1 || true)"
             if [ -n "$PREV" ]; then
               NOTES="$(git log "${PREV}..HEAD" --no-merges --pretty='- %s' | grep -v '^- chore(' | head -30 || true)"
             else
-              NOTES="$(git log --no-merges -n 30 --pretty='- %s' | grep -v '^- chore(' || true)"
+              # 先滤后截（与上一分支同口径）：避免先截 30 条再滤后远少于 30 条
+              NOTES="$(git log --no-merges --pretty='- %s' | grep -v '^- chore(' | head -30 || true)"
             fi
           fi
           {
@@ -579,6 +587,8 @@ jobs:
           NOTES: ${{ steps.notes.outputs.notes }}
         run: |
           set -euo pipefail
+          # 强制 UTF-8：cut -c1-120 需按字符截中文（非 UTF-8 locale 会按字节截断 → 乱码/Python 解码异常）
+          export LC_ALL=C.UTF-8
           V="$(sed -n 's/^version:[[:space:]]*//p' simple_live_app/pubspec.yaml | head -1)"
           TAG="v${V%%+*}"
           # 最近一条「非 bot(chore)」提交作为更新说明，避开上一次的 chore(version) 自引用
@@ -634,6 +644,8 @@ jobs:
               d["version_desc"] = d.get("version_desc", "")
           """releases 列表页：不能用 releases/latest（GitHub 的 latest 会排除测试版，而我们发版即测试版）"""
           d["download_url"] = "https://github.com/Howezzzzz/dart_simple_live/releases"
+          # 同步 GitHub Release 的 prerelease:true（App 未消费该字段，仅防清单值与实际发版状态矛盾）
+          d["prerelease"] = True
           d["download_urls"] = {k: base + v for k, v in urls.items()}
           # 各平台产物 sha256：App 下载后校验，防第三方镜像换包（2026-10-20 Howe 定）
           def _sha_of(name):

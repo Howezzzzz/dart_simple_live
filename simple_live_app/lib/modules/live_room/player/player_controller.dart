@@ -43,7 +43,8 @@ mixin PlayerMixin {
   GlobalKey globalDanmuKey = GlobalKey();
 
   /// 当前视频分辨率（供布局判定「覆盖式面板」实时刷新，2026-10-21 RISK-17）。
-  /// 由 fitPanelWidthToVideo 更新；页面 Obx 读取以触发重建。
+  /// 由 player 的 width/height 流直接更新（与自适应/全屏等设置**解耦**）——
+  /// 页面 Obx 读取它触发重建；fitPanelWidthToVideo 亦会更新（冗余但无害）。
   var videoWidthRx = 0.obs;
   var videoHeightRx = 0.obs;
 
@@ -421,13 +422,10 @@ mixin PlayerSystemMixin on PlayerMixin, PlayerStateMixin, PlayerDanmakuMixin {
   Size? _lastWindowSize;
   Offset? _lastWindowPosition;
 
-  bool _fittingWindowByResolution = false;
-
   /// 进入直播间后：**不改变窗口大小**，按当前直播流分辨率调整「右侧弹幕栏宽度」，
   /// 使播放区贴合原始比例（无黑边）。因为不动窗口，**最大化/各种窗口状态下同样生效**。
   Future<void> fitPanelWidthToVideo({int attempt = 0}) async {
     if (Platform.isAndroid || Platform.isIOS) return;
-    if (_fittingWindowByResolution) return;
     // 这些状态下面板不可见，无从调整
     if (fullScreenState.value || windowFillState.value || smallWindowState.value) {
       return;
@@ -467,16 +465,10 @@ mixin PlayerSystemMixin on PlayerMixin, PlayerStateMixin, PlayerDanmakuMixin {
     final current = AppSettingsController.instance.messagePanelWidth.value;
     Log.d(
         'fitPanelWidthToVideo[try$attempt] video=${w}x$h player=${playerSize.width}x${playerSize.height} contentW=$contentWidth -> panel $current -> $target');
-    if ((target - current).abs() < 4) return;
-    _fittingWindowByResolution = true;
-    try {
-      AppSettingsController.instance.setMessagePanelWidth(target);
-      Log.d('fitPanelWidthToVideo OK: panel=$target');
-    } finally {
-      Future.delayed(const Duration(milliseconds: 400), () {
-        _fittingWindowByResolution = false;
-      });
-    }
+    // 2026-10-21 rev.5：**不再回写面板宽度**（面板宽度改为"单帧派生"，见 panel_width.dart 的
+    // computePanelLayout）。这里只保留计算与日志，用于排障；否则"自适应"会与"用户意图宽"
+    // 互相覆盖、导致判定阈值失真。
+    Log.d('fitPanelWidthToVideo（已停用回写）-> 派生建议值 $target（当前 $current）');
   }
 
   ///小窗模式()
@@ -958,6 +950,12 @@ class PlayerController extends BaseController
     });
     _widthSubscription = player.stream.width.listen((event) {
       Log.d('width:$event  W:${(player.state.width)}  H:${(player.state.height)}');
+      // RISK-17：分辨率一到就记下来（与「自适应/自动全屏」等设置解耦），
+      // 供页面判定覆盖式面板；否则在未开自适应或处于全屏时该值恒为 0 → 永不折叠。
+      if ((player.state.width ?? 0) > 0 && (player.state.height ?? 0) > 0) {
+        videoWidthRx.value = player.state.width!;
+        videoHeightRx.value = player.state.height!;
+      }
       if (player.state.width == null) {
         return;
       } else {
@@ -973,6 +971,10 @@ class PlayerController extends BaseController
     });
     _heightSubscription = player.stream.height.listen((event) {
       Log.d('height:$event  W:${(player.state.width)}  H:${(player.state.height)}');
+      if ((player.state.width ?? 0) > 0 && (player.state.height ?? 0) > 0) {
+        videoWidthRx.value = player.state.width!;
+        videoHeightRx.value = player.state.height!;
+      }
       isVertical.value = (player.state.height ?? 9) > (player.state.width ?? 16);
       if (AppSettingsController.instance.autoFitWindowWidth.value &&
           !AppSettingsController.instance.autoFullScreen.value) {

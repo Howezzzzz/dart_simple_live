@@ -139,12 +139,14 @@ class AppSettingsController extends GetxController {
       Platform.isAndroid ? "mediacodec_embed" : "libmpv",
     );
 
-    // 旧版本可能存过小于下限的值：装载时就夹逼，避免首次渲染出异常窄面板
-    messagePanelWidth.value = LocalStorageService.instance
-        .getValue(
-            LocalStorageService.kMessagePanelWidth, kMessagePanelDefaultWidth)
-        .clamp(kMessagePanelMinWidth, kMessagePanelMaxWidth)
-        .toDouble();
+    // 2026-10-21 rev.5：`messagePanelWidth` 语义 = **用户意图宽**（0~800）。
+    // 允许 0（= 收起面板，走覆盖式）；装载时必须守卫非有限/负值，且**不能**照抄 [180,800]
+    // 的旧夹逼（否则"0=收起"会被吃掉）。
+    final rawPanelW =
+        LocalStorageService.instance.getValue(LocalStorageService.kMessagePanelWidth, kMessagePanelDefaultWidth);
+    messagePanelWidth.value = (rawPanelW is num && rawPanelW.isFinite && rawPanelW >= 0)
+        ? rawPanelW.toDouble().clamp(0.0, kMessagePanelMaxWidth)
+        : kMessagePanelDefaultWidth;
 
     volumeNorm.value = LocalStorageService.instance.getValue(
       LocalStorageService.kVolumeNorm,
@@ -374,7 +376,7 @@ class AppSettingsController extends GetxController {
   // 滑动调节亮度/音量上下滑动手势控制
   @SettingItem(defaultValue: false, key: LocalStorageService.kVerticalDragLock)
   var verticalDragLock = false.obs;
-  
+
   // 控制全屏模式是否弹出SC
   @SettingItem(defaultValue: false, key: 'kAutoShowFullSCEnable')
   var autoShowFullSCEnable = false.obs;
@@ -481,20 +483,22 @@ class AppSettingsController extends GetxController {
     LocalStorageService.instance.setValue(LocalStorageService.kVideoOutputDriver, e);
   }
 
-  /// 桌面端直播间右侧消息面板宽度（拖拽分隔条调节，双击分隔条恢复默认）
+  /// 桌面端直播间右侧消息面板宽度 = **用户意图宽**（拖拽分隔条调节；双击分隔条恢复默认 300）。
+  ///
+  /// 取值范围 **[0, 800]**：`0` 表示**收起面板**（走覆盖式弹幕面板）；`1~179` 视为"要更窄"，
+  /// 同样走覆盖式；`≥180` 参与"能否分栏"的判定（见 `panel_width.dart:computePanelLayout`）。
+  /// 注：2026-10-21 rev.5 起，自适应**不再回写**本值（`fitPanelWidthToVideo` 已停用回写），
+  /// 所以本值恒为"用户设定值"，可直接作为判定阈值。
   var messagePanelWidth = kMessagePanelDefaultWidth.obs;
 
   void setMessagePanelWidth(double e) {
-    messagePanelWidth.value =
-        e.clamp(kMessagePanelMinWidth, kMessagePanelMaxWidth);
-    LocalStorageService.instance.setValue(
-        LocalStorageService.kMessagePanelWidth, messagePanelWidth.value);
+    messagePanelWidth.value = e.isFinite ? e.clamp(0.0, kMessagePanelMaxWidth) : kMessagePanelDefaultWidth;
+    LocalStorageService.instance.setValue(LocalStorageService.kMessagePanelWidth, messagePanelWidth.value);
   }
 
   /// 保存当前面板宽度（拖拽结束时调用，避免拖拽过程高频写盘）
   void saveMessagePanelWidth() {
-    LocalStorageService.instance.setValue(
-        LocalStorageService.kMessagePanelWidth, messagePanelWidth.value);
+    LocalStorageService.instance.setValue(LocalStorageService.kMessagePanelWidth, messagePanelWidth.value);
   }
 
   /// 关注列表时长显示模式（开播时长/观看时长）

@@ -2,7 +2,7 @@
     "version": "1.08.27",
     "version_num": 10827,
     "version_desc": "- 更新流程改全屏进度页，修复灰屏\n- 修复斗鱼网页登录页空白、退号清理卡死\n- 退号清理提速（Windows）\n- 关注页卡片列数统一；极窄窗口改覆盖式弹幕面板\n- 外链加固：虎牙 UA、字体下载多源兜底",
-    "prerelease": false,
+    "prerelease": true,
     "download_url": "https://github.com/Howezzzzz/dart_simple_live/releases",
     "download_urls": {
         "android": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.27/app-arm64-v8a-release.apk",

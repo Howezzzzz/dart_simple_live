@@ -9,6 +9,7 @@ import 'package:lottie/lottie.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:remixicon/remixicon.dart';
 import 'package:simple_live_app/app/app_style.dart';
+import 'package:simple_live_app/app/log.dart';
 import 'package:simple_live_app/app/controller/app_settings_controller.dart';
 import 'package:simple_live_app/app/sites.dart';
 import 'package:simple_live_app/app/utils/panel_width.dart';
@@ -208,24 +209,40 @@ class LiveRoomPage extends GetView<LiveRoomController> {
 
   /// 播放器与右侧消息面板之间的分隔条：
   /// 横向拖拽调节面板宽度（实时生效，松手时持久化），双击恢复默认
-  Widget buildPanelResizeHandle() {
+  Widget buildPanelResizeHandle(BuildContext context, {bool wide = false}) {
     final settings = AppSettingsController.instance;
     return MouseRegion(
       cursor: SystemMouseCursors.resizeColumn,
       child: GestureDetector(
         behavior: HitTestBehavior.translucent,
+        // 拖拽即表示"我要手动宽度" → 关掉自动撑满（设置页开关同步显示为关，可随时切回）
+        onHorizontalDragStart: (_) {
+          if (settings.autoFitWindowWidth.value) {
+            settings.setAutoFitWindowWidth(false);
+          }
+        },
         onHorizontalDragUpdate: (d) {
+          // 范围放宽到 0~800：0 = 收起面板（走覆盖式）；<180 视为"要更窄"（同样覆盖式）
           final w = settings.messagePanelWidth.value - d.delta.dx;
-          settings.messagePanelWidth.value = w.clamp(kMessagePanelMinWidth, kMessagePanelMaxWidth);
+          settings.messagePanelWidth.value = w.isFinite ? w.clamp(0.0, kMessagePanelMaxWidth) : 0.0;
         },
         onHorizontalDragEnd: (_) {
           settings.saveMessagePanelWidth();
+          final w = settings.messagePanelWidth.value;
+          showPanelHint(
+            context,
+            w < kMessagePanelMinWidth
+                ? '面板宽度 ${w.round()} · <180 保持覆盖式（面板宽度 ≥180 才会并排显示）'
+                : '面板宽度 ${w.round()} · 已切「手动宽度」（双击分隔条恢复默认）',
+          );
         },
         onDoubleTap: () {
           settings.setMessagePanelWidth(kMessagePanelDefaultWidth);
+          settings.setAutoFitWindowWidth(true);
+          showPanelHint(context, '已恢复默认：面板宽 300 + 按分辨率自适应');
         },
         child: Container(
-          width: 8,
+          width: wide ? 16 : 8,
           color: Colors.transparent,
           alignment: Alignment.center,
           child: Container(
@@ -233,6 +250,21 @@ class LiveRoomPage extends GetView<LiveRoomController> {
             color: Colors.grey.withAlpha(50),
           ),
         ),
+      ),
+    );
+  }
+
+  /// 轻提示（拖动/双击后反馈，避免"拖不动/没反应"的错觉）
+  void showPanelHint(BuildContext context, String msg) {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    if (messenger == null) return;
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(msg, style: const TextStyle(fontSize: 13)),
+        duration: const Duration(milliseconds: 1800),
+        behavior: SnackBarBehavior.floating,
+        width: 340,
       ),
     );
   }
@@ -309,17 +341,32 @@ class LiveRoomPage extends GetView<LiveRoomController> {
             builder: (context, constraints) {
               return Obx(
                 () {
-                  final panelW = AppSettingsController.instance.messagePanelWidth.value;
-                  // 极窄 → 覆盖式（放不下则折叠分栏）；否则照旧分栏。RISK-17 方案 B。
-                  final vw = controller.videoWidthRx.value;
-                  final vh = controller.videoHeightRx.value;
-                  final overlay = panelNeedsOverlay(
+                  final settings = AppSettingsController.instance;
+                  // **单帧派生**（判定与渲染同源；2026-10-21 rev.5）：
+                  // 用户意图宽 = messagePanelWidth（0~800，0 = 收起）；自动模式 = autoFitWindowWidth。
+                  final layout = computePanelLayout(
                     contentWidth: constraints.maxWidth,
-                    videoWidth: vw.toDouble(),
-                    videoHeight: vh.toDouble(),
                     playerHeight: constraints.maxHeight,
-                    panelWidth: panelW,
+                    videoWidth: controller.videoWidthRx.value.toDouble(),
+                    videoHeight: controller.videoHeightRx.value.toDouble(),
+                    manualWidth: settings.messagePanelWidth.value,
+                    autoMode: settings.autoFitWindowWidth.value,
+                    overlayActive: controller.panelOverlayActive,
+                    scaleMode: settings.scaleMode.value,
+                    aspectByUser: settings.aspectByUser.value,
                   );
+                  // 普通字段（非 Rx）：build 期写入仅作"下一次判定的滞回记忆"，不触发重建
+                  controller.panelOverlayActive = layout.overlay;
+                  final overlay = layout.overlay;
+                  final renderW = layout.renderW;
+                  final openOverlay = controller.panelOverlayOpen.value;
+                  if (settings.logEnable.value) {
+                    Log.d('panelOverlay content=${constraints.maxWidth.toStringAsFixed(0)} '
+                        'playerH=${constraints.maxHeight.toStringAsFixed(0)} '
+                        'video=${controller.videoWidthRx.value}x${controller.videoHeightRx.value} '
+                        'manual=${settings.messagePanelWidth.value.toStringAsFixed(0)} '
+                        'auto=${settings.autoFitWindowWidth.value} $layout');
+                  }
                   if (!overlay && controller.panelOverlayOpen.value) {
                     WidgetsBinding.instance.addPostFrameCallback((_) {
                       controller.panelOverlayOpen.value = false;
@@ -332,10 +379,9 @@ class LiveRoomPage extends GetView<LiveRoomController> {
                           Expanded(
                             child: buildMediaPlayer(),
                           ),
-                          if (!overlay) ...[
-                            buildPanelResizeHandle(),
+                          if (!overlay)
                             SizedBox(
-                              width: panelW,
+                              width: renderW,
                               child: Column(
                                 children: [
                                   buildUserProfile(context),
@@ -343,7 +389,6 @@ class LiveRoomPage extends GetView<LiveRoomController> {
                                 ],
                               ),
                             ),
-                          ],
                         ],
                       ),
                       // 沉浸式：顶栏叠在画面顶部（不覆盖右侧弹幕栏）
@@ -351,7 +396,7 @@ class LiveRoomPage extends GetView<LiveRoomController> {
                         AnimatedPositioned(
                           left: 0,
                           top: (controller.showControlsState.value && !controller.lockControlsState.value) ? 0 : -64.0,
-                          right: overlay ? 0.0 : (panelW + 8),
+                          right: overlay ? 0.0 : (renderW + 8),
                           duration: const Duration(milliseconds: 200),
                           child: MouseRegion(
                             // 鼠标移到顶栏上等同移到画面上：唤出并重新计时
@@ -363,11 +408,15 @@ class LiveRoomPage extends GetView<LiveRoomController> {
                           ),
                         ),
                       // 覆盖层置于顶栏之后（否则顶栏会压住其关闭按钮）；宽度夹逼防遮满画面
-                      if (overlay)
-                        _buildOverlayPanel(
-                          context,
-                          panelW > constraints.maxWidth * 0.85 ? constraints.maxWidth * 0.85 : panelW,
-                        ),
+                      if (overlay) _buildOverlayPanel(context, layout.overlayW),
+                      // 手柄**常驻且始终最后绘制**（同一 Element，翻转时不丢手势）：
+                      // 分栏 → 贴面板左缘；覆盖式收起 → 贴右缘；覆盖式展开 → 贴覆盖层左缘（照样能拖）
+                      Positioned(
+                        right: !overlay ? renderW : (openOverlay ? layout.overlayW : 0),
+                        top: 0,
+                        bottom: 0,
+                        child: buildPanelResizeHandle(context, wide: overlay),
+                      ),
                     ],
                   );
                 },
