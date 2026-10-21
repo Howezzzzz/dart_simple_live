@@ -1,15 +1,15 @@
 {
-    "version": "1.08.28",
-    "version_num": 10828,
-    "version_desc": "- **弹幕面板宽度可拖到 0**（= 收起面板，走覆盖式）；宽度 <180 也直接走覆盖式，不再出现窄缝分栏\n- 拖动分隔条会**自动切到「手动宽度」**（设置页开关可见、双击分隔条恢复默认 300 + 自适应），拖动/双击有轻提示\n- 修复：**覆盖式弹幕面板不触发**（判定与渲染改为同帧同源，堵掉两处溢出/NaN 崩溃路径）\n- 关注页**卡片样式列数收紧**（大屏一行不再塞太多）：4K+225% 缩放 9→7 列、1280 宽 7→5 列、1920 宽 10→8 列；卡片更宽更好认，手机竖屏仍 2 列\n- 修复：**极窄窗口的覆盖式弹幕面板不触发**（视频分辨率没被记录，判定一直按“放得下”处理 → 永远分栏、右侧看不到展开气泡）\n- iOS 提示优化：本平台无安装包时不误报『拒绝安装』，改为引导用浏览器打开下载页",
+    "version": "1.08.29",
+    "version_num": 10829,
+    "version_desc": "- 分栏判定改规则：**面板宽 ≥180 且窗口放得下 180 就分栏显示**——意图宽放不下时面板自动夹到能放下的宽度（不再因为设了 300 就整个切覆盖式）；双击分隔条 / 覆盖层「分栏」按钮恢复默认后立即回分栏\n- 覆盖式弹幕面板交互优化：**展开按钮加大并内移**（不再贴边难点）；覆盖层头部新增**「分栏」按钮**；覆盖式下**拖分隔条 dock 回分栏**（拖拽期间挂起滞回 + 宽度上限钳到可用空间，向左加宽必回分栏）；展开时**点画面空白处直",
     "prerelease": true,
     "download_url": "https://github.com/Howezzzzz/dart_simple_live/releases",
     "download_urls": {
-        "android": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.28/app-arm64-v8a-release.apk",
-        "windows": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.28/Slive-1.08.28+10828-windows-setup.exe",
-        "macos": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.28/simple_live_app-1.08.28+10828-macos.dmg",
-        "linux": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.28/Slive-x86_64-linux.deb",
-        "linux_flatpak": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.28/Slive-x86_64.flatpak"
+        "android": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.29/app-arm64-v8a-release.apk",
+        "windows": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.29/Slive-1.08.29+10829-windows-setup.exe",
+        "macos": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.29/simple_live_app-1.08.29+10829-macos.dmg",
+        "linux": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.29/Slive-x86_64-linux.deb",
+        "linux_flatpak": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.29/Slive-x86_64.flatpak"
     },
     "mirror_prefixes": [
         "https://gh-proxy.com/",
@@ -17,10 +17,10 @@
         "https://ghproxy.cc/"
     ],
     "download_sha256": {
-        "android": "2a8ac29facbba06e8ebe07001dd3017cfae1e28224b777ca85bcf762c6990ba2",
-        "windows": "c5841c48d4a94cb072c05b6885dda08928689b9af4b9a5c1fb603472c9742660",
-        "macos": "c4b09a10d482f129472a1a87620fceb83e5674c53c717b8e30a7e086ab22cbca",
-        "linux": "e36c73364b34b1efa266813755be0ea09659e2f49df7b0a50ab61aea789bbc5b",
-        "linux_flatpak": "9540a46ffb8dc04176bf28bcacf98e5e9973adba1766ed51aa26acedd24284d0"
+        "android": "bf7daa330c9398cfa54a9e16fdacd83973ab2ac3eecad77701a96cd41e6f0ffe",
+        "windows": "301a07d395ec6c3262c75669bb2610c4df8f7bb54fa583766d2d46b3430d88a2",
+        "macos": "a8a44da3fac6b8346749e4d6634164b15290af23551be1d71782b9d79334afbd",
+        "linux": "9b3248d72941f4989cbcc1403f99b2757708e936c5814c5fa52d16387c99f225",
+        "linux_flatpak": "a9ccaa51372aebea2df51a0ec1ee33d759bf0a458c5015924348759ce5d9689f"
     }
 }
