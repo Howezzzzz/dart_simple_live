@@ -1,15 +1,15 @@
 {
-    "version": "1.08.34",
-    "version_num": 10834,
-    "version_desc": "- 修复：安卓端画面贴底后**上方留白显示成白色**——视频区补统一黑底，黑边恢复为黑色\n- 修复：安卓端**全屏时画面贴底导致底部被系统导航栏遮住一截**（上方留大黑块）——全屏/窗口全屏不再贴底，恢复按比例居中\n- 修复：长按画面**划不出弹幕栏**——视频窗格整体接长按（黑边区也覆盖）+ 判定改用**当帧布局**（不再依赖标记位）；面板收起态下长按即从右侧划出弹幕栏\n- 修复：**覆盖式收起态的手柄贴屏幕右缘、抢走安卓边缘返回手势**（右缘左滑变成拖面板宽度）——收起态不放手柄（分栏/覆盖层展开态保留）",
+    "version": "1.08.35",
+    "version_num": 10835,
+    "version_desc": "- 修复：覆盖式收起态划出弹幕栏时**直接闪出、没有滑动动画**——Stack 条件子项（点击捕捉层/覆盖层/顶栏/手柄）在展开瞬间按位置错位被重建、动画状态被重置；已加固定 key 恢复滑入动画",
     "prerelease": true,
     "download_url": "https://github.com/Howezzzzz/dart_simple_live/releases",
     "download_urls": {
-        "android": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.34/app-arm64-v8a-release.apk",
-        "windows": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.34/Slive-1.08.34+10834-windows-setup.exe",
-        "macos": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.34/simple_live_app-1.08.34+10834-macos.dmg",
-        "linux": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.34/Slive-x86_64-linux.deb",
-        "linux_flatpak": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.34/Slive-x86_64.flatpak"
+        "android": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.35/app-arm64-v8a-release.apk",
+        "windows": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.35/Slive-1.08.35+10835-windows-setup.exe",
+        "macos": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.35/simple_live_app-1.08.35+10835-macos.dmg",
+        "linux": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.35/Slive-x86_64-linux.deb",
+        "linux_flatpak": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.35/Slive-x86_64.flatpak"
     },
     "mirror_prefixes": [
         "https://gh-proxy.com/",
@@ -17,10 +17,10 @@
         "https://ghproxy.cc/"
     ],
     "download_sha256": {
-        "android": "21b4e214e9466be6f0ff9915ac1bb6c6804fb0e18af18b6c0a88b88f83ea2b10",
-        "windows": "db1d9c49b9857b1cdb8b4c9836dabd316ec8a73c0a4858e9c8be876bc6a423fd",
-        "macos": "ac8c467cc8fe7179b1d54883f6349480fc9d17bea029bcdfd91a7cb6e186af9e",
-        "linux": "210a478b58453392edfdfe73451420b5859c697291a8a5c424782ed1153665a2",
-        "linux_flatpak": "a3fbf2c99602a5ee20b9b94d0170a2b503667dd1409aecb19466989627b8ce80"
+        "android": "31f8e54a03776cd10d71c9df3cd0a339784b3c549f1eed64244ed1d840e1ca82",
+        "windows": "5119cc02f1511e079238be591a603ee40d0688053853db2f25ce308fc89e2158",
+        "macos": "289509168a46a9033a680fbbad10c95a72c1e7830e30516d8aef4ad580408127",
+        "linux": "b5a8c9d6fecbf8ec7bd85c8b426f6149c3d1450c2d458a401ee32ed3e59bf836",
+        "linux_flatpak": "23deaf38131b9cc4d41329e8611c45b347a9253c49e79f56e6eb45680aaa3713"
     }
 }
