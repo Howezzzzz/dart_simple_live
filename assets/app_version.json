@@ -1,15 +1,15 @@
 {
-    "version": "1.08.33",
-    "version_num": 10833,
-    "version_desc": "- 直播间**非全屏**时，若右侧弹幕栏处于**覆盖式（收起）**状态：**长按屏幕可直接从右侧滑出弹幕栏**（与全屏长按滑出关注列表的手感一致）；分栏状态/竖屏长按仍为关注列表\n- 上游同步：内嵌 `packages/media_kit` 副本深度同步至上游最新（保留自有 libmpv 定制）；`media_kit_video` 维持 `e4220ada`（上游后续提交把 wakelock_plus 升至 1.8.\n- 内置 libmpv 以新基线重建（音量均衡自建版）：android 构建系统 v1.3.1、windows 20260915；产物迁移至新 Release（-v2），校验哈希同步更新",
+    "version": "1.08.34",
+    "version_num": 10834,
+    "version_desc": "- 修复：安卓端画面贴底后**上方留白显示成白色**——视频区补统一黑底，黑边恢复为黑色\n- 修复：安卓端**全屏时画面贴底导致底部被系统导航栏遮住一截**（上方留大黑块）——全屏/窗口全屏不再贴底，恢复按比例居中\n- 修复：长按画面**划不出弹幕栏**——视频窗格整体接长按（黑边区也覆盖）+ 判定改用**当帧布局**（不再依赖标记位）；面板收起态下长按即从右侧划出弹幕栏\n- 修复：**覆盖式收起态的手柄贴屏幕右缘、抢走安卓边缘返回手势**（右缘左滑变成拖面板宽度）——收起态不放手柄（分栏/覆盖层展开态保留）",
     "prerelease": true,
     "download_url": "https://github.com/Howezzzzz/dart_simple_live/releases",
     "download_urls": {
-        "android": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.33/app-arm64-v8a-release.apk",
-        "windows": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.33/Slive-1.08.33+10833-windows-setup.exe",
-        "macos": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.33/simple_live_app-1.08.33+10833-macos.dmg",
-        "linux": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.33/Slive-x86_64-linux.deb",
-        "linux_flatpak": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.33/Slive-x86_64.flatpak"
+        "android": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.34/app-arm64-v8a-release.apk",
+        "windows": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.34/Slive-1.08.34+10834-windows-setup.exe",
+        "macos": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.34/simple_live_app-1.08.34+10834-macos.dmg",
+        "linux": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.34/Slive-x86_64-linux.deb",
+        "linux_flatpak": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.34/Slive-x86_64.flatpak"
     },
     "mirror_prefixes": [
         "https://gh-proxy.com/",
@@ -17,10 +17,10 @@
         "https://ghproxy.cc/"
     ],
     "download_sha256": {
-        "android": "1bea07b7ecef3259d82252e01054db72d3f0a81efa332e6974bc2917673c8ab1",
-        "windows": "e1cfdd34fd13d9e4ff71e4360390a2131bccd497f883a0fd59b4cd745f9d4f90",
-        "macos": "d52688c86af4ac29c81ce4787b18aaec8f9e8490fec84320a4eaa69c6a740b14",
-        "linux": "20f14c173f93786ebb8350b9dd25f82df81f16ca535bf8d8b2afefacf3b8ce06",
-        "linux_flatpak": "59a516e82894eeece24dc5e568ccdf7316d8f06ba67de81a70ad4d50596c18e3"
+        "android": "21b4e214e9466be6f0ff9915ac1bb6c6804fb0e18af18b6c0a88b88f83ea2b10",
+        "windows": "db1d9c49b9857b1cdb8b4c9836dabd316ec8a73c0a4858e9c8be876bc6a423fd",
+        "macos": "ac8c467cc8fe7179b1d54883f6349480fc9d17bea029bcdfd91a7cb6e186af9e",
+        "linux": "210a478b58453392edfdfe73451420b5859c697291a8a5c424782ed1153665a2",
+        "linux_flatpak": "a3fbf2c99602a5ee20b9b94d0170a2b503667dd1409aecb19466989627b8ce80"
     }
 }
