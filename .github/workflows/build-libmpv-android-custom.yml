@@ -81,7 +81,7 @@ jobs:
       - uses: nttld/setup-ndk@v1
         with:
           link-to-sdk: true
-          ndk-version: r27c
+          ndk-version: r30  # v1.3.1 构建系统要求 r30（depinfo.sh v_ndk=30.0.16248370）
 
       - name: Patch default flavor (enable loudnorm filter)
         working-directory: ./buildscripts
