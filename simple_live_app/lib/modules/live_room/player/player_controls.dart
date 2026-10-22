@@ -78,6 +78,15 @@ Widget buildFullControls(
               if (controller.lockControlsState.value) {
                 return;
               }
+              // 2026-10-22 Howe：非全屏 + 右侧弹幕栏处于覆盖式（收起）时，
+              // 长按屏幕改为从右侧滑出弹幕栏（对齐全屏长按出关注列表的手感）
+              if (!controller.fullScreenState.value &&
+                  !controller.windowFillState.value &&
+                  controller.panelOverlayActive &&
+                  !controller.panelOverlayOpen.value) {
+                controller.panelOverlayOpen.value = true;
+                return;
+              }
               showFollowUser(controller);
             },
             onVerticalDragStart: controller.onVerticalDragStart,
@@ -336,8 +345,7 @@ Widget buildFullControls(
                     onPressed: () {
                       if (controller.smallWindowState.value) {
                         controller.exitSmallWindow();
-                      } else if (controller.windowFillState.value &&
-                          !controller.fullScreenState.value) {
+                      } else if (controller.windowFillState.value && !controller.fullScreenState.value) {
                         controller.exitWindowFill();
                       } else {
                         controller.exitFull();
@@ -654,8 +662,7 @@ Widget buildDanmuView(VideoState videoState, LiveRoomController controller) {
       () => Offstage(
         offstage: !controller.showDanmakuState.value,
         child: Padding(
-          padding: (controller.fullScreenState.value ||
-                  controller.windowFillState.value)
+          padding: (controller.fullScreenState.value || controller.windowFillState.value)
               ? EdgeInsets.only(
                   top: AppSettingsController.instance.danmuTopMargin.value,
                   bottom: AppSettingsController.instance.danmuBottomMargin.value,

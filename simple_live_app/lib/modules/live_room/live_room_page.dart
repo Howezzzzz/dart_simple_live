@@ -210,6 +210,8 @@ class LiveRoomPage extends GetView<LiveRoomController> {
   }
 
   Widget buildPhoneUI(BuildContext context) {
+    // 竖屏无分栏/覆盖层：清掉横屏残留的覆盖记忆（防长按误触发“划出弹幕栏”）
+    controller.panelOverlayActive = false;
     return Column(
       children: [
         AspectRatio(

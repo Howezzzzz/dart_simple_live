@@ -2,29 +2,29 @@
   "schema": 1,
   "bundles": {
     "android_arm64": {
-      "url": "https://github.com/Howezzzzz/dart_simple_live/releases/download/libmpv-android-custom-v1/default-arm64-v8a.jar",
-      "sha256": "53d409a4089780dca560d10644fa84cd04db159e5c5ba4e0ff5987f026da73e3",
+      "url": "https://github.com/Howezzzzz/dart_simple_live/releases/download/libmpv-android-custom-v2/default-arm64-v8a.jar",
+      "sha256": "0df9c043a7d32ea4995ba0ecf8cbe72e569436355d2b3e24a40d2c5d94b6409d",
       "format": "zip",
       "root": "lib/arm64-v8a",
       "library": "libmpv.so"
     },
     "android_arm": {
-      "url": "https://github.com/Howezzzzz/dart_simple_live/releases/download/libmpv-android-custom-v1/default-armeabi-v7a.jar",
-      "sha256": "1b14a6a1706c3ccd84e4da5705c6c9a159fa3936677c9839a2c5e05bbe9d0a3c",
+      "url": "https://github.com/Howezzzzz/dart_simple_live/releases/download/libmpv-android-custom-v2/default-armeabi-v7a.jar",
+      "sha256": "b448394fef0cd39531f94772cbcfd7529163f616b6b9f97ef80b25d7d1226328",
       "format": "zip",
       "root": "lib/armeabi-v7a",
       "library": "libmpv.so"
     },
     "android_x64": {
-      "url": "https://github.com/Howezzzzz/dart_simple_live/releases/download/libmpv-android-custom-v1/default-x86_64.jar",
-      "sha256": "218f84bd258d06f70d3070765787392fcc383bc1e1d7815df0c8ca839efd23f9",
+      "url": "https://github.com/Howezzzzz/dart_simple_live/releases/download/libmpv-android-custom-v2/default-x86_64.jar",
+      "sha256": "7a17bf22239487195c233eac0b36fbd1f7070b54780725a237e4845fbb6b8091",
       "format": "zip",
       "root": "lib/x86_64",
       "library": "libmpv.so"
     },
     "android_ia32": {
-      "url": "https://github.com/Howezzzzz/dart_simple_live/releases/download/libmpv-android-custom-v1/default-x86.jar",
-      "sha256": "379c2dfe2551d0b5cfaa73ec20615beef2233920a5f6987e1d276d8d84c84f6b",
+      "url": "https://github.com/Howezzzzz/dart_simple_live/releases/download/libmpv-android-custom-v2/default-x86.jar",
+      "sha256": "4938994f3b7c049f3f6aeeaadf3f9b511abbefc41c67a139ad70cec09410d7cf",
       "format": "zip",
       "root": "lib/x86",
       "library": "libmpv.so"
@@ -36,8 +36,8 @@
       "library": "libmpv-2.dll"
     },
     "windows_x64": {
-      "url": "https://github.com/Howezzzzz/dart_simple_live/releases/download/libmpv-custom-v1/mpv-dev-x86_64-slive-custom.7z",
-      "sha256": "47514de4cc6a3bf875370fe044920a85c25edf225d5bb535d928814e75b929e8",
+      "url": "https://github.com/Howezzzzz/dart_simple_live/releases/download/libmpv-custom-v2/mpv-dev-x86_64-slive-custom.7z",
+      "sha256": "59171b888a76361cb79407947e0b42c5878a15ec1672cea5a289d39d2923302a",
       "format": "7z",
       "library": "libmpv-2.dll"
     },
@@ -85,7 +85,7 @@
       "url": "https://github.com/ErBWs/libmpv-ohos-build/releases/download/20260811/libmpv_aarch64.zip",
       "sha256": "2bfb9844a7552c450694581b315b26cdf6202eaa57724e9f70f3facfad75163b",
       "format": "zip",
-      "library": "libmpv.so.2"
+      "library": "libmpv.so"
     }
   }
 }
