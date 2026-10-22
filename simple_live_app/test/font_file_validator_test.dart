@@ -85,13 +85,20 @@ void main() {
     });
 
     test('HTML 错误页 → 判为问题', () {
-      final body = '<!DOCTYPE html><html><body>404</body></html>'.codeUnits;
-      expect(FontFileCheck.problem(_bytesFrom(body, 5000), 5000), contains('错误页'));
+      // 真实错误页是完整响应体（不是定长补零数组）——头 64 字节内不含 NUL 才会被当文本识别
+      const body =
+          '<!DOCTYPE html><html><head><title>404</title></head><body>'
+          '<h1>404 Not Found</h1><p>The requested URL was not found on this server.</p></body></html>';
+      final bytes = Uint8List.fromList(body.codeUnits);
+      expect(FontFileCheck.problem(bytes, bytes.length), contains('错误页'));
     });
 
     test('带 UTF-8 BOM 的 HTML → 也能识别（真 BOM 字节 EF BB BF）', () {
-      final raw = <int>[0xEF, 0xBB, 0xBF, ...'<html>denied</html>'.codeUnits];
-      expect(FontFileCheck.problem(_bytesFrom(raw, 2000), 2000), contains('错误页'));
+      const body =
+          '<html><head><title>403</title></head><body><h1>Sorry</h1>'
+          '<p>Access to this resource has been denied by the server.</p></body></html>';
+      final bytes = Uint8List.fromList(<int>[0xEF, 0xBB, 0xBF, ...body.codeUnits]);
+      expect(FontFileCheck.problem(bytes, bytes.length), contains('错误页'));
     });
 
     test('非法字体头 → 判为问题', () {
