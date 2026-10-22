@@ -29,9 +29,9 @@ jobs:
     container:
       image: docker://ghcr.io/shinchiro/archlinux:latest
     env:
-      CACHE_PREFIX: slive-vnorm-v2
+      CACHE_PREFIX: slive-vnorm-v1
       BUILD_REPO: Predidit/libmpv-win32-video-cmake
-      BUILD_REPO_SHA: 90278c41d6d7f0bb5747a528fa1b9be5f993cb7e
+      BUILD_REPO_SHA: fdf75129fc694b5ca555ce73cffc43bb6943ae13  # 2026-10-22 回归修复：90278c41(tag 20260915) 比 main 旧 2 个提交、漏了 TLS 校验默认值补丁（v2 Windows 黑屏根因）→ 回钉 main HEAD
       TARGET_ARCH: x86_64-w64-mingw32
     steps:
       - name: Setup git config
