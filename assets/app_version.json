@@ -1,15 +1,15 @@
 {
-    "version": "1.08.36",
-    "version_num": 10836,
-    "version_desc": "- 修复：**Windows 端直播黑屏**（斗鱼/B站等进房间只有转圈无画面）——新基线重建的 Windows libmpv 有问题；**Windows 先回退到原版 libmpv**（Android 仍用新基线，其构建已验证正常）",
+    "version": "1.08.37",
+    "version_num": 10837,
+    "version_desc": "- 依赖底座升级（插件现代化批次）：`package_info_plus` 8→10、`device_info_plus` 12→13、`share_plus` 12→13、`network_info_plus` 7→8、`file_pic\n- 文件选择适配新版 API（file_picker 13）：配置导出 / 日志保存 / 截图保存改为**由插件直接写入**所选位置；导入配置 / 导入关注列表改用**单选**接口（保持一次只选一个文件，避免多选后静默丢弃）\n- 工程约束修正：最低 Dart 版本同步为 `>=3.12`（`wakelock_plus 1.8.1` 的真实要求，原 `>=3.0.5` 已失真）\n- 字体下载加固：下载后做**内容级校验**（字体头魔数 + 最小体积 + HTML 错误页嗅探）——此前只数文件个数，截断的文件或镜像返回的错误页会被当成「已下载」并加载（乱码）；校验不过自动换下一个源并重下\n- 字体下载**可取消**：离开外观设置页即停止进行中的下载（此前会在后台继续跑完，且重复点击会并发写同一临时文件）\n- 修复：**6 个纯 .otf 字体家族选了不生效**（寒蝉德黑体 / 寒蝉半圆体 / 卜力士 / 普力士 / IBM Plex Sans SC / 繁 Think 黑）——加载字体与「是否已下载」判定此前**只认 .ttf**，.otf",
     "prerelease": true,
     "download_url": "https://github.com/Howezzzzz/dart_simple_live/releases",
     "download_urls": {
-        "android": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.36/app-arm64-v8a-release.apk",
-        "windows": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.36/Slive-1.08.36+10836-windows-setup.exe",
-        "macos": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.36/simple_live_app-1.08.36+10836-macos.dmg",
-        "linux": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.36/Slive-x86_64-linux.deb",
-        "linux_flatpak": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.36/Slive-x86_64.flatpak"
+        "android": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.37/app-arm64-v8a-release.apk",
+        "windows": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.37/Slive-1.08.37+10837-windows-setup.exe",
+        "macos": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.37/simple_live_app-1.08.37+10837-macos.dmg",
+        "linux": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.37/Slive-x86_64-linux.deb",
+        "linux_flatpak": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.37/Slive-x86_64.flatpak"
     },
     "mirror_prefixes": [
         "https://gh-proxy.com/",
@@ -17,10 +17,10 @@
         "https://ghproxy.cc/"
     ],
     "download_sha256": {
-        "android": "a4bbb940b390efa666b19478a14a246c9ffc3aabe912eee854c434d539540897",
-        "windows": "7709277015067302e1dbba5b8a600b5696679f5da4a95e12e47f94f44e7238b7",
-        "macos": "c113a20517317dab97992274bee01782e81d0987281ec41137b19b67b10f1469",
-        "linux": "b294fe9c060866e8109dccad0b803babee1ab982ecd70b01ee7bf5d86b658044",
-        "linux_flatpak": "f6d98e66ba3dd6d38cc5cf7a7ab639950f304a18651598503609f2f28373a9b3"
+        "android": "48d8ba60e2c04a7f5bae62f5bf79675da03f6a8dcdd94c9c38d1a176f44b4e8e",
+        "windows": "c7656327f5f82593df530fd24d0536ca6ab060226b8024e14cb1ada1ef095ae3",
+        "macos": "75416d8bed003e3f77946287459cafb9cb6271838b834996fa7c96990af41805",
+        "linux": "36d31b24aefdd5f6113c2ce011b7b48ae907c708a0b10b709ae7531065e7f5fc",
+        "linux_flatpak": "51ebc3d10241f26a32c3cbfca1c61d1b0b9eff38952f096e20f75d636bb56dfb"
     }
 }
