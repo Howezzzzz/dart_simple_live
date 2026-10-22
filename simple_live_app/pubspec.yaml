@@ -1,5 +1,5 @@
 name: simple_live_app
-version: 1.08.32+10832
+version: 1.08.31+10831
 publish_to: none
 description: "Slive APP"
 environment: 
@@ -101,10 +101,14 @@ dependencies:
   media_kit:
     path: packages/media_kit
   # media_kit_video：不改动，直接引用上游 SlotSun/media-kit（fork 自有 libmpv 构建体系）
+  # 2026-10-22：上游清晨改写了 main（force-push），原钉 ref `b2bb9ff0`（“windows_x64 use zip...”）
+  # 已不可达→Linux runner 新克隆拉不到该 sha，pub get 报「找不到 media_kit_video/pubspec.yaml」；
+  # 改钉改写后的同内容 commit e4220ada（仅 media_kit/ 目录有小改，而我方 media_kit 走 path 覆盖，
+  # 对构建零影响；media_kit_video/ 与旧 ref 逐字节一致）。
   media_kit_video:
     git:
       url: https://github.com/SlotSun/media-kit.git
-      ref: b2bb9ff072905ab96dc07201b8b1a19adfeeac67
+      ref: e4220ada5d46bcc548f51ee04e79fec9e0d039c5
       path: ./media_kit_video
 
 dependency_overrides:

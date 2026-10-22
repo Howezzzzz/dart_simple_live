@@ -879,8 +879,8 @@ packages:
     dependency: "direct main"
     description:
       path: media_kit_video
-      ref: b2bb9ff072905ab96dc07201b8b1a19adfeeac67
-      resolved-ref: b2bb9ff072905ab96dc07201b8b1a19adfeeac67
+      ref: e4220ada5d46bcc548f51ee04e79fec9e0d039c5
+      resolved-ref: e4220ada5d46bcc548f51ee04e79fec9e0d039c5
       url: "https://github.com/SlotSun/media-kit.git"
     source: git
     version: "1.2.5"
