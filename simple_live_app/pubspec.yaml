@@ -103,12 +103,12 @@ dependencies:
   # media_kit_video：不改动，直接引用上游 SlotSun/media-kit（fork 自有 libmpv 构建体系）
   # 2026-10-22：上游清晨改写了 main（force-push），原钉 ref `b2bb9ff0`（“windows_x64 use zip...”）
   # 已不可达→Linux runner 新克隆拉不到该 sha，pub get 报「找不到 media_kit_video/pubspec.yaml」；
-  # 改钉改写后的同内容 commit e4220ada，随后再跟随到当前 main 头 ccd38d67（“upgrade wakelock_plus v1.8.1”，
-  # 即把 media_kit_video 的 wakelock_plus 从 1.3.3 → 1.8.1；Howe 2026-10-22 定：合并同步进来）。
+  # 改钉改写后的同内容 commit e4220ada，暂不回跟 main 头 ccd38d67：其唯一改动是把 wakelock_plus 由 1.3.3→1.8.1，而 1.8.1 依赖 win32 ^6.0.1，
+  # 与我方 network_info_plus ^7.0.0（win32 ^5.5.3）冲突 → 版本求解失败。待先升级 network_info_plus(→v8) 后再跟。
   media_kit_video:
     git:
       url: https://github.com/SlotSun/media-kit.git
-      ref: ccd38d67f961e703cde3f9a4e010425574cca202
+      ref: e4220ada5d46bcc548f51ee04e79fec9e0d039c5
       path: ./media_kit_video
 
 dependency_overrides:

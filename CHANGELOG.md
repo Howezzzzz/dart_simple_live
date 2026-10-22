@@ -7,7 +7,7 @@
 
 ## 1.08.33（2026-10-22）
 - 直播间**非全屏**时，若右侧弹幕栏处于**覆盖式（收起）**状态：**长按屏幕可直接从右侧滑出弹幕栏**（与全屏长按滑出关注列表的手感一致）；分栏状态/竖屏长按仍为关注列表
-- 上游同步：media-kit 跟随至 `ccd38d67`（media_kit_video 的 wakelock_plus 由 1.3.3→1.8.1）；内嵌 `packages/media_kit` 副本已深度同步至同版本（保留自有 libmpv 定制）
+- 上游同步：内嵌 `packages/media_kit` 副本深度同步至上游最新（保留自有 libmpv 定制）；`media_kit_video` 维持 `e4220ada`（上游后续提交把 wakelock_plus 升至 1.8.1，与我方 network_info_plus 的 win32 约束冲突，待升级该插件后再跟进）
 - 内置 libmpv 以新基线重建（音量均衡自建版）：android 构建系统 v1.3.1、windows 20260915；产物迁移至新 Release（-v2），校验哈希同步更新
 
 ## 1.08.32（2026-10-22）
