@@ -318,7 +318,8 @@ class LiveRoomPage extends GetView<LiveRoomController> {
   /// 极窄窗口的**覆盖式弹幕面板**（RISK-17 方案 B，2026-10-21 Howe 定）：
   /// 默认收起、右缘一个展开按钮；点开后以覆盖层从右侧滑出（不挤压播放区）。
   Widget _buildOverlayPanel(BuildContext context, double panelW) {
-    return Obx(() {
+    return Obx(key: const ValueKey('overlayPanel'), // 固定身份：防插入兄弟时状态重置→动画闪入
+        () {
       final open = controller.panelOverlayOpen.value;
       return Stack(
         children: [
@@ -475,6 +476,7 @@ class LiveRoomPage extends GetView<LiveRoomController> {
                       // 置于顶栏之前（不挡顶栏按钮）、只在视频区（覆盖层左侧）生效；收起后恢复正常点击
                       if (overlay && openOverlay)
                         Positioned(
+                          key: const ValueKey('overlayTapCatcher'), // 固定身份：避免插入/移除时兄弟元素错位（弹幕栏动画失效）
                           left: 0,
                           top: 0,
                           bottom: 0,
@@ -487,6 +489,7 @@ class LiveRoomPage extends GetView<LiveRoomController> {
                       // 沉浸式：顶栏叠在画面顶部（不覆盖右侧弹幕栏）
                       if (showOverlayBar)
                         AnimatedPositioned(
+                          key: const ValueKey('videoTopBar'), // 固定身份：防插入兄弟时状态重置
                           left: 0,
                           top: (controller.showControlsState.value && !controller.lockControlsState.value)
                               ? 0
@@ -509,6 +512,7 @@ class LiveRoomPage extends GetView<LiveRoomController> {
                       // 2026-10-22 Howe：**覆盖式收起态不放手柄**——它贴屏幕最右缘会抢安卓边缘返回手势（右缘左滑变拖宽）
                       if (!(overlay && !openOverlay))
                         Positioned(
+                          key: const ValueKey('panelHandle'), // 固定身份
                           right: !overlay ? renderW : layout.overlayW,
                           top: 0,
                           bottom: 0,
