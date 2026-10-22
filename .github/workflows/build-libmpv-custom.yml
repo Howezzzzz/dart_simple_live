@@ -120,6 +120,31 @@ jobs:
             grep -qxF "        --enable-filter=${filt}" packages/ffmpeg.cmake || { echo "::error::patch verification failed: ${filt}"; exit 1; }
           done
 
+      # 2026-10-22：上游 libopenmpt 0.7.12 的 tarball 链接失效（lib.openmpt.org 疑撤旧版）→
+      # 按序探测可用源（0.7.12 原链 / 0.7.13 / buildroot 镜像），取第一个可用者，并同步 URL_HASH。
+      - name: Fix libopenmpt source URL (原 0.7.12 链失效，探测可用源)
+        run: |
+          set -e
+          F=packages/libopenmpt.cmake
+          try_src() { # $1=url  $2=sha256(大写)
+            code=$(curl -s -o /dev/null -w '%{http_code}' -r 0-0 -L --max-time 60 "$1" || echo 000)
+            echo "probe [$code] $1"
+            case "$code" in
+              200|206)
+                sed -i "s|https://lib\.openmpt\.org/files/libopenmpt/src/libopenmpt-0\.7\.[0-9]+release\.autotools\.tar\.gz|$1|" "$F"
+                sed -i "s|SHA256=[0-9A-Fa-f]*|SHA256=$2|" "$F"
+                echo "-> applied: $1"
+                grep -nE 'URL' "$F"
+                return 0 ;;
+              *) return 1 ;;
+            esac
+          }
+          try_src "https://lib.openmpt.org/files/libopenmpt/src/libopenmpt-0.7.12+release.autotools.tar.gz" "79AB3CE3672601E525B5CC944F026C80C03032F37D39CAA84C8CA3FDD75E0C98" \
+          || try_src "https://lib.openmpt.org/files/libopenmpt/src/libopenmpt-0.7.13+release.autotools.tar.gz" "DCD7CDE4F9C498EB496C4556E1C1B81353E2A74747E8270A42565117EA42E1F1" \
+          || try_src "https://sources.buildroot.net/libopenmpt/libopenmpt-0.7.13+release.autotools.tar.gz" "DCD7CDE4F9C498EB496C4556E1C1B81353E2A74747E8270A42565117EA42E1F1" \
+          || try_src "https://sources.buildroot.net/libopenmpt/libopenmpt-0.7.12+release.autotools.tar.gz" "79AB3CE3672601E525B5CC944F026C80C03032F37D39CAA84C8CA3FDD75E0C98" \
+          || { echo "::error::no usable libopenmpt source found (0.7.12/0.7.13/mirrors all unreachable)"; exit 1; }
+
       - name: Configure & download sources
         run: |
           cmake -DTARGET_ARCH=${TARGET_ARCH} -DCOMPILER_TOOLCHAIN=clang -DCMAKE_INSTALL_PREFIX=$PWD/clang_root -DMINGW_INSTALL_PREFIX=$PWD/build_x86_64/${TARGET_ARCH} -DSINGLE_SOURCE_LOCATION=$PWD/src_packages -DRUSTUP_LOCATION=$PWD/clang_root/install_rustup -G Ninja --fresh -B build_x86_64 -S $PWD
