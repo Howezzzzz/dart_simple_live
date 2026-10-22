@@ -29,9 +29,9 @@ jobs:
     container:
       image: docker://ghcr.io/shinchiro/archlinux:latest
     env:
-      CACHE_PREFIX: slive-vnorm-v1
+      CACHE_PREFIX: slive-vnorm-v2
       BUILD_REPO: Predidit/libmpv-win32-video-cmake
-      BUILD_REPO_SHA: fdf75129fc694b5ca555ce73cffc43bb6943ae13
+      BUILD_REPO_SHA: 90278c41d6d7f0bb5747a528fa1b9be5f993cb7e
       TARGET_ARCH: x86_64-w64-mingw32
     steps:
       - name: Setup git config

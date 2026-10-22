@@ -4,12 +4,13 @@
 #       仅启用 overlay/equalizer，动态响度滤镜 loudnorm 缺失 → 安卓音量均衡不可用。
 # 做法（对齐 build-libmpv-custom.yml 的 Windows 模式）：
 #   1. 锁定 sha 拉取上游构建系统（不 fork、不内嵌，workflow 只是编排）
+# 2026-10-22：基线由 v1.2.7(dd2bfba8) 升到 v1.3.1(04430482)，与上游 media-kit 现用版本对齐
 #   2. patch buildscripts/flavors/default.sh 追加 --enable-filter=loudnorm
 #   3. 构建 4 个 ABI（arm64-v8a / armeabi-v7a / x86_64 / x86），发布到本仓库 Release
 #
 # 重建后需重新回填 4 个 jar 的 SHA-256 到
-#   simple_live_app/packages/media_kit_libs_android_video/android/build.gradle
-# （build.gradle 单源、钉死 SHA；若 jar 变更而 SHA 未同步更新，Android 构建会 SHA 校验失败——fail-loud）
+#   simple_live_app/packages/media_kit/hook/native_bundles.json（native assets 架构，2026-10 起）
+# （钉死 SHA；若 jar 变更而 SHA 未同步更新，构建会 SHA 校验失败——fail-loud）
 
 name: libmpv-android-custom
 
@@ -19,7 +20,7 @@ on:
       release_tag:
         description: 'Release tag (assets: 4 ABI jars)'
         required: false
-        default: 'libmpv-android-custom-v1'
+        default: 'libmpv-android-custom-v2'
         type: string
 
 permissions:
@@ -37,7 +38,7 @@ jobs:
     container: docker.io/debian:bookworm-slim
     env:
       BUILD_REPO: Predidit/libmpv-android-video-build
-      BUILD_REPO_SHA: dd2bfba8209bcd22e2d4c79f125b40e619e637ed
+      BUILD_REPO_SHA: 0443048272a511d7a990a2a3d5ca6bbaf55a869a
     steps:
       - name: Checkout build system (pinned)
         uses: actions/checkout@v4
