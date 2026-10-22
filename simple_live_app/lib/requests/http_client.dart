@@ -222,6 +222,16 @@ class HttpClient {
       );
 
       if (response.statusCode == 200 || response.statusCode == 206) {
+        // 2026-10-22：完整性校验——dio 的 download 只等 onDone，**不比对实际落盘大小与 content-length**，
+        // 连接中途被掐断时可能“干净地”结束，留下截断文件（字体下载曾因此在 4KB 之外静默通过）。
+        // 有 content-length 时核对；无（chunked）则跳过，交由调用方做内容级校验。
+        final total = int.tryParse(response.headers.value(Headers.contentLengthHeader) ?? '') ?? -1;
+        if (total > 0) {
+          final got = await tempFile.length();
+          if (got < total) {
+            throw HttpError("下载不完整（$got/$total 字节）");
+          }
+        }
         // 下载完成重命名临时文件
         return await tempFile.rename(savePath);
       } else {

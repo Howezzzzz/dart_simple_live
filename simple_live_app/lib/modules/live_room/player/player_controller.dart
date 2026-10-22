@@ -576,20 +576,18 @@ mixin PlayerSystemMixin on PlayerMixin, PlayerStateMixin, PlayerDanmakuMixin {
         );
         SmartDialog.showToast("已保存截图至相册");
       } else {
-        //选择保存文件夹
-        var path = await FilePicker.saveFile(
-          allowedExtensions: ["jpg"],
-          type: FileType.image,
+        // 选择保存位置（file_picker 13：提供字节+文件名，由插件写入；返回选中位置 Uri）
+        var uri = await FilePicker.saveFile(
           fileName: "${DateTime.now().millisecondsSinceEpoch}.jpg",
+          bytes: imageData,
+          mimeType: "image/jpeg",
         );
-        if (path == null) {
+        if (uri == null) {
           SmartDialog.showToast("取消保存");
           SmartDialog.dismiss(status: SmartStatus.loading);
           return;
         }
-        var file = File(path);
-        await file.writeAsBytes(imageData);
-        SmartDialog.showToast("已保存截图至${file.path}");
+        SmartDialog.showToast("已保存截图至${uri.toFilePath()}");
       }
     } catch (e) {
       Log.logPrint(e);

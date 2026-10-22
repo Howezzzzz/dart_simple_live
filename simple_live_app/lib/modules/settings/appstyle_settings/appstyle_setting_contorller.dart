@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:get/get_core/src/get_main.dart';
@@ -12,6 +13,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:simple_live_app/app/constant.dart';
 import 'package:simple_live_app/app/controller/app_settings_controller.dart';
 import 'package:simple_live_app/app/log.dart';
+import 'package:simple_live_app/app/utils/font_file_check.dart';
 import 'package:simple_live_app/models/font_model.dart';
 import 'package:simple_live_app/requests/http_client.dart';
 import 'package:simple_live_app/services/local_storage_service.dart';
@@ -27,6 +29,9 @@ class AppStyleSettingController extends GetxController {
   final RxList<FontModel> fontList = <FontModel>[].obs;
   final RxMap<FontModel, String> fontMap = <FontModel, String>{}.obs;
   Rx<DownloadState> fontState = DownloadState.notDownloaded.obs;
+
+  /// 2026-10-22 ISS-176：字体下载取消令牌（页面离开时取消）
+  CancelToken? _fontDownloadCancel;
 
   Future<void> init() async {
     styleColor.value = LocalStorageService.instance.getValue(LocalStorageService.kStyleColor, 0xff3498db);
@@ -72,6 +77,8 @@ class AppStyleSettingController extends GetxController {
   }
 
   Future<void> onFontSelected(FontModel fontModel) async {
+    // 2026-10-22 复核必改 B：换字体前先取消在跑的下载（否则旧任务变孤儿下载、状态错乱）
+    cancelFontDownload();
     var fontName = fontModel.id;
     curFontModel.value = fontModel;
     if (await fontDownloadCheck(fontName)) {
@@ -93,25 +100,64 @@ class AppStyleSettingController extends GetxController {
   ];
 
   Future<void> downloadFont() async {
+    // 2026-10-22 ISS-176：防重入/防并发——重复点会并发写同一 .part；
+    // 复核必改 B：守卫必须看令牌（换字体后 fontState 会被重置，光看状态会放过重入 → 孤儿下载）
+    if (_fontDownloadCancel != null) return;
     final dbPath = AppSettingsController.instance.dbPath;
-    var fontName = curFontModel.value!.id;
+    final fontModel = curFontModel.value;
+    if (fontModel == null) return;
+    var fontName = fontModel.id;
     final fontDir = Directory("$dbPath/fonts/$fontName");
     if (!await fontDir.exists()) {
       await fontDir.create(recursive: true);
     }
     Log.d("开始下载----$fontName");
     fontState.value = DownloadState.downloading;
+    // 2026-10-22 ISS-176：取消令牌（离开字体设置页时取消，不再后台白跑流量）
+    final cancel = _fontDownloadCancel = CancelToken();
     var allOk = true;
-    for (var filePath in curFontModel.value!.files) {
-      final fileName = filePath.split('/').last;
-      final file = File("${fontDir.path}/$fileName");
-      if (await file.exists()) continue; // 已存在则跳过（保留原语义）
-      final ok = await _downloadFontFile(filePath, file.path);
-      if (!ok) {
-        allOk = false;
-        Log.e("字体文件下载失败（所有源）：$filePath", StackTrace.current);
-        break; // 单个文件全源失败 → 中止，不加载残缺字体
+    var canceled = false;
+    try {
+      for (var filePath in fontModel.files) {
+        final fileName = filePath.split('/').last;
+        final file = File("${fontDir.path}/$fileName");
+        if (await file.exists()) {
+          // 2026-10-22 ISS-175：已有文件先做内容校验，坏的就删掉重下
+          // （否则会被当作「已存在」跳过，一直用坏字体）
+          final check = await _checkFontFile(file);
+          if (check.problem == null) continue; // 已存在且合法 → 跳过（保留原语义）
+          Log.w(
+            "字体文件校验不通过，删除重下：${file.path} -> ${check.problem}"
+            "${check.unreadable ? "（读取异常）" : ""}",
+          );
+          try {
+            await file.delete();
+          } catch (_) {}
+        }
+        final ok = await _downloadFontFile(filePath, file.path, cancel);
+        if (!ok) {
+          if (cancel.isCancelled) {
+            canceled = true;
+            break; // 取消不算失败，不回弹提示（用户已离开页面）
+          }
+          allOk = false;
+          Log.e("字体文件下载失败（所有源）：$filePath", StackTrace.current);
+          break; // 单个文件全源失败 → 中止，不加载残缺字体
+        }
       }
+    } catch (e, s) {
+      // 2026-10-22 复核必改 A：任何异常都要落到确定态，
+      // 否则状态恒为 downloading → 守卫永久拦住后续下载（只能重启）
+      Log.e("字体下载异常：$fontName", s);
+      allOk = false;
+    } finally {
+      _fontDownloadCancel = null;
+    }
+    if (canceled) {
+      Log.d("字体下载已取消----$fontName");
+      // 取消不硬写 notDownloaded：若文件其实已齐全（取消发生在最后一个下完后）就按已下载
+      fontState.value = await fontDownloadCheck(fontName) ? DownloadState.downloaded : DownloadState.notDownloaded;
+      return;
     }
     if (!allOk) {
       fontState.value = DownloadState.notDownloaded;
@@ -122,13 +168,56 @@ class AppStyleSettingController extends GetxController {
     await loadFont(fontName);
   }
 
-  /// 多源依次尝试下载单个字体文件（首个成功即用）；失败源清理 .part 残留。
-  Future<bool> _downloadFontFile(String filePath, String savePath) async {
-    for (final baseUrl in _fontBaseUrls) {
+  /// 离开字体设置页时调用：取消进行中的下载（ISS-176）
+  void cancelFontDownload() {
+    final token = _fontDownloadCancel;
+    if (token == null || token.isCancelled) return;
+    Log.d("取消字体下载（离开页面）");
+    token.cancel("页面已离开");
+  }
+
+  /// 读取文件头做内容级校验（ISS-175）。
+  /// 返回 (problem, unreadable)：problem=null 通过；unreadable=true 表示**读不出来**
+  /// （I/O 问题，不能据此认定字体损坏——复核建议区分，避免杀软锁文件/网络盘抖动被判成损坏）。
+  Future<({String? problem, bool unreadable})> _checkFontFile(File file) async {
+    try {
+      final raf = await file.open();
       try {
-        await HttpClient.instance.download("$baseUrl$filePath", savePath);
-        return true;
+        // 同一句柄取长度，避免两次打开之间的竞态（复核建议）
+        final len = await raf.length();
+        final head = await raf.read(len < FontFileCheck.headBytes ? len : FontFileCheck.headBytes);
+        return (problem: FontFileCheck.problem(head, len), unreadable: false);
+      } finally {
+        await raf.close();
+      }
+    } catch (e) {
+      return (problem: "读取失败：$e", unreadable: true);
+    }
+  }
+
+  /// 多源依次尝试下载单个字体文件（首个成功即用）；失败源清理 .part 残留。
+  /// 2026-10-22：新增取消（ISS-176）与内容级校验（ISS-175，不良内容换下一个源）。
+  Future<bool> _downloadFontFile(String filePath, String savePath, CancelToken cancel) async {
+    for (final baseUrl in _fontBaseUrls) {
+      if (cancel.isCancelled) return false;
+      try {
+        await HttpClient.instance.download("$baseUrl$filePath", savePath, cancel: cancel);
+        final check = await _checkFontFile(File(savePath));
+        if (check.problem == null) return true;
+        Log.w("字体内容校验不通过（$baseUrl）：$filePath -> ${check.problem}");
+        try {
+          final f = File(savePath);
+          if (await f.exists()) await f.delete(); // 换下一个源重试
+        } catch (_) {}
       } catch (e) {
+        if (cancel.isCancelled) {
+          // 取消：清残留并立即结束，不再尝试其它源
+          try {
+            final part = File("$savePath.part");
+            if (await part.exists()) await part.delete();
+          } catch (_) {}
+          return false;
+        }
         Log.w("字体源失败（$baseUrl）：$filePath -> $e");
         // HttpClient.download 先写 $savePath.part、成功后 rename；失败时清掉 .part 残留
         try {
@@ -155,14 +244,17 @@ class AppStyleSettingController extends GetxController {
     }
     curFontName.value = fontName;
     if (curFontName.value != null) {
-      curFontModel.value =
-          fontMap.keys.firstWhere((element) => element.id == curFontName.value, orElse: () => fontMap.keys.first);
+      curFontModel.value = fontMap.keys.firstWhere(
+        (element) => element.id == curFontName.value,
+        orElse: () => fontMap.keys.first,
+      );
     } else {
       curFontModel.value = fontMap.keys.first;
     }
     // maybe curFontName = null
-    fontState.value =
-        await fontDownloadCheck(curFontModel.value!.id) ? DownloadState.downloaded : DownloadState.notDownloaded;
+    fontState.value = await fontDownloadCheck(curFontModel.value!.id)
+        ? DownloadState.downloaded
+        : DownloadState.notDownloaded;
 
     Log.d("当前字体模型：${curFontModel.value!.id}");
   }
@@ -172,13 +264,20 @@ class AppStyleSettingController extends GetxController {
     final fontDir = Directory("$dbPath/fonts/$fontName");
     final loader = FontLoader(fontName);
 
-    await for (final entity in fontDir.list()) {
-      if (entity is File && entity.path.endsWith('.ttf')) {
-        loader.addFont(entity.readAsBytes().then(ByteData.sublistView));
+    // 2026-10-22 复核 P2：本函数挂在启动链（init → userFontInit → loadFont）且无兜底，
+    // 任一文件读取失败会让 runApp 不执行（白屏）；本批又让 6 个 .otf 家族首次走进这条路径。
+    try {
+      await for (final entity in fontDir.list()) {
+        // 2026-10-22 修复：原只认 .ttf → 6 个纯 .otf 家族（32 文件）根本加载不了
+        if (entity is File && FontFileCheck.isFontFileName(entity.path)) {
+          loader.addFont(entity.readAsBytes().then(ByteData.sublistView));
+        }
       }
+      await loader.load();
+      Log.d('已加载$fontName 词库');
+    } catch (e, s) {
+      Log.e('加载字体失败（$fontName），回退系统默认字体', s);
     }
-    await loader.load();
-    Log.d('已加载$fontName 词库');
   }
 
   /// 字体是否「完整下载」（供 UI 状态与启动加载判断）。
@@ -188,20 +287,47 @@ class AppStyleSettingController extends GetxController {
     final dbPath = AppSettingsController.instance.dbPath;
     final fontDir = Directory("$dbPath/fonts/$fontName");
     if (!await fontDir.exists()) return false;
-    final ttfCount = await fontDir.list().where((e) => e is File && e.path.endsWith('.ttf')).length;
-    if (ttfCount == 0) return false;
-    final expected = _expectedFontFileCount(fontName);
-    return expected <= 0 || ttfCount >= expected;
+    final expectedFiles = _expectedFontFiles(fontName);
+    if (expectedFiles != null && expectedFiles.isNotEmpty) {
+      // 2026-10-22 复核 P3：不再只数个数（目录里残留的多余文件会掩盖缺失），
+      // 改为按清单逐个文件「存在 + 内容合法」精确校（每家族 ≤9 个文件）
+      for (final path in expectedFiles) {
+        final file = File("${fontDir.path}/${path.split('/').last}");
+        if (!await file.exists()) return false;
+        final check = await _checkFontFile(file);
+        if (check.problem != null) {
+          Log.w(
+            "字体文件校验不通过：${file.path} -> ${check.problem}"
+            "${check.unreadable ? "（读取异常，非内容损坏）" : ""}",
+          );
+          return false;
+        }
+      }
+      return true;
+    }
+    // 清单取不到（异常情况）→ 退回「≥1 个字体文件 + 内容校验」的旧语义
+    var count = 0;
+    await for (final entity in fontDir.list()) {
+      if (entity is File && FontFileCheck.isFontFileName(entity.path)) {
+        final check = await _checkFontFile(entity);
+        if (check.problem != null) {
+          Log.w("字体文件校验不通过：${entity.path} -> ${check.problem}");
+          return false;
+        }
+        count++;
+      }
+    }
+    return count > 0;
   }
 
-  /// 该字体的期望文件数（从已加载字体清单取；取不到返回 0 = 不校验）。
-  int _expectedFontFileCount(String fontName) {
+  /// 该字体的期望文件相对路径（清单里找不到返回 null → 退回数量校）
+  List<String>? _expectedFontFiles(String fontName) {
     for (final f in fontMap.keys) {
-      if (f.id == fontName) return f.files.length;
+      if (f.id == fontName) return f.files;
     }
     final cur = curFontModel.value;
-    if (cur != null && cur.id == fontName) return cur.files.length;
-    return 0;
+    if (cur != null && cur.id == fontName) return cur.files;
+    return null;
   }
 
   Future<void> fetchFonts() async {

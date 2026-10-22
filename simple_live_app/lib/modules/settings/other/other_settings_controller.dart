@@ -53,7 +53,7 @@ class OtherSettingsController extends BaseController {
     "sdl": "sdl (Cross-platform, via SDL library)",
     "openal": "openal (Cross-platform, OpenAL backend)",
     "libao": "libao (Cross-platform, uses libao library)",
-    "auto": "auto (Not available)"
+    "auto": "auto (Not available)",
   };
 
   var hardwareDecoder = {
@@ -83,7 +83,7 @@ class OtherSettingsController extends BaseController {
     "cuda": "cuda",
     "cuda-copy": "cuda-copy",
     "crystalhd": "crystalhd",
-    "rkmpp": "rkmpp"
+    "rkmpp": "rkmpp",
   };
 
   @override
@@ -146,15 +146,16 @@ class OtherSettingsController extends BaseController {
   }
 
   void saveLogFile(LogFileModel item) async {
-    var filePath = await FilePicker.saveFile(
-      allowedExtensions: ['log'],
-      type: FileType.custom,
-      fileName: item.name,
-    );
-    if (filePath != null) {
-      var file = File(item.path);
-      await file.copy(filePath);
-      SmartDialog.showToast("保存成功");
+    try {
+      // file_picker 13：saveFile 需提供字节，由插件写入选中位置
+      final bytes = await File(item.path).readAsBytes();
+      final uri = await FilePicker.saveFile(fileName: item.name, bytes: bytes, mimeType: 'text/plain');
+      if (uri != null) {
+        SmartDialog.showToast("保存成功");
+      }
+    } catch (e) {
+      Log.logPrint(e);
+      SmartDialog.showToast("保存失败:$e");
     }
   }
 
@@ -172,24 +173,16 @@ class OtherSettingsController extends BaseController {
 
       var bytes = Uint8List.fromList(utf8.encode(jsonEncode(data)));
 
-      // FilePicker 直接写入
-      var inlineSave = Platform.isAndroid || Platform.isIOS || kIsWeb;
-
-      var path = await FilePicker.saveFile(
-        allowedExtensions: ['json'],
-        type: FileType.custom,
+      // file_picker 13：统一提供字节，由插件写入选中位置（桌面/移动一致）
+      final uri = await FilePicker.saveFile(
         fileName: "simple_live_config.json",
-        bytes: inlineSave ? bytes : null,
+        bytes: bytes,
+        mimeType: "application/json",
       );
 
-      if (path == null && !kIsWeb) {
+      if (uri == null && !kIsWeb) {
         SmartDialog.showToast("保存取消");
         return;
-      }
-
-      // 桌面平台需要手动写入
-      if (!inlineSave && path != null) {
-        await File(path).writeAsBytes(bytes);
       }
 
       SmartDialog.showToast("保存成功");
@@ -201,14 +194,18 @@ class OtherSettingsController extends BaseController {
 
   void importConfig() async {
     try {
-      var file = await FilePicker.pickFiles(
+      // file_picker 13：pickFiles 在所有平台硬编码多选（allowMultiple: true），此处需单选→用 pickFile
+      final file = await FilePicker.pickFile(
         allowedExtensions: ['json'],
         type: FileType.custom,
       );
       if (file == null) {
         return;
       }
-      var filePath = file.files.single.path!;
+      final filePath = file.path;
+      if (filePath == null) {
+        return;
+      }
       var data = jsonDecode(await File(filePath).readAsString());
       if (data["type"] != "simple_live") {
         SmartDialog.showToast("不支持的配置文件");

@@ -425,7 +425,8 @@ class FollowService extends GetxService {
       int rankA = historyRankMap[a.id] ?? maxRank;
       double normRecencyA = (maxRank - rankA).toDouble() / maxRank;
       double wDormantA = dormantIds.contains(a.id) ? 0.0 : 1.0;
-      double scoreA = ((wDuration * normDurationA) + (wRecency * normRecencyA)) *
+      double scoreA =
+          ((wDuration * normDurationA) + (wRecency * normRecencyA)) *
           (a.liveStatus.value == 2 ? wOnline : wOffline) *
           wDormantA;
 
@@ -433,7 +434,8 @@ class FollowService extends GetxService {
       int rankB = historyRankMap[b.id] ?? maxRank;
       double normRecencyB = (maxRank - rankB).toDouble() / maxRank;
       double wDormantB = dormantIds.contains(b.id) ? 0.0 : 1.0;
-      double scoreB = ((wDuration * normDurationB) + (wRecency * normRecencyB)) *
+      double scoreB =
+          ((wDuration * normDurationB) + (wRecency * normRecencyB)) *
           (b.liveStatus.value == 2 ? wOnline : wOffline) *
           wDormantB;
 
@@ -512,8 +514,7 @@ class FollowService extends GetxService {
     try {
       var site = Sites.allSites[item.siteId]!;
       // 仅需房间状态/封面等，不获取弹幕凭证（减少请求、降低平台风控）
-      LiveRoomDetail detail = await site.liveSite
-          .getRoomDetail(roomId: item.roomId, includeDanmaku: false);
+      LiveRoomDetail detail = await site.liveSite.getRoomDetail(roomId: item.roomId, includeDanmaku: false);
       item.liveStatus.value = detail.status ? 2 : 1;
       item.liveStartTime.value = detail.status ? detail.startTime : null;
       item.cover.value = detail.status ? detail.cover : "";
@@ -634,14 +635,19 @@ class FollowService extends GetxService {
         SmartDialog.showToast("无权限");
         return;
       }
-      var file = await FilePicker.pickFiles(
+      // file_picker 13：pickFiles 在所有平台硬编码多选，此处需单选→用 pickFile
+      final file = await FilePicker.pickFile(
         type: FileType.custom,
         allowedExtensions: ['json'],
       );
       if (file == null) {
         return;
       }
-      var jsonFile = File(file.files.single.path!);
+      final path = file.path;
+      if (path == null) {
+        return;
+      }
+      var jsonFile = File(path);
       await inputJson(await jsonFile.readAsString());
       SmartDialog.showToast("导入成功");
     } catch (e) {
@@ -754,7 +760,7 @@ class FollowService extends GetxService {
             "addTime": item.addTime.toString(),
             "remark": item.remark,
             "romanName": item.romanName,
-            "tag": item.tag
+            "tag": item.tag,
           },
         )
         .toList();
