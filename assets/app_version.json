@@ -1,15 +1,15 @@
 {
-    "version": "1.08.32",
-    "version_num": 10832,
-    "version_desc": "- 修复：**更新界面不跟随夜间模式**（一直白色）——该页误用 `package:flutter/material.dart`（工程其余 86 个文件统一走 `material_ui` 包；material 已拆为独立包），两套 mate\n- 维护：构建依赖跟上游改写后的 media-kit 提交（原钉 ref 被上游 force-push 抹除导致 CI 无法克隆；仅换引用、包内容不变）",
+    "version": "1.08.33",
+    "version_num": 10833,
+    "version_desc": "- 直播间**非全屏**时，若右侧弹幕栏处于**覆盖式（收起）**状态：**长按屏幕可直接从右侧滑出弹幕栏**（与全屏长按滑出关注列表的手感一致）；分栏状态/竖屏长按仍为关注列表\n- 上游同步：内嵌 `packages/media_kit` 副本深度同步至上游最新（保留自有 libmpv 定制）；`media_kit_video` 维持 `e4220ada`（上游后续提交把 wakelock_plus 升至 1.8.\n- 内置 libmpv 以新基线重建（音量均衡自建版）：android 构建系统 v1.3.1、windows 20260915；产物迁移至新 Release（-v2），校验哈希同步更新",
     "prerelease": true,
     "download_url": "https://github.com/Howezzzzz/dart_simple_live/releases",
     "download_urls": {
-        "android": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.32/app-arm64-v8a-release.apk",
-        "windows": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.32/Slive-1.08.32+10832-windows-setup.exe",
-        "macos": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.32/simple_live_app-1.08.32+10832-macos.dmg",
-        "linux": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.32/Slive-x86_64-linux.deb",
-        "linux_flatpak": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.32/Slive-x86_64.flatpak"
+        "android": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.33/app-arm64-v8a-release.apk",
+        "windows": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.33/Slive-1.08.33+10833-windows-setup.exe",
+        "macos": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.33/simple_live_app-1.08.33+10833-macos.dmg",
+        "linux": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.33/Slive-x86_64-linux.deb",
+        "linux_flatpak": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.33/Slive-x86_64.flatpak"
     },
     "mirror_prefixes": [
         "https://gh-proxy.com/",
@@ -17,10 +17,10 @@
         "https://ghproxy.cc/"
     ],
     "download_sha256": {
-        "android": "7396152bb40747736b9d894c76bebbfd53b0cdbe4da88c07e800aa92c6886274",
-        "windows": "9dd087e2210aa0d90e87d86ec5f2dab51ba9493855bad290d28f1074f98c7b38",
-        "macos": "f469703d9c5f1c0323c58c308e42f9e9bb9b27dde161b9dcd341fbe7ee8ffe4e",
-        "linux": "aca84f476e542f5561598de1b01b5a726e96fa9677c9e8550cfec64022d4709f",
-        "linux_flatpak": "ae9ef5278d54eec4998aa8535128216a9b2b4afd1c9b96bdb57114985880abe7"
+        "android": "1bea07b7ecef3259d82252e01054db72d3f0a81efa332e6974bc2917673c8ab1",
+        "windows": "e1cfdd34fd13d9e4ff71e4360390a2131bccd497f883a0fd59b4cd745f9d4f90",
+        "macos": "d52688c86af4ac29c81ce4787b18aaec8f9e8490fec84320a4eaa69c6a740b14",
+        "linux": "20f14c173f93786ebb8350b9dd25f82df81f16ca535bf8d8b2afefacf3b8ce06",
+        "linux_flatpak": "59a516e82894eeece24dc5e568ccdf7316d8f06ba67de81a70ad4d50596c18e3"
     }
 }
