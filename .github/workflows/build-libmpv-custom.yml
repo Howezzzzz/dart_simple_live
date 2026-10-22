@@ -131,7 +131,7 @@ jobs:
             echo "probe [$code] $1"
             case "$code" in
               200|206)
-                sed -i "s|https://lib\.openmpt\.org/files/libopenmpt/src/libopenmpt-0\.7\.[0-9]+release\.autotools\.tar\.gz|$1|" "$F"
+                sed -i "s|https://lib\.openmpt\.org/files/libopenmpt/src/[^[:space:]]*|$1|" "$F"
                 sed -i "s|SHA256=[0-9A-Fa-f]*|SHA256=$2|" "$F"
                 echo "-> applied: $1"
                 grep -nE 'URL' "$F"
@@ -139,10 +139,10 @@ jobs:
               *) return 1 ;;
             esac
           }
-          try_src "https://lib.openmpt.org/files/libopenmpt/src/libopenmpt-0.7.12+release.autotools.tar.gz" "79AB3CE3672601E525B5CC944F026C80C03032F37D39CAA84C8CA3FDD75E0C98" \
+          # 实测（2026-10-22 runner）：lib.openmpt.org 整站不可达（curl 000）；buildroot 镜像 206 可下。
+          try_src "https://sources.buildroot.net/libopenmpt/libopenmpt-0.7.13+release.autotools.tar.gz" "DCD7CDE4F9C498EB496C4556E1C1B81353E2A74747E8270A42565117EA42E1F1" \
           || try_src "https://lib.openmpt.org/files/libopenmpt/src/libopenmpt-0.7.13+release.autotools.tar.gz" "DCD7CDE4F9C498EB496C4556E1C1B81353E2A74747E8270A42565117EA42E1F1" \
-          || try_src "https://sources.buildroot.net/libopenmpt/libopenmpt-0.7.13+release.autotools.tar.gz" "DCD7CDE4F9C498EB496C4556E1C1B81353E2A74747E8270A42565117EA42E1F1" \
-          || try_src "https://sources.buildroot.net/libopenmpt/libopenmpt-0.7.12+release.autotools.tar.gz" "79AB3CE3672601E525B5CC944F026C80C03032F37D39CAA84C8CA3FDD75E0C98" \
+          || try_src "https://lib.openmpt.org/files/libopenmpt/src/libopenmpt-0.7.12+release.autotools.tar.gz" "79AB3CE3672601E525B5CC944F026C80C03032F37D39CAA84C8CA3FDD75E0C98" \
           || { echo "::error::no usable libopenmpt source found (0.7.12/0.7.13/mirrors all unreachable)"; exit 1; }
 
       - name: Configure & download sources
