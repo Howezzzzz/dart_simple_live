@@ -78,13 +78,11 @@ Widget buildFullControls(
               if (controller.lockControlsState.value) {
                 return;
               }
-              // 2026-10-22 Howe：非全屏 + 右侧弹幕栏处于覆盖式（收起）时，
-              // 长按屏幕改为从右侧滑出弹幕栏（对齐全屏长按出关注列表的手感）
-              if (!controller.fullScreenState.value &&
-                  !controller.windowFillState.value &&
-                  controller.panelOverlayActive &&
-                  !controller.panelOverlayOpen.value) {
-                controller.panelOverlayOpen.value = true;
+              // 2026-10-22 Howe：长按行为由页面按当帧布局决定（非全屏+收起态→划出弹幕栏；否则关注列表）
+              final h = controller.videoLongPressHandler;
+              Log.d('[长按] handler=${h != null}');
+              if (h != null) {
+                h();
                 return;
               }
               showFollowUser(controller);
@@ -460,7 +458,17 @@ Widget buildControls(
           onVerticalDragStart: controller.onVerticalDragStart,
           onVerticalDragUpdate: controller.onVerticalDragUpdate,
           onVerticalDragEnd: controller.onVerticalDragEnd,
-          //onLongPress: controller.showDebugInfo,
+          // 2026-10-22 Howe：直播间（非全屏）长按也要能划出弹幕栏（此前此行被注释→长按无人处理）
+          onLongPress: () {
+            if (controller.lockControlsState.value) return;
+            final h = controller.videoLongPressHandler;
+            Log.d('[长按] buildControls handler=${h != null}');
+            if (h != null) {
+              h();
+            } else {
+              showFollowUser(controller);
+            }
+          },
           child: MouseRegion(
             onEnter: controller.onEnter,
             child: Container(

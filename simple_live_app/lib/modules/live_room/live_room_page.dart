@@ -91,6 +91,7 @@ class LiveRoomPage extends GetView<LiveRoomController> {
           );
         }
         if (controller.fullScreenState.value || controller.windowFillState.value) {
+          controller.videoLongPressHandler = null; // 全屏/窗口全屏：长按仍出关注列表
           Widget fillPage = PopScope(
             canPop: false,
             onPopInvokedWithResult: (e, r) {
@@ -212,6 +213,7 @@ class LiveRoomPage extends GetView<LiveRoomController> {
   Widget buildPhoneUI(BuildContext context) {
     // 竖屏无分栏/覆盖层：清掉横屏残留的覆盖记忆（防长按误触发“划出弹幕栏”）
     controller.panelOverlayActive = false;
+    controller.videoLongPressHandler = null; // 竖屏：长按走默认（关注列表），不涉弹幕栏
     return Column(
       children: [
         AspectRatio(
@@ -412,6 +414,16 @@ class LiveRoomPage extends GetView<LiveRoomController> {
                   );
                   // 普通字段（非 Rx）：build 期写入仅作"下一次判定的滞回记忆"，不触发重建
                   controller.panelOverlayActive = layout.overlay;
+                  // 长按画面：用**当帧布局**决定（非全屏 + 覆盖式收起 → 划出弹幕栏；否则关注列表）
+                  controller.videoLongPressHandler = () {
+                    if (controller.lockControlsState.value) return;
+                    if (layout.overlay && !controller.panelOverlayOpen.value) {
+                      controller.panelOverlayOpen.value = true;
+                      Log.d('[长按] 划出弹幕栏');
+                      return;
+                    }
+                    showFollowUser(controller);
+                  };
                   final overlay = layout.overlay;
                   final renderW = layout.renderW;
                   final openOverlay = controller.panelOverlayOpen.value;
@@ -432,7 +444,20 @@ class LiveRoomPage extends GetView<LiveRoomController> {
                       Row(
                         children: [
                           Expanded(
-                            child: buildMediaPlayer(),
+                            // 视频窗格整体接长按：贴底后上方黑边区没有媒体组件的手势层（Howe 2026-10-22）
+                            child: GestureDetector(
+                              behavior: HitTestBehavior.translucent,
+                              onLongPress: () {
+                                if (controller.lockControlsState.value) return;
+                                final h = controller.videoLongPressHandler;
+                                if (h != null) {
+                                  h();
+                                } else {
+                                  showFollowUser(controller);
+                                }
+                              },
+                              child: buildMediaPlayer(),
+                            ),
                           ),
                           if (!overlay)
                             SizedBox(
@@ -480,20 +505,22 @@ class LiveRoomPage extends GetView<LiveRoomController> {
                       // 覆盖层置于顶栏之后（否则顶栏会压住其关闭按钮）；宽度夹逼防遮满画面
                       if (overlay) _buildOverlayPanel(context, layout.overlayW),
                       // 手柄**常驻且始终最后绘制**（同一 Element，翻转时不丢手势）：
-                      // 分栏 → 贴面板左缘；覆盖式收起 → 贴右缘；覆盖式展开 → 贴覆盖层左缘（照样能拖）
-                      Positioned(
-                        right: !overlay ? renderW : (openOverlay ? layout.overlayW : 0),
-                        top: 0,
-                        bottom: 0,
-                        child: buildPanelResizeHandle(
-                          context,
-                          wide: overlay,
-                          // available=0（尺寸未就绪）时不钳制，避免误把宽度拖成 0
-                          dragCap: (overlay && layout.available > 0) ? layout.available : null,
-                          // auto 分栏时把当前渲染宽传给拖拽起点（防切手动第一帧跳变）
-                          dockFrom: (!overlay && settings.autoFitWindowWidth.value) ? layout.renderW : null,
+                      // 分栏 → 贴面板左缘；覆盖式展开 → 贴覆盖层左缘（照样能拖）
+                      // 2026-10-22 Howe：**覆盖式收起态不放手柄**——它贴屏幕最右缘会抢安卓边缘返回手势（右缘左滑变拖宽）
+                      if (!(overlay && !openOverlay))
+                        Positioned(
+                          right: !overlay ? renderW : layout.overlayW,
+                          top: 0,
+                          bottom: 0,
+                          child: buildPanelResizeHandle(
+                            context,
+                            wide: overlay,
+                            // available=0（尺寸未就绪）时不钳制，避免误把宽度拖成 0
+                            dragCap: (overlay && layout.available > 0) ? layout.available : null,
+                            // auto 分栏时把当前渲染宽传给拖拽起点（防切手动第一帧跳变）
+                            dockFrom: (!overlay && settings.autoFitWindowWidth.value) ? layout.renderW : null,
+                          ),
                         ),
-                      ),
                     ],
                   );
                 },
@@ -596,21 +623,25 @@ class LiveRoomPage extends GetView<LiveRoomController> {
       double aspectByUser = AppSettingsController.instance.aspectByUser.value;
       aspectRatio = aspectByUser;
     }
-    return Stack(
-      children: [
-        _buildAlignedVideo(boxFit: boxFit, aspectRatio: aspectRatio),
-        Obx(
-          () => Visibility(
-            visible: !controller.liveStatus.value,
-            child: const Center(
-              child: Text(
-                "未开播",
-                style: TextStyle(fontSize: 16, color: Colors.white),
+    // 视频区统一黑底：贴底后上方留黑边、居中/满屏模式的留白也都是黑（不再露页面背景）
+    return Container(
+      color: Colors.black,
+      child: Stack(
+        children: [
+          _buildAlignedVideo(boxFit: boxFit, aspectRatio: aspectRatio),
+          Obx(
+            () => Visibility(
+              visible: !controller.liveStatus.value,
+              child: const Center(
+                child: Text(
+                  "未开播",
+                  style: TextStyle(fontSize: 16, color: Colors.white),
+                ),
               ),
             ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
@@ -619,8 +650,12 @@ class LiveRoomPage extends GetView<LiveRoomController> {
   /// fill/cover 无黑边、桌面保持原“居中”行为不变。
   Widget _buildAlignedVideo({required BoxFit boxFit, double? aspectRatio}) {
     // 安卓且 contain：视频比例夹框后再沉底；取不到尺寸（未就绪）或强制满铺模式不夹
+    // 2026-10-22：**全屏/窗口全屏不夹**——edgeToEdge 下贴底会把画面贴到屏幕最底、被系统导航栏遮住一截（上方留大黑块）
     double? bottomAlignAspect;
-    if (Platform.isAndroid && boxFit == BoxFit.contain) {
+    if (Platform.isAndroid &&
+        boxFit == BoxFit.contain &&
+        !controller.fullScreenState.value &&
+        !controller.windowFillState.value) {
       if (aspectRatio != null && aspectRatio > 0) {
         bottomAlignAspect = aspectRatio; // 3/4/5 强制比例
       } else {

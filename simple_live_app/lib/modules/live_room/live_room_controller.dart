@@ -1351,6 +1351,11 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     }
   }
 
+  /// 长按画面时的处理器（由页面在 build 时按「当帧布局」设置）：
+  /// 非全屏 + 右侧面板覆盖式收起态 → 划出弹幕栏；否则走关注列表。
+  /// 为 null（如全屏）时由调用方直接走关注列表。
+  void Function()? videoLongPressHandler;
+
   void resetRoom(Site site, String roomId) async {
     // 切房/重进：复位"视频分辨率 + 覆盖式滞回记忆"，避免沿用上一房的值（切房不走 onInit）
     panelOverlayActive = false;
