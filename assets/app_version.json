@@ -1,15 +1,15 @@
 {
-    "version": "1.08.38",
-    "version_num": 10838,
-    "version_desc": "- 同步上游 dev 更新（11 个提交）：新增「**安全模式**」——把第三方平台凭据（cookie）与 WebDAV 密码在本地用 AES-256 加密保存，密钥托管在**系统安全存储**（Keystore / 钥匙串 / DPAPI）\n- 安全模式**本地加固**（合入时自查发现并修复）：① 修复「设置同步会把安全模式状态带到别的设备、导致对端误触发重置、清空全部账号」的隐患；② 修复「解密时直接改写本地缓存，导致明文凭据可能被 WebDAV 上传」的隐患；③ 账号/密码\n- 播放器依赖 `media_kit_video` 跟进上游最新（移除已废弃的 `wakelock_plus_ohos`，锁文件同步）\n- 稳定性：修复账号失效后界面仍显示为有效的问题；WebDAV 账号合并遇到本机没有的站点时不再崩溃",
+    "version": "1.08.39",
+    "version_num": 10839,
+    "version_desc": "- 修复：安卓横屏（沉浸式）下，覆盖式弹幕栏的「弹幕」标题/按钮、以及分栏面板的「用户信息」压在系统状态栏上——现按状态栏高度避让（背景仍延伸到状态栏后，保持沉浸观感）\n- 修复：Windows 桌面分栏模式，视频顶栏右缘留下的一条未压暗竖缝（顶栏右边界对齐面板左缘）",
     "prerelease": true,
     "download_url": "https://github.com/Howezzzzz/dart_simple_live/releases",
     "download_urls": {
-        "android": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.38/app-arm64-v8a-release.apk",
-        "windows": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.38/Slive-1.08.38+10838-windows-setup.exe",
-        "macos": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.38/simple_live_app-1.08.38+10838-macos.dmg",
-        "linux": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.38/Slive-x86_64-linux.deb",
-        "linux_flatpak": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.38/Slive-x86_64.flatpak"
+        "android": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.39/app-arm64-v8a-release.apk",
+        "windows": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.39/Slive-1.08.39+10839-windows-setup.exe",
+        "macos": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.39/simple_live_app-1.08.39+10839-macos.dmg",
+        "linux": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.39/Slive-x86_64-linux.deb",
+        "linux_flatpak": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.39/Slive-x86_64.flatpak"
     },
     "mirror_prefixes": [
         "https://gh-proxy.com/",
@@ -17,10 +17,10 @@
         "https://ghproxy.cc/"
     ],
     "download_sha256": {
-        "android": "beb10c3cbe4e727023c339d7b164196dd356ede44d5c5531307bf37cb8e4c333",
-        "windows": "a947c8dfd6ba2fd7403a7574cfbc13a4b52ca7fd4e1179b3f3f5f386b68bb1c2",
-        "macos": "a43f25a2194c7d46c64a4c95f226aa30d8fdff4a32b3a6f8b020406b70ec9d58",
-        "linux": "ac33c0bb66130dc79f2e45d907bfd13343e7036ce8a09cd63daebc34e5d6dac6",
-        "linux_flatpak": "7ae99d30af983034aa033e4e6ec7cea5ecdf373df07d602488705c704eee2fd6"
+        "android": "57fe54dffc4b4edae8ccda966f57d0f4519e7af969fcfcede98474137735cdba",
+        "windows": "2aa8de2c3530752ab0bbfef3d01620a5015a950f24c0ef50a20957c819dbb267",
+        "macos": "5b3be4fb401fce272f91df73f77cfebdbea6cfaec652235511691664c74184fa",
+        "linux": "1bc330bda9f13b578c3eeda4b2e51a5a6175c42ac2740bda9b2aca9dc8dcb671",
+        "linux_flatpak": "16b552652c3302aea11b510f61a7a0219b8ab410f55fd9e00f52dcf66c4bdcf8"
     }
 }
