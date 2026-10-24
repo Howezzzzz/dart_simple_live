@@ -1,15 +1,15 @@
 {
-    "version": "1.08.37",
-    "version_num": 10837,
-    "version_desc": "- 依赖底座升级（插件现代化批次）：`package_info_plus` 8→10、`device_info_plus` 12→13、`share_plus` 12→13、`network_info_plus` 7→8、`file_pic\n- 文件选择适配新版 API（file_picker 13）：配置导出 / 日志保存 / 截图保存改为**由插件直接写入**所选位置；导入配置 / 导入关注列表改用**单选**接口（保持一次只选一个文件，避免多选后静默丢弃）\n- 工程约束修正：最低 Dart 版本同步为 `>=3.12`（`wakelock_plus 1.8.1` 的真实要求，原 `>=3.0.5` 已失真）\n- 字体下载加固：下载后做**内容级校验**（字体头魔数 + 最小体积 + HTML 错误页嗅探）——此前只数文件个数，截断的文件或镜像返回的错误页会被当成「已下载」并加载（乱码）；校验不过自动换下一个源并重下\n- 字体下载**可取消**：离开外观设置页即停止进行中的下载（此前会在后台继续跑完，且重复点击会并发写同一临时文件）\n- 修复：**6 个纯 .otf 字体家族选了不生效**（寒蝉德黑体 / 寒蝉半圆体 / 卜力士 / 普力士 / IBM Plex Sans SC / 繁 Think 黑）——加载字体与「是否已下载」判定此前**只认 .ttf**，.otf",
+    "version": "1.08.38",
+    "version_num": 10838,
+    "version_desc": "- 同步上游 dev 更新（11 个提交）：新增「**安全模式**」——把第三方平台凭据（cookie）与 WebDAV 密码在本地用 AES-256 加密保存，密钥托管在**系统安全存储**（Keystore / 钥匙串 / DPAPI）\n- 安全模式**本地加固**（合入时自查发现并修复）：① 修复「设置同步会把安全模式状态带到别的设备、导致对端误触发重置、清空全部账号」的隐患；② 修复「解密时直接改写本地缓存，导致明文凭据可能被 WebDAV 上传」的隐患；③ 账号/密码\n- 播放器依赖 `media_kit_video` 跟进上游最新（移除已废弃的 `wakelock_plus_ohos`，锁文件同步）\n- 稳定性：修复账号失效后界面仍显示为有效的问题；WebDAV 账号合并遇到本机没有的站点时不再崩溃",
     "prerelease": true,
     "download_url": "https://github.com/Howezzzzz/dart_simple_live/releases",
     "download_urls": {
-        "android": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.37/app-arm64-v8a-release.apk",
-        "windows": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.37/Slive-1.08.37+10837-windows-setup.exe",
-        "macos": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.37/simple_live_app-1.08.37+10837-macos.dmg",
-        "linux": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.37/Slive-x86_64-linux.deb",
-        "linux_flatpak": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.37/Slive-x86_64.flatpak"
+        "android": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.38/app-arm64-v8a-release.apk",
+        "windows": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.38/Slive-1.08.38+10838-windows-setup.exe",
+        "macos": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.38/simple_live_app-1.08.38+10838-macos.dmg",
+        "linux": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.38/Slive-x86_64-linux.deb",
+        "linux_flatpak": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.38/Slive-x86_64.flatpak"
     },
     "mirror_prefixes": [
         "https://gh-proxy.com/",
@@ -17,10 +17,10 @@
         "https://ghproxy.cc/"
     ],
     "download_sha256": {
-        "android": "48d8ba60e2c04a7f5bae62f5bf79675da03f6a8dcdd94c9c38d1a176f44b4e8e",
-        "windows": "c7656327f5f82593df530fd24d0536ca6ab060226b8024e14cb1ada1ef095ae3",
-        "macos": "75416d8bed003e3f77946287459cafb9cb6271838b834996fa7c96990af41805",
-        "linux": "36d31b24aefdd5f6113c2ce011b7b48ae907c708a0b10b709ae7531065e7f5fc",
-        "linux_flatpak": "51ebc3d10241f26a32c3cbfca1c61d1b0b9eff38952f096e20f75d636bb56dfb"
+        "android": "beb10c3cbe4e727023c339d7b164196dd356ede44d5c5531307bf37cb8e4c333",
+        "windows": "a947c8dfd6ba2fd7403a7574cfbc13a4b52ca7fd4e1179b3f3f5f386b68bb1c2",
+        "macos": "a43f25a2194c7d46c64a4c95f226aa30d8fdff4a32b3a6f8b020406b70ec9d58",
+        "linux": "ac33c0bb66130dc79f2e45d907bfd13343e7036ce8a09cd63daebc34e5d6dac6",
+        "linux_flatpak": "7ae99d30af983034aa033e4e6ec7cea5ecdf373df07d602488705c704eee2fd6"
     }
 }
