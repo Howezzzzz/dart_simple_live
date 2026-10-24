@@ -1692,14 +1692,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.8.1"
-  wakelock_plus_ohos:
-    dependency: transitive
-    description:
-      name: wakelock_plus_ohos
-      sha256: b22af297411555b5ec0fe43ec2960cd5f019dd23b83853214ebe6dcc97b337bd
-      url: "https://pub.dev"
-    source: hosted
-    version: "0.0.3"
   wakelock_plus_platform_interface:
     dependency: transitive
     description:
