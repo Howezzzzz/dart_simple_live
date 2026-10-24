@@ -509,7 +509,9 @@ class LiveRoomPage extends GetView<LiveRoomController> {
                           top: (controller.showControlsState.value && !controller.lockControlsState.value)
                               ? 0
                               : -(64 + MediaQuery.paddingOf(context).top),
-                          right: overlay ? 0.0 : (renderW + 8),
+                          // 右边界对齐面板左缘（原来是 renderW+8，把 8px 拖拽手柄那一竖条露在顶栏渐变之外 → Windows 桌面恒分栏，能看见一条未压暗的竖缝，Howe 2026-10-24）；
+                          // 手柄在本顶栏之后绘制，照样可拖，不受影响
+                          right: overlay ? 0.0 : renderW,
                           duration: const Duration(milliseconds: 200),
                           child: MouseRegion(
                             // 鼠标移到顶栏上等同移到画面上：唤出并重新计时
