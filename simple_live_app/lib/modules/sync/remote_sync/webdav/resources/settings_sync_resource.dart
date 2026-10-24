@@ -11,12 +11,23 @@ class SettingsSyncResource implements SyncResource<Map<String, dynamic>> {
   @override
   String get fileName => "SimpleLive_Settings.json";
 
+  /// 同步时要排除的本地键（设备本地/安全状态）——抽为静态列表便于回归测试（见 ISS-211）
+  static const List<String> excludedSyncKeys = [
+    LocalStorageService.kHiveDbVer,
+    LocalStorageService.kWebDAVPassword,
+    kAppSafeEnable,
+    kAppAuthorName,
+  ];
+
   @override
   Future<Map<String, dynamic>> loadLocal() async {
     var settingList = LocalStorageService.instance.settingsBox.toMap();
-    settingList.remove(LocalStorageService.kHiveDbVer);
-    // 不同步webdav的密码,防止旧密码覆盖新密码
-    settingList.remove(LocalStorageService.kWebDAVPassword);
+    // 不同步：数据库版本 / webdav 密码（防旧密码覆盖）/ 安全模式状态与哨兵。
+    // 原因：安全模式是设备本地状态（密钥存于各设备系统安全存储），跨设备同步会使对端
+    // appSafeEnable=true 但密钥解不开 → 触发破坏性 reset() 清空全部账号（见 ISS-211）
+    for (final key in excludedSyncKeys) {
+      settingList.remove(key);
+    }
     // make cur and remote data_struct: {'Platform.operatingSystem':settingList}
     var curLocal = {
       LocalStorageService.kHiveDbVer: AppSettingsController.instance.dbVer,

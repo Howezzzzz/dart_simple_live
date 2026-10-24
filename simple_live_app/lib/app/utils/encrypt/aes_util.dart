@@ -51,6 +51,11 @@ class AesUtils {
     var nonceLength = 12;
     var macLength = 16;
 
+    // 最小长度校验：非密文/截断数据在此 fail-fast（否则 sublist 抛 RangeError，见 ISS-222）
+    if (combined.length < nonceLength + macLength) {
+      throw const FormatException('AES-GCM 密文长度不足 (<nonce+mac)');
+    }
+
     var nonce = combined.sublist(0, nonceLength);
     var cipherText = combined.sublist(
       nonceLength,

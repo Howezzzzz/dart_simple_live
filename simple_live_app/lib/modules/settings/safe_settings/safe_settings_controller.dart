@@ -77,7 +77,7 @@ class SafeSettingsController extends GetxController {
     if (AppSettingsController.instance.appSafeEnable.value) {
       try {
         String plain = await AesUtils.decrypt(AppSettingsController.instance.appAuthorName, key);
-        return plain == 'AoZora';
+        return plain == SafeService.kSafeMarker;
       } catch (e) {
         Log.i('密钥error，checkDecode');
         return false;

@@ -49,8 +49,13 @@ class AppSettingsController extends GetxController {
 
   var dbPath = "";
 
+  bool _inited = false;
+
   @override
   Future<void> onInit() async {
+    // 幂等：避免 main.dart 里 Get.put 与手动 onInit 双跑（见 ISS-217）
+    if (_inited) return;
+    _inited = true;
     getThemeMode();
     firstRun = LocalStorageService.instance.getValue(LocalStorageService.kFirstRun, true);
     getAppSafeEnable();

@@ -34,8 +34,7 @@ class PasswordUtil {
     'U',
     'V',
     'W',
-    'Z',
-    'X'
+    'Z'
   ];
 
   static final _lowCaseList = [

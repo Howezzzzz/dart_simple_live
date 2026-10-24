@@ -30,8 +30,13 @@ class DBService extends GetxService {
     await accountBox.put(account.id, account);
   }
 
-  Account getAccount(String id) {
-    return accountBox.values.firstWhere((item)=>item.id == id);
+  /// 取指定账号；不存在返回 null。
+  /// 不用 firstWhere（无 orElse 会在账号缺失时抛 StateError，见 ISS-213）。
+  Account? getAccount(String id) {
+    for (final item in accountBox.values) {
+      if (item.id == id) return item;
+    }
+    return null;
   }
 
   List<Account> getAllAccounts() {

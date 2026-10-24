@@ -7,6 +7,9 @@ class Constant {
   static const String kUpdateDanmaku = "UpdateDanmaku";
   static const String kUpdateAccount = "UpdateAccount";
 
+  /// 安全模式哨兵字符串：校验「密钥 ↔ 数据」是否配套（单一来源，见 ISS-223）
+  static const String kSafeMarker = 'AoZora';
+
   static final Map<String, HomePageItem> allHomePages = {
     "recommend": HomePageItem(
       iconData: Remix.home_smile_line,

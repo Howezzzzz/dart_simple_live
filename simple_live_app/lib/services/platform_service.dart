@@ -24,6 +24,8 @@ class PlatformService extends GetxService {
 
   RxList<Account> accountList = RxList();
 
+  bool _inited = false;
+
   Future<void> _initAccount() async {
     accountList.value = await SafeService.instance.getDecodeAccounts();
     // 加密模式, 未登录->跳过cookie使用/登录->解码
@@ -200,6 +202,11 @@ class PlatformService extends GetxService {
     );
     if (!info.isValid) {
       SmartDialog.showToast('${site.name}账号失效，请重新设置');
+      // 失效也要回写 isActive，否则 UI 无法反映账号已失效（见 ISS-220）；不覆盖原 credential
+      await updateAccount(ac.copyWith(
+        isActive: false,
+        updatedAt: DateTime.now().millisecondsSinceEpoch,
+      ));
     } else {
       site.liveSite.setSiteAttrs(resAc.credential);
       await updateAccount(resAc);
@@ -269,9 +276,21 @@ class PlatformService extends GetxService {
 
   @override
   Future<void> onInit() async {
-    subscription = EventBus.instance.listen(Constant.kUpdateAccount, (account) {
+    // 幂等：Get.put 内部已会触发 onInit，调用方再手动调一次不得重复初始化
+    // （否则 EventBus 双订阅泄漏 + _initAccount/accountLogin 双跑，见 ISS-217）
+    if (_inited) {
+      super.onInit();
+      return;
+    }
+    _inited = true;
+    subscription = EventBus.instance.listen(Constant.kUpdateAccount, (data) {
       Log.i('update Account');
-      accountLogin(account);
+      if (data is Account) {
+        accountLogin(data);
+      } else {
+        // 非 Account 载荷（如 webdav 恢复后的刷新信号 0）→ 整体重载并重加密（见 ISS-216）
+        _initAccount();
+      }
     });
     await _initAccount();
     _updateDouyinAttr();

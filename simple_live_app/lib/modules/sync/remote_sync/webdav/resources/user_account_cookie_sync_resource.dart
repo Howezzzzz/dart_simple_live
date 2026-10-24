@@ -32,7 +32,7 @@ class UserAccountCookieSyncResource implements SyncResource<List<Account>> {
     for (var item in data) {
       await DBService.instance.addAccount(item);
     }
-    EventBus.instance.emit(Constant.kUpdateAccount, 0);
+    EventBus.instance.emit(Constant.kUpdateAccount, 0); // 0 = 「账号已整体变更」刷新信号（非 Account，监听方需区分，见 ISS-216）
   }
 
   @override
@@ -50,8 +50,9 @@ class UserAccountCookieSyncResource implements SyncResource<List<Account>> {
     final map = {for (final item in local) item.siteId: item};
 
     for (final account in remote) {
-      final localAc = map[account.siteId]!;
-      if (account.updatedAt > localAc.updatedAt) {
+      final localAc = map[account.siteId];
+      // 本地无该 siteId → 直接补入；不得用 `!` 空断言（陌生/异构账号会崩，见 ISS-215）
+      if (localAc == null || account.updatedAt > localAc.updatedAt) {
         map[account.siteId] = account;
       }
     }
