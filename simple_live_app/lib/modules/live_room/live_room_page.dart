@@ -317,7 +317,7 @@ class LiveRoomPage extends GetView<LiveRoomController> {
 
   /// 极窄窗口的**覆盖式弹幕面板**（RISK-17 方案 B，2026-10-21 Howe 定）：
   /// 默认收起、右缘一个展开按钮；点开后以覆盖层从右侧滑出（不挤压播放区）。
-  Widget _buildOverlayPanel(BuildContext context, double panelW) {
+  Widget _buildOverlayPanel(BuildContext context, double panelW, double topInset) {
     return Obx(key: const ValueKey('overlayPanel'), // 固定身份：防插入兄弟时状态重置→动画闪入
         () {
       final open = controller.panelOverlayOpen.value;
@@ -358,31 +358,36 @@ class LiveRoomPage extends GetView<LiveRoomController> {
             width: panelW,
             child: Container(
               color: Theme.of(context).cardColor,
-              child: Column(
-                children: [
-                  Row(
-                    children: [
-                      const SizedBox(width: 8),
-                      const Text("弹幕", style: TextStyle(fontSize: 13)),
-                      const Spacer(),
-                      // 明确的「回到分栏」按钮（Howe 2026-10-21：覆盖式打开后没有返回分栏的入口）
-                      TextButton.icon(
-                        onPressed: () => _restoreDefaultPanel(context),
-                        icon: const Icon(Icons.vertical_split, size: 15),
-                        label: const Text("分栏", style: TextStyle(fontSize: 12)),
-                        style: TextButton.styleFrom(
-                          visualDensity: VisualDensity.compact,
-                          padding: const EdgeInsets.symmetric(horizontal: 8),
+              // 背景延伸到状态栏后面（沉浸式观感）；只把内容垫开状态栏高度，
+              // 否则「弹幕」标题与按钮会压在系统状态栏上（Howe 2026-10-24 真机）
+              child: Padding(
+                padding: EdgeInsets.only(top: topInset),
+                child: Column(
+                  children: [
+                    Row(
+                      children: [
+                        const SizedBox(width: 8),
+                        const Text("弹幕", style: TextStyle(fontSize: 13)),
+                        const Spacer(),
+                        // 明确的「回到分栏」按钮（Howe 2026-10-21：覆盖式打开后没有返回分栏的入口）
+                        TextButton.icon(
+                          onPressed: () => _restoreDefaultPanel(context),
+                          icon: const Icon(Icons.vertical_split, size: 15),
+                          label: const Text("分栏", style: TextStyle(fontSize: 12)),
+                          style: TextButton.styleFrom(
+                            visualDensity: VisualDensity.compact,
+                            padding: const EdgeInsets.symmetric(horizontal: 8),
+                          ),
                         ),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.close, size: 18),
-                        onPressed: () => controller.panelOverlayOpen.value = false,
-                      ),
-                    ],
-                  ),
-                  Expanded(child: buildMessageArea()),
-                ],
+                        IconButton(
+                          icon: const Icon(Icons.close, size: 18),
+                          onPressed: () => controller.panelOverlayOpen.value = false,
+                        ),
+                      ],
+                    ),
+                    Expanded(child: buildMessageArea()),
+                  ],
+                ),
               ),
             ),
           ),
@@ -392,6 +397,9 @@ class LiveRoomPage extends GetView<LiveRoomController> {
   }
 
   Widget buildTabletUI(BuildContext context, {bool showOverlayBar = false}) {
+    // 安卓/桌面横屏沉浸式（edgeToEdge）：body 画到状态栏后面，右侧面板顶部内容需要垫开状态栏高度
+    // （与 buildVideoTopBar 同口径）。非沉浸式（有一体 AppBar）时 = 0，不重复垫。
+    final topInset = showOverlayBar ? MediaQuery.paddingOf(context).top : 0.0;
     return Column(
       children: [
         Expanded(
@@ -463,11 +471,18 @@ class LiveRoomPage extends GetView<LiveRoomController> {
                           if (!overlay)
                             SizedBox(
                               width: renderW,
-                              child: Column(
-                                children: [
-                                  buildUserProfile(context),
-                                  buildMessageArea(),
-                                ],
+                              child: Container(
+                                color: Theme.of(context).cardColor,
+                                // 沉浸式下垫开状态栏：否则「用户信息」压在系统状态栏上（与覆盖式弹幕栏同一问题）
+                                child: Padding(
+                                  padding: EdgeInsets.only(top: topInset),
+                                  child: Column(
+                                    children: [
+                                      buildUserProfile(context),
+                                      buildMessageArea(),
+                                    ],
+                                  ),
+                                ),
                               ),
                             ),
                         ],
@@ -506,7 +521,7 @@ class LiveRoomPage extends GetView<LiveRoomController> {
                           ),
                         ),
                       // 覆盖层置于顶栏之后（否则顶栏会压住其关闭按钮）；宽度夹逼防遮满画面
-                      if (overlay) _buildOverlayPanel(context, layout.overlayW),
+                      if (overlay) _buildOverlayPanel(context, layout.overlayW, topInset),
                       // 手柄**常驻且始终最后绘制**（同一 Element，翻转时不丢手势）：
                       // 分栏 → 贴面板左缘；覆盖式展开 → 贴覆盖层左缘（照样能拖）
                       // 2026-10-22 Howe：**覆盖式收起态不放手柄**——它贴屏幕最右缘会抢安卓边缘返回手势（右缘左滑变拖宽）
