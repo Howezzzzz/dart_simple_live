@@ -30,6 +30,8 @@ dependencies:
   firebase_core: ^4.13.0
   intl: ^0.20.2 # 国际化
   pinyin: ^3.3.0
+  cryptography: ^2.9.0
+  cryptography_flutter: ^2.3.4
   qr_flutter: ^4.1.0 # 二维码生成
   dynamic_color: ^2.1.0 # 动态颜色
   path: any
@@ -86,6 +88,7 @@ dependencies:
       ref: sbi_fx_pc/v6.2.0-beta.3
   connectivity_plus: ^7.0.0 # 网络状态
   qr_code_scanner_plus: ^2.0.14 # 二维码扫描
+  flutter_secure_storage: ^11.2.0 # 密钥存储
 
   # 网络相关
   webdav_client: ^1.2.2 # WebDAV

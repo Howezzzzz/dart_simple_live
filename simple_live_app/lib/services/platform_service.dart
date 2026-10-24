@@ -6,14 +6,15 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:get/get.dart';
 import 'package:simple_live_app/app/constant.dart';
+import 'package:simple_live_app/app/controller/app_settings_controller.dart';
 import 'package:simple_live_app/app/event_bus.dart';
 import 'package:simple_live_app/app/log.dart';
 import 'package:simple_live_app/app/sites.dart';
 import 'package:simple_live_app/models/db/account.dart';
 import 'package:simple_live_app/requests/common_request.dart';
-import 'package:simple_live_app/services/db_service.dart';
 import 'package:simple_live_app/services/local_storage_service.dart';
 import 'package:simple_live_app/services/web_login_cookies.dart';
+import 'package:simple_live_app/services/safe_service.dart';
 import 'package:simple_live_core/simple_live_core.dart';
 
 class PlatformService extends GetxService {
@@ -23,8 +24,12 @@ class PlatformService extends GetxService {
 
   RxList<Account> accountList = RxList();
 
-  void _initAccount() {
-    accountList.value = DBService.instance.getAllAccounts();
+  Future<void> _initAccount() async {
+    accountList.value = await SafeService.instance.getDecodeAccounts();
+    // 加密模式, 未登录->跳过cookie使用/登录->解码
+    if (AppSettingsController.instance.appSafeEnable.value && !AppSettingsController.instance.appStoreKey.value) {
+      return;
+    }
     // 自动更新
     for (var account in accountList) {
       accountLogin(account);
@@ -37,7 +42,7 @@ class PlatformService extends GetxService {
       accountList.map((a) => a.id == ac.id ? ac : a).toList(),
     );
     accountList.refresh();
-    await DBService.instance.addAccount(ac);
+    await SafeService.instance.encodeAccount(ac);
   }
 
   Future<void> accountLogout(Account ac) async {
@@ -193,10 +198,11 @@ class PlatformService extends GetxService {
       isActive: info.isValid,
       updatedAt: DateTime.now().millisecondsSinceEpoch,
     );
-    await updateAccount(resAc);
-    site.liveSite.setSiteAttrs(resAc.credential);
     if (!info.isValid) {
       SmartDialog.showToast('${site.name}账号失效，请重新设置');
+    } else {
+      site.liveSite.setSiteAttrs(resAc.credential);
+      await updateAccount(resAc);
     }
     return info.isValid;
   }
@@ -204,6 +210,7 @@ class PlatformService extends GetxService {
   // ==================== 抖音 ====================
 
   final _douyinSite = (Sites.allSites[Constant.kDouyin]!.liveSite as DouyinSite);
+
   void _updateDouyinAttr() {
     var douyinHlsFirst = LocalStorageService.instance.getValue(LocalStorageService.kDouyinHlsFirst, false);
     Map<String, dynamic> params = {
@@ -261,12 +268,12 @@ class PlatformService extends GetxService {
   // ==================== 生命周期 ====================
 
   @override
-  void onInit() {
+  Future<void> onInit() async {
     subscription = EventBus.instance.listen(Constant.kUpdateAccount, (account) {
       Log.i('update Account');
       accountLogin(account);
     });
-    _initAccount();
+    await _initAccount();
     _updateDouyinAttr();
     _initHuya();
     super.onInit();
