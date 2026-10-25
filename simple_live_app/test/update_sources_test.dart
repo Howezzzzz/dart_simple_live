@@ -115,7 +115,7 @@ void main() {
     });
     test('空链接 / 版本号非法 → 不可信', () {
       expect(CommonRequest.isTrustedManifest(_v(0)), isFalse);
-      expect(CommonRequest.isTrustedManifest(_v(1000000)), isFalse);
+      expect(CommonRequest.isTrustedManifest(_v(100000000)), isFalse); // 超新上界 99,999,999（ISS-163）
       expect(CommonRequest.isTrustedManifest(_v(10821, downloadUrl: '')), isFalse);
     });
   });

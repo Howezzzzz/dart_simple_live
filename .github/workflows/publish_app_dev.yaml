@@ -75,15 +75,19 @@ jobs:
           BASE="${OLD%%+*}"
           IFS='.' read -r MA MI PA <<< "$BASE"
           MA=$((10#$MA)); MI=$((10#$MI)); PA=$((10#$PA + 1))
-          # patch ≥100 会让 version_num 公式(major*10000+minor*100+patch) 与 app 端
-          # parseVersion(逐段补零拼接) 分叉 —— 到 100 时进位到下一 minor、patch 归 0
-          if [ "$PA" -ge 100 ]; then
+          # version_num 统一公式（2026-10-25，ISS-163）：major*1000000 + minor*1000 + patch，
+          # 与 app 端 Utils.parseVersion / scripts/update_version.dart 同源。各段上限 1000（到 1000 进位），
+          # 避免"段满两位溢出串位"（旧 *10000/*100 公式在 minor≥100 时会与 app 端分叉）
+          if [ "$PA" -ge 1000 ]; then
             MI=$((MI + 1)); PA=0
+          fi
+          if [ "$MI" -ge 1000 ]; then
+            MA=$((MA + 1)); MI=0
           fi
           # 2026-10-20 Howe 定：minor/patch 恒两位（段内 9→10 不进位跨点；进位归零补零）。
           # 例：1.8.24 → 1.08.25；1.9.99 → 1.10.00（major 不补零，与 app 端 formatVersion 一致）
           NEW="$(printf '%s.%02d.%02d' "$MA" "$MI" "$PA")"
-          NUM=$((MA*10000 + MI*100 + PA))
+          NUM=$((MA*1000000 + MI*1000 + PA))
           echo "version: $OLD -> $NEW+$NUM"
           sed -i "s/^version: .*/version: $NEW+$NUM/" simple_live_app/pubspec.yaml
           git config user.name "slive-bot"
@@ -602,7 +606,7 @@ jobs:
           import hashlib, json, os, sys
           tag, ver, desc = sys.argv[1], sys.argv[2], sys.argv[3]
           parts = ver.split('+')[0].split('.')
-          num = int(parts[0]) * 10000 + int(parts[1]) * 100 + int(parts[2]) if len(parts) == 3 else 0
+          num = int(parts[0]) * 1000000 + int(parts[1]) * 1000 + int(parts[2]) if len(parts) == 3 else 0
           files = [os.path.basename(os.path.join(r, f)) for r, _, fs in os.walk("dist") for f in fs]
           def pick(*preds):
               for pred in preds:

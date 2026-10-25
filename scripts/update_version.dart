@@ -157,10 +157,12 @@ Map<String, List<String>> _parseChangelog(String content) {
 }
 
 int _versionToNum(String version) {
-  final parts = version.split('.');
+  // 与 app 端 Utils.parseVersion / CI 同一公式（2026-10-25 统一，ISS-163）：
+  // major*1000000 + minor*1000 + patch；各段上限 1000。
+  final parts = version.split('+').first.split('.');
   if (parts.length != 3) return 0;
-  return int.parse(parts[0]) * 10000 +
-      int.parse(parts[1]) * 100 +
+  return int.parse(parts[0]) * 1000000 +
+      int.parse(parts[1]) * 1000 +
       int.parse(parts[2]);
 }
 

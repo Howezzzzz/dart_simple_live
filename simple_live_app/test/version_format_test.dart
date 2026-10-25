@@ -33,12 +33,30 @@ void main() {
       expect(Utils.formatVersion('1.9.99'), '1.09.99');
     });
 
-    test('与 CI version_num 公式的绝对契约（防两侧同时漂移）', () {
-      // CI bump：NUM = major*10000 + minor*100 + patch；app 端 parseVersion 必须恒等
-      expect(Utils.parseVersion('1.08.25'), 10825);
-      expect(Utils.parseVersion('1.10.0'), 11000);
-      expect(Utils.parseVersion('1.10.00'), 11000);
-      expect(Utils.parseVersion('1.09.99'), 10999);
+    test('与 CI version_num 公式的绝对契约（防两侧同时漂移；2026-10-25 统一为 *1000000/*1000）', () {
+      // 统一公式（app / CI / scripts 三处同源，ISS-163）：NUM = major*1000000 + minor*1000 + patch
+      expect(Utils.parseVersion('1.08.25'), 1008025);
+      expect(Utils.parseVersion('1.10.0'), 1010000);
+      expect(Utils.parseVersion('1.10.00'), 1010000);
+      expect(Utils.parseVersion('1.09.99'), 1009099);
+    });
+
+    test('段溢出不再分叉：minor/patch ≥100 时仍与公式恒等且序正确（ISS-163）', () {
+      // 旧「逐段补零拼接」与 CI 乘法公式在段到 100 时分叉（如 1.100.41：拼接 110041 vs 公式 20041）；
+      // 现统一为乘法公式后必须恒等，且跨 minor / 跨 major 都不得串位。
+      expect(Utils.parseVersion('1.100.41'), 1100041);
+      expect(Utils.parseVersion('1.100.00'), 1100000);
+      expect(Utils.parseVersion('1.999.999'), 1999999);
+      expect(Utils.parseVersion('2.0.0'), 2000000);
+      // 严格递增
+      expect(Utils.parseVersion('1.100.00'), greaterThan(Utils.parseVersion('1.99.99')));
+      expect(Utils.parseVersion('1.100.41'), greaterThan(Utils.parseVersion('1.100.40')));
+      expect(Utils.parseVersion('2.0.0'), greaterThan(Utils.parseVersion('1.999.999')));
+    });
+
+    test('兼容带构建号输入（与 formatVersion 对称，ISS-163）', () {
+      expect(Utils.parseVersion('1.08.41+10841'), 1008041);
+      expect(Utils.parseVersion('1.08.41+10841'), Utils.parseVersion('1.08.41'));
     });
 
     test('与 parseVersion 数值一致性：补零不改变比较结果', () {

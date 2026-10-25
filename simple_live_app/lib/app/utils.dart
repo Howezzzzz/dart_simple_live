@@ -561,13 +561,17 @@ class Utils {
     }
   }
 
+  /// 版本号 → 单一整数，供「谁更新」比较。**App / CI / scripts 三处必须同一公式**。
+  ///
+  /// 公式（2026-10-25 统一，ISS-163）：`major*1000000 + minor*1000 + patch`；
+  /// 各段上限 1000（CI 到 1000 进位，见 `publish_app_dev.yaml`）。
+  /// 旧实现「逐段补零拼接」隐含「每段最多两位」，段到 100 时与 CI 乘法公式分叉
+  /// （如 1.100.41：拼接 110041 vs 公式 20041）→ 现统一为同一公式，杜绝分叉。
+  /// 兼容带构建号输入（`1.08.41+10841`）；无法解析的段按 0 处理，不抛异常。
   static int parseVersion(String version) {
-    var sp = version.split('.');
-    var num = "";
-    for (var item in sp) {
-      num = num + item.padLeft(2, '0');
-    }
-    return int.parse(num);
+    final sp = version.split('+').first.split('.');
+    int seg(int i) => i < sp.length ? (int.tryParse(sp[i].trim()) ?? 0) : 0;
+    return seg(0) * 1000000 + seg(1) * 1000 + seg(2);
   }
 
   /// 版本号显示格式：**major 不补零，minor/patch 恒两位**（2026-10-20 Howe 定）。

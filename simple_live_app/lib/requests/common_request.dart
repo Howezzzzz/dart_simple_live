@@ -88,9 +88,11 @@ class CommonRequest {
   /// 可信性校验（纯函数，便于单测）：防第三方代理注入伪造清单。
   ///
   /// 规则：`download_url` 与所有 `download_urls` 必须通过 [isTrustedUrl]（我们自己的仓库路径），
-  /// 且 `version_num` 为正。
+  /// 且 `version_num` 为正、不超方案上界。
   static bool isTrustedManifest(VersionModel v) {
-    if (v.versionNum <= 0 || v.versionNum > 999999) return false;
+    // 上界 = 版本号方案最大值（major≤99、minor/patch<1000：99*1000000+999*1000+999），
+    // 与 parseVersion / CI 同一方案（见 ISS-163）；仅作「荒谬值」兜底，真可信锚是下方 isTrustedUrl。
+    if (v.versionNum <= 0 || v.versionNum > 99999999) return false;
     if (!isTrustedUrl(v.downloadUrl)) return false;
     for (final u in v.downloadUrls.values) {
       if (!isTrustedUrl(u)) return false;
