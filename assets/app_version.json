@@ -1,15 +1,15 @@
 {
-    "version": "1.08.40",
-    "version_num": 10840,
-    "version_desc": "- 同步上游 dev 更新：Flutter 构建引擎升级到 3.47.8（跟随上游，fvm / flatpak 版本同步）\n- 虎牙：屏蔽直播间「系统消息」弹幕（不再混进弹幕流）\n- 全屏自动弹出 SC（醒目留言）时，不再显示「SC列表」标题栏，画面更干净",
+    "version": "1.08.41",
+    "version_num": 10841,
+    "version_desc": "- 修复：极窄窗口下的「覆盖式弹幕栏」，点「分栏」按钮 / 双击分隔条没有反应（仍停在覆盖式）——原因是清掉状态后界面没有重新计算；现已修好，点击即回到并排的分栏形态",
     "prerelease": true,
     "download_url": "https://github.com/Howezzzzz/dart_simple_live/releases",
     "download_urls": {
-        "android": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.40/app-arm64-v8a-release.apk",
-        "windows": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.40/Slive-1.08.40+10840-windows-setup.exe",
-        "macos": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.40/simple_live_app-1.08.40+10840-macos.dmg",
-        "linux": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.40/Slive-x86_64-linux.deb",
-        "linux_flatpak": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.40/Slive-x86_64.flatpak"
+        "android": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.41/app-arm64-v8a-release.apk",
+        "windows": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.41/Slive-1.08.41+10841-windows-setup.exe",
+        "macos": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.41/simple_live_app-1.08.41+10841-macos.dmg",
+        "linux": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.41/Slive-x86_64-linux.deb",
+        "linux_flatpak": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.41/Slive-x86_64.flatpak"
     },
     "mirror_prefixes": [
         "https://gh-proxy.com/",
@@ -17,10 +17,10 @@
         "https://ghproxy.cc/"
     ],
     "download_sha256": {
-        "android": "9b940f86ec883304eb81f3bb011e07baeea911771a9308d20e2d0dd92140ac49",
-        "windows": "2ec6d690f9431fc6961fecb84b4fdc632254513cc380ad2eaae56844ecd3bd76",
-        "macos": "716087ccab1c55467ee9819c462da5d22168578472ffd1c2ab37b0ffe43590a2",
-        "linux": "17a0d22681de2f3306f49b13a721d5ed1c185a74fee247cbc3a930404490be24",
-        "linux_flatpak": "48697149b69b1e8369b3548d732c17059a22e30a02fb341d5a37f2064d1ed22c"
+        "android": "c4d76630793acce91364971ac2f8916ffadb9a01b443a3812a3b0c61f6108777",
+        "windows": "345cd1ab26074a69736f088c1f5ac4e2c64692dd016a3414a147cf4c400d5c1a",
+        "macos": "055ceeddb567ab483f30146548c339dc87b313ede20e4f270d03bfe5297af811",
+        "linux": "a2032b4ac3ea40bf1a7ce791a81d155395613b69af75c3a75051d170684b626d",
+        "linux_flatpak": "bfc7a8334b71c1e6f5b9c516f25efa0265827451f7294e8aaf631f8612fa1148"
     }
 }
