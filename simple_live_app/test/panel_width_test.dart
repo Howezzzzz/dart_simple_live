@@ -167,7 +167,7 @@ void main() {
         expect(r.overlay, isTrue);
         expect(r.renderW.isFinite, isTrue);
       }
-      final r2 = lay(manual: double.nan); // NaN → 按默认 300 处理；avail≈195 ≥ 180 → 分栏（渲染夹到 avail）
+      final r2 = lay(manual: double.nan); // NaN → 按默认 180 处理；avail≈195 ≥ 180 → 分栏（渲染夹到 avail）
       expect(r2.overlay, isFalse);
       expect(r2.renderW.isFinite, isTrue);
       expect(r2.renderW, closeTo(lay().available, 0.05));
@@ -289,10 +289,10 @@ void main() {
       expect(r.reason, 'force-split');
     });
 
-    test('forceSplit：意图宽为 0（已收起）→ 用默认 300', () {
+    test('forceSplit：意图宽为 0（已收起）→ 用默认 180（2026-10-25 Howe：默认 300→180）', () {
       final r = lay(fs: true, fo: false, manual: 0);
       expect(r.overlay, isFalse);
-      expect(r.renderW, 300.0);
+      expect(r.renderW, 180.0);
     });
 
     test('forceSplit：窗口过窄（容不下面板 + 最小播放区）→ 回落常规判定（悬浮）', () {

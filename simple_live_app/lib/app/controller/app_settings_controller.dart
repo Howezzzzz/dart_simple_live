@@ -499,7 +499,7 @@ class AppSettingsController extends GetxController {
     LocalStorageService.instance.setValue(LocalStorageService.kVideoOutputDriver, e);
   }
 
-  /// 桌面端直播间右侧消息面板宽度 = **用户意图宽**（拖拽分隔条调节；双击分隔条恢复默认 300）。
+  /// 桌面端直播间右侧消息面板宽度 = **用户意图宽**（拖拽分隔条调节；双击分隔条恢复默认 180）。
   ///
   /// 取值范围 **[0, 800]**：`0` 表示**收起面板**（走覆盖式弹幕面板）；`1~179` 视为"要更窄"，
   /// 同样走覆盖式；`≥180` 参与"能否分栏"的判定（见 `panel_width.dart:computePanelLayout`）。

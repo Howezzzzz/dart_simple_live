@@ -13,8 +13,9 @@ library;
 
 import 'dart:math' as math;
 
-/// 面板默认宽度（双击分隔条恢复该值）。
-const double kMessagePanelDefaultWidth = 300.0;
+/// 面板默认宽度（双击分隔条恢复该值；2026-10-25 Howe 定：由 300 下调到 180——
+/// 180 可完整显示弹幕内容且不影响布局，给播放区腾更多空间；与最小宽度同值）。
+const double kMessagePanelDefaultWidth = 180.0;
 
 /// 面板最小宽度（Howe 2026-10-17 定：由 220 下调到 180）。
 const double kMessagePanelMinWidth = 180.0;

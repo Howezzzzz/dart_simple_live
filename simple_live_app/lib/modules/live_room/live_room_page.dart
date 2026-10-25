@@ -303,10 +303,11 @@ class LiveRoomPage extends GetView<LiveRoomController> {
     );
   }
 
-  /// 「回到分栏/恢复默认」：恢复 300 + 按分辨率自适应，并**显式退出滞回记忆**
+  /// 「回到分栏/恢复默认」：恢复 180 + 按分辨率自适应，并**显式退出滞回记忆**
   /// （否则 avail 在 [180,204) 区间时会被滞回按在覆盖式，双击/点「分栏」像没反应）。
   /// 下一帧重建后 `panelOverlayActive` 已反映新布局：false=已回分栏、true=窗口仍放不下。
   /// （2026-10-21 Howe：双击恢复 300 后仍是覆盖式；要求 ≥180 且窗口放得下就分栏）
+  /// （2026-10-25 Howe：默认宽 300→180——180 已能完整显示弹幕内容）
   void _restoreDefaultPanel(BuildContext context) {
     final settings = AppSettingsController.instance;
     controller.panelOverlayActive = false;
@@ -319,7 +320,7 @@ class LiveRoomPage extends GetView<LiveRoomController> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       showPanelHint(
         context,
-        controller.panelOverlayActive ? '窗口太窄，无法分栏，请拉宽窗口' : '已恢复默认：面板宽 300 + 按分辨率自适应',
+        controller.panelOverlayActive ? '窗口太窄，无法分栏，请拉宽窗口' : '已恢复默认：面板宽 180 + 按分辨率自适应',
       );
     });
   }
