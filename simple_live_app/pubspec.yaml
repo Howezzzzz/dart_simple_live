@@ -4,7 +4,7 @@ publish_to: none
 description: "Slive APP"
 environment: 
   sdk: '>=3.12.0 <4.0.0'   # 2026-10-22 插件现代化：wakelock_plus 1.8.1 要求 Dart >=3.12（原 >=3.0.5 已失真，同步为真实底线）
-  flutter: 3.47.6
+  flutter: 3.47.8
 
 dependencies: 
   flutter: 

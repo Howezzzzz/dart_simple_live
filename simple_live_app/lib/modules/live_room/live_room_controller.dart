@@ -1223,7 +1223,7 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
       } else {
         // 完全封装
         Utils.showScRightDialog(
-          title: "SC列表",
+          title: duration == null ? "SC列表" : null,
           duration: duration,
           child: Obx(
             () => Stack(
