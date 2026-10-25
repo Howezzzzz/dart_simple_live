@@ -333,8 +333,9 @@ class LiveRoomPage extends GetView<LiveRoomController> {
         : LiveRoomController.kPanelOverrideOverlay;
     controller.panelOverlayActive = false; // 清滞回记忆，避免把显式覆盖又按回原形态
     controller.panelManualOverride = false;
-    // 切到悬浮 → 直接展开悬浮栏（否则点了「悬浮弹幕栏」反而什么都看不到）；切到分栏 → 由 build 收起覆盖层
-    controller.panelOverlayOpen.value = !forceSplit;
+    // 悬浮一律以**收起态**（右缘小按钮）呈现（Howe 2026-10-25：「悬浮弹幕栏」= 变成右缘那个小按钮）；
+    // 分栏时覆盖层由 build 自动收起
+    controller.panelOverlayOpen.value = false;
     controller.panelLayoutEpoch.value++; // 普通字段改不动 UI，必须显式踢一次重算
   }
 
