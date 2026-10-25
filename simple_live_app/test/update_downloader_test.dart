@@ -223,7 +223,7 @@ void main() {
       expect(sawRange, isFalse, reason: '没有 sha 就不该续传（无法校验拼接结果）');
       expect(path, '${root.path}/$asset');
       expect(File(path).readAsBytesSync(), orderedEquals(p));
-      expect(root.listSync().where((e) => e.path.contains('slive_dl_')), isEmpty);
+      expect(root.listSync().where((e) => e.path.startsWith('${root.path}/slive_dl_')), isEmpty);
     });
 
     test('跨版本隔离：不同 sha → 不同断点目录，同名安卓资产不串用', () async {
