@@ -148,7 +148,15 @@ class UpdateDownloader {
     return <String>[...usable, ...unusable];
   }
 
-  /// 下载到临时目录；可选 sha256 校验（不匹配则删文件并抛错）。返回本地文件路径。
+  /// 下载更新包到临时目录。支持 **HTTP Range 断点续传**（ISS-162）：
+  ///
+  /// - **断点按内容隔离**：`expectedSha256` 非空时，落盘到 `slive_dl_<sha前8位>/` 子目录。
+  ///   不同版本 → 不同 sha → 不同目录，**旧版本残留的半截包不可能拼进新版本**（关键：
+  ///   Android 资产名 `app-arm64-v8a-release.apk` 不带版本号，不能以文件名为断点键）。
+  /// - **无 sha 不续传**：`expectedSha256 == null` 时保持旧行为（整包重下）——没有校验值就
+  ///   无法判定拼接结果，绝不允许盲拼。
+  /// - **服务器不支持 Range**（回 200 全量）→ 自动退化为从头重下。
+  /// - 收尾沿用 [verifySha256]（不匹配 → 删文件 + 抛 [UpdateDownloadException]）。
   static Future<String> download(
     String url, {
     void Function(int received, int total)? onProgress,
@@ -158,21 +166,63 @@ class UpdateDownloader {
     final dir = await getTemporaryDirectory();
     var name = Uri.parse(url).pathSegments.isNotEmpty ? Uri.parse(url).pathSegments.last : 'slive_update';
     if (!name.contains('.')) name = '$name.bin';
-    final path = '${dir.path}/$name';
+
+    // 断点以「内容 sha」为键，跨版本结构隔离；无 sha 则不建断点目录、不续传。
+    final shaKey = (expectedSha256 ?? '').trim().toLowerCase();
+    final resumableBySha = shaKey.isNotEmpty;
+    final folder = resumableBySha ? '${dir.path}/slive_dl_${shaKey.substring(0, 8)}' : dir.path;
+    final path = '$folder/$name';
     final f = File(path);
-    if (await f.exists()) {
-      await f.delete().catchError((_) => f);
+    if (!await f.parent.exists()) {
+      await f.parent.create(recursive: true);
     }
-    await Dio().download(
+    final existing = resumableBySha && await f.exists() ? await f.length() : 0;
+
+    // 有断点就带 Range 请求续传
+    final resp = await Dio().get<ResponseBody>(
       url,
-      path,
       cancelToken: cancelToken,
-      onReceiveProgress: onProgress,
       options: Options(
+        responseType: ResponseType.stream,
         followRedirects: true,
         receiveTimeout: const Duration(minutes: 30),
+        headers: existing > 0 ? {'Range': 'bytes=$existing-'} : null,
+        validateStatus: (c) => c != null && (c == 200 || c == 206),
       ),
     );
+
+    // 仅当「有断点 且 服务器真的给了 206」才追加；否则（200 全量）从头覆盖，绝不盲拼。
+    final append = existing > 0 && resp.statusCode == 206;
+    final offset = append ? existing : 0;
+    // 总大小：206 → Content-Range 的 TOTAL；其余 → offset + Content-Length。
+    int total = -1;
+    final cr = resp.headers.value('content-range');
+    if (append && cr != null) {
+      final m = RegExp(r'bytes\s+\d+-\d+/(\d+|\*)').firstMatch(cr);
+      total = m == null ? -1 : (int.tryParse(m.group(1)!) ?? -1);
+    }
+    if (total < 0) {
+      final n = int.tryParse(resp.headers.value('content-length') ?? '');
+      if (n != null) total = offset + n;
+    }
+
+    final sink = f.openWrite(mode: append ? FileMode.append : FileMode.write);
+    var received = offset;
+    try {
+      onProgress?.call(received, total);
+      await for (final chunk in resp.data!.stream) {
+        sink.add(chunk);
+        received += chunk.length;
+        onProgress?.call(received, total);
+      }
+    } finally {
+      try {
+        await sink.close();
+      } catch (_) {
+        // 关闭失败（取消/断流）不应掩盖原始异常；成功路径的落盘问题由下方 sha 校验兜底
+      }
+    }
+
     if (expectedSha256 != null) {
       await verifySha256(path, expectedSha256);
     }
