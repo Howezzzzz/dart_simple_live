@@ -89,7 +89,7 @@ class _UpdateFlowPageState extends State<UpdateFlowPage> {
     try {
       final candidates = UpdateDownloader.buildCandidates(_v);
       Log.d('[更新] 候选线路 ${candidates.length} 条');
-      final ranked = await UpdateDownloader.rankBySpeed(candidates);
+      final ranked = await UpdateDownloader.rankBySpeed(candidates, cancelToken: cancelToken);
       Log.d('[更新] 测速完成，线路顺序：${ranked.length} 条');
       var lastError = '未知错误';
       for (var i = 0; i < ranked.length; i++) {

@@ -102,10 +102,15 @@ class UpdateDownloader {
   }
 
   /// 并发探测各线路，按**实测速度降序**返回；探测失败的排在最后（仍作为兜底尝试）。
+  ///
+  /// [cancelToken]：用户取消（点「取消」/侧键关页）时透传给探测请求，令在飞的测速
+  /// 立即中断而不必等满 timeout（ISS-161/168；取消后各请求抛 cancel → 被下方 catch 记 -1，
+  /// 函数照常返回，调用方的 `isCancelled` 检查会阻止后续下载）。
   static Future<List<String>> rankBySpeed(
     List<String> urls, {
     int probeBytes = UpdateDownloader.probeBytes,
     Duration timeout = UpdateDownloader.probeTimeout,
+    CancelToken? cancelToken,
   }) async {
     if (urls.length <= 1) return List<String>.of(urls);
     final dio = Dio(BaseOptions(
@@ -122,6 +127,7 @@ class UpdateDownloader {
         // 不支持 Range 的站点会返回 200 全量：靠 receiveTimeout 兜住，别把大文件全拉下来。
         final r = await dio.get<List<int>>(
           u,
+          cancelToken: cancelToken,
           options: Options(
             responseType: ResponseType.bytes,
             headers: {'Range': 'bytes=0-${probeBytes - 1}'},

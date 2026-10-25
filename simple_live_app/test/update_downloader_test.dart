@@ -1,3 +1,6 @@
+import 'dart:io';
+
+import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:simple_live_app/models/version_model.dart';
 import 'package:simple_live_app/services/update_downloader.dart';
@@ -94,6 +97,28 @@ void main() {
 
     test('空列表返回空', () async {
       expect(await UpdateDownloader.rankBySpeed([]), isEmpty);
+    });
+
+    test('取消 token → 中断在飞的测速探测（ISS-161/168）', () async {
+      // 起一个「只收不回」的本地服务器：探测会一直挂到超时；只有取消真的透传到探测请求，
+      // 才能在取消后迅速返回（否则要挂满 timeout）。
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      server.listen((_) {/* 接受连接但永不响应 */});
+      final base = 'http://127.0.0.1:${server.port}/x';
+      final token = CancelToken();
+      final fut = UpdateDownloader.rankBySpeed(
+        [base, '$base?b'],
+        timeout: const Duration(seconds: 30),
+        cancelToken: token,
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+      final sw = Stopwatch()..start();
+      token.cancel();
+      final r = await fut;
+      sw.stop();
+      expect(sw.elapsed.inSeconds, lessThan(3), reason: '取消后应迅速返回，而非挂满 30s');
+      expect(r, hasLength(2), reason: '全部失败 → 保序返回全部候选（兜底）');
+      await server.close(force: true);
     });
   });
 }
