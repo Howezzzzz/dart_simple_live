@@ -318,6 +318,40 @@ class LiveRoomPage extends GetView<LiveRoomController> {
     });
   }
 
+  /// 面板形态切换（Howe 2026-10-25）：覆盖式头部「分栏」 ↔ 分栏头部「悬浮弹幕栏」。
+  /// 显式覆盖 → 不再看余量：分栏时画面让位/留黑边（面板照常占位），悬浮时面板浮在画面上。
+  /// 仅当前房间有效（切房复位，见 LiveRoomController.resetRoom）。
+  void _setPanelForm(BuildContext context, {required bool forceSplit}) {
+    controller.panelLayoutOverride = forceSplit
+        ? LiveRoomController.kPanelOverrideSplit
+        : LiveRoomController.kPanelOverrideOverlay;
+    controller.panelOverlayActive = false; // 清滞回记忆，避免把显式覆盖又按回原形态
+    controller.panelManualOverride = false;
+    // 切到悬浮 → 直接展开悬浮栏（否则点了「悬浮弹幕栏」反而什么都看不到）；切到分栏 → 由 build 收起覆盖层
+    controller.panelOverlayOpen.value = !forceSplit;
+    controller.panelLayoutEpoch.value++; // 普通字段改不动 UI，必须显式踢一次重算
+  }
+
+  /// 分栏模式面板头部的「悬浮弹幕栏」切换按钮（与覆盖式头部的「分栏」按钮对称）。
+  Widget _buildPanelFormBar(BuildContext context) {
+    return Row(
+      children: [
+        const SizedBox(width: 8),
+        const Text("弹幕", style: TextStyle(fontSize: 13)),
+        const Spacer(),
+        TextButton.icon(
+          onPressed: () => _setPanelForm(context, forceSplit: false),
+          icon: const Icon(Icons.picture_in_picture_alt, size: 15),
+          label: const Text("悬浮弹幕栏", style: TextStyle(fontSize: 12)),
+          style: TextButton.styleFrom(
+            visualDensity: VisualDensity.compact,
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+          ),
+        ),
+      ],
+    );
+  }
+
   /// 极窄窗口的**覆盖式弹幕面板**（RISK-17 方案 B，2026-10-21 Howe 定）：
   /// 默认收起、右缘一个展开按钮；点开后以覆盖层从右侧滑出（不挤压播放区）。
   Widget _buildOverlayPanel(BuildContext context, double panelW, double topInset) {
@@ -372,9 +406,9 @@ class LiveRoomPage extends GetView<LiveRoomController> {
                         const SizedBox(width: 8),
                         const Text("弹幕", style: TextStyle(fontSize: 13)),
                         const Spacer(),
-                        // 明确的「回到分栏」按钮（Howe 2026-10-21：覆盖式打开后没有返回分栏的入口）
+                        // 「分栏」按钮（Howe 2026-10-25：与分栏头部的「悬浮弹幕栏」互切）
                         TextButton.icon(
-                          onPressed: () => _restoreDefaultPanel(context),
+                          onPressed: () => _setPanelForm(context, forceSplit: true),
                           icon: const Icon(Icons.vertical_split, size: 15),
                           label: const Text("分栏", style: TextStyle(fontSize: 12)),
                           style: TextButton.styleFrom(
@@ -420,6 +454,8 @@ class LiveRoomPage extends GetView<LiveRoomController> {
                     videoHeight: controller.videoHeightRx.value.toDouble(),
                     manualWidth: settings.messagePanelWidth.value,
                     autoMode: settings.autoFitWindowWidth.value && !controller.panelManualOverride,
+                    forceSplit: controller.panelLayoutOverride == LiveRoomController.kPanelOverrideSplit,
+                    forceOverlay: controller.panelLayoutOverride == LiveRoomController.kPanelOverrideOverlay,
                     overlayActive: controller.panelOverlayActive && !controller.panelDragActive,
                     scaleMode: settings.scaleMode.value,
                     aspectByUser: settings.aspectByUser.value,
@@ -484,6 +520,7 @@ class LiveRoomPage extends GetView<LiveRoomController> {
                                   padding: EdgeInsets.only(top: topInset),
                                   child: Column(
                                     children: [
+                                      _buildPanelFormBar(context),
                                       buildUserProfile(context),
                                       buildMessageArea(),
                                     ],

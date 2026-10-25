@@ -123,6 +123,8 @@ PanelLayout computePanelLayout({
   required double manualWidth,
   required bool autoMode,
   required bool overlayActive,
+  bool forceSplit = false,
+  bool forceOverlay = false,
   int scaleMode = 0,
   double aspectByUser = 0,
   double handleWidth = kPanelResizeHandleWidth,
@@ -147,6 +149,34 @@ PanelLayout computePanelLayout({
   // 面板可占的上限就是窗口内容宽：手柄是**叠在播放区上的悬浮条**，不再从布局里扣宽度
   // （否则 auto 模式下播放区会比视频比例宽 8px，contain 时左右各留一条黑边）。
   final double maxPanelByWindow = contentWidth;
+
+  // ②' 用户显式覆盖（Howe 2026-10-25：「悬浮弹幕栏」↔「分栏」互切）：
+  //    forceOverlay → 一定用覆盖式（即便窗口完全放得下）；
+  //    forceSplit   → 一定并排（即便按比例算出的余量 <180，画面让位/留黑边），
+  //                   但仍要求「面板 + 最小播放区」能放进窗口，否则回落常规判定。
+  if (forceOverlay) {
+    return PanelLayout(
+      overlay: true,
+      renderW: 0,
+      overlayW: overlayWidthOf(contentWidth),
+      available: math.max(0.0, contentWidth),
+      reason: 'force-overlay',
+    );
+  }
+  if (forceSplit) {
+    final double cap = math.max(0.0, maxPanelByWindow - kMinPlayerWidth);
+    final double intent = userW < kMessagePanelMinWidth ? kMessagePanelDefaultWidth : userW;
+    final double rw = math.min(intent.clamp(kMessagePanelMinWidth, kMessagePanelMaxWidth), cap);
+    if (rw >= kMessagePanelMinWidth) {
+      return PanelLayout(
+        overlay: false,
+        renderW: rw,
+        overlayW: overlayWidthOf(contentWidth),
+        available: math.max(0.0, contentWidth - rw),
+        reason: 'force-split',
+      );
+    }
+  }
 
   // ② 有效宽高比（按 scaleMode）
   //    fill/cover(1/2) → 无黑边；3/4 → 强制比例；5 → 自定义比例（非法回退视频比例）；

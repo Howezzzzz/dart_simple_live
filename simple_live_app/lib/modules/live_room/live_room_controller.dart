@@ -96,6 +96,16 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
   /// 若此时 `messagePanelWidth` / `autoFitWindowWidth` 恰好已是目标值（Rx 无变化），
   /// 点「分栏」就会「状态清了但界面不重建」→ 看着没反应（2026-10-25 Howe 真机）。
   var panelLayoutEpoch = 0.obs;
+
+  /// [panelLayoutOverride] 取值。
+  static const int kPanelOverrideAuto = 0;
+  static const int kPanelOverrideSplit = 1;
+  static const int kPanelOverrideOverlay = 2;
+
+  /// 面板形态的**用户显式覆盖**（普通字段，切房重置）：自动 / 强制分栏 / 强制悬浮（覆盖式）。
+  /// 由「覆盖式头部→分栏按钮」与「分栏头部→悬浮弹幕栏按钮」互切（Howe 2026-10-25）：
+  /// 点后不再看余量——分栏时画面让位/留黑边，悬浮时面板收成右缘按钮。
+  int panelLayoutOverride = kPanelOverrideAuto;
   RxList<LiveSuperChatMessage> superChats = RxList<LiveSuperChatMessage>();
 
   /// 直播已开播时长文本（HH:mm:ss，每秒刷新；未激活为空串）
@@ -1367,6 +1377,7 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     panelOverlayActive = false;
     panelDragActive = false;
     panelManualOverride = false; // 手动宽度只作用于当前房间，换房恢复自适应
+    panelLayoutOverride = kPanelOverrideAuto; // 形态覆盖（强制分栏/悬浮）也只作用于当前房间
     panelOverlayOpen.value = false; // 覆盖层展开中切房 → 新房不要带着展开态
     videoWidthRx.value = 0;
     videoHeightRx.value = 0;

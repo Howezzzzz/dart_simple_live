@@ -258,4 +258,52 @@ void main() {
       }
     });
   });
+
+  // ---------- ISS-228：面板形态显式覆盖（「分栏」↔「悬浮弹幕栏」互切，Howe 2026-10-25）----------
+  group('computePanelLayout 形态覆盖（ISS-228）', () {
+    PanelLayout lay({required bool fs, required bool fo, double cw = 600, double ph = 288, double manual = 300}) =>
+        computePanelLayout(
+          contentWidth: cw,
+          playerHeight: ph,
+          videoWidth: 1920,
+          videoHeight: 1080,
+          manualWidth: manual,
+          autoMode: true,
+          overlayActive: false,
+          forceSplit: fs,
+          forceOverlay: fo,
+        );
+
+    test('forceOverlay：窗口完全够宽也强制悬浮', () {
+      final r = lay(fs: false, fo: true, cw: 1600, ph: 540);
+      expect(r.overlay, isTrue);
+      expect(r.renderW, 0);
+      expect(r.reason, 'force-overlay');
+    });
+
+    test('forceSplit：余量不足 180 也并排（画面让位），宽度取意图值', () {
+      // cw=600 ph=288 16:9 → avail = 600-512 = 88 < 180（常规判定会悬浮）
+      final r = lay(fs: true, fo: false);
+      expect(r.overlay, isFalse);
+      expect(r.renderW, 300.0);
+      expect(r.reason, 'force-split');
+    });
+
+    test('forceSplit：意图宽为 0（已收起）→ 用默认 300', () {
+      final r = lay(fs: true, fo: false, manual: 0);
+      expect(r.overlay, isFalse);
+      expect(r.renderW, 300.0);
+    });
+
+    test('forceSplit：窗口过窄（容不下面板 + 最小播放区）→ 回落常规判定（悬浮）', () {
+      final r = lay(fs: true, fo: false, cw: 300);
+      expect(r.overlay, isTrue);
+    });
+
+    test('forceSplit 仍不超窗口：renderW ≤ cw - kMinPlayerWidth', () {
+      final r = lay(fs: true, fo: false, cw: 560, manual: 800);
+      expect(r.overlay, isFalse);
+      expect(r.renderW, closeTo(320, 1e-9)); // min(800, 560-240)
+    });
+  });
 }
