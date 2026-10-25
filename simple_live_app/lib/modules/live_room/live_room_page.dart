@@ -307,6 +307,9 @@ class LiveRoomPage extends GetView<LiveRoomController> {
     controller.panelManualOverride = false; // 手动宽度只作用于当前房间，双击/「分栏」即恢复
     settings.setMessagePanelWidth(kMessagePanelDefaultWidth);
     settings.setAutoFitWindowWidth(true);
+    // 上述两个字段是普通字段、两个 Rx 又可能本就等于目标值（无通知）→ 必须显式踢一次重算，
+    // 否则点「分栏」会出现「状态已清、界面不动」的假死（2026-10-25 Howe 真机）。
+    controller.panelLayoutEpoch.value++;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       showPanelHint(
         context,
@@ -436,12 +439,15 @@ class LiveRoomPage extends GetView<LiveRoomController> {
                   final overlay = layout.overlay;
                   final renderW = layout.renderW;
                   final openOverlay = controller.panelOverlayOpen.value;
+                  // 订阅「重算信号」：用户动作（如点「分栏」）后自增即触发本 Obx 重算
+                  // （普通字段 panelOverlayActive/panelManualOverride 改不动 UI，见控制器注释）
+                  final panelEpoch = controller.panelLayoutEpoch.value;
                   if (settings.logEnable.value) {
                     Log.d('panelOverlay content=${constraints.maxWidth.toStringAsFixed(0)} '
                         'playerH=${constraints.maxHeight.toStringAsFixed(0)} '
                         'video=${controller.videoWidthRx.value}x${controller.videoHeightRx.value} '
                         'manual=${settings.messagePanelWidth.value.toStringAsFixed(0)} '
-                        'auto=${settings.autoFitWindowWidth.value} $layout');
+                        'auto=${settings.autoFitWindowWidth.value} epoch=$panelEpoch $layout');
                   }
                   if (!overlay && controller.panelOverlayOpen.value) {
                     WidgetsBinding.instance.addPostFrameCallback((_) {

@@ -90,6 +90,12 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
   /// 用户拖的宽度；**不触碰「按分辨率自适应」开关**（2026-10-21 Howe：拖一下开关就被
   /// 关掉并持久化、之后进房都不自适应，属意外行为）。切房/双击恢复后自动清除。
   bool panelManualOverride = false;
+
+  /// 面板布局「重算信号」：布局 Obx 读它——用户动作后自增一次即**强制单帧重算**。
+  /// 原因：`panelOverlayActive` / `panelManualOverride` 是普通字段，改它们**不会**触发重建；
+  /// 若此时 `messagePanelWidth` / `autoFitWindowWidth` 恰好已是目标值（Rx 无变化），
+  /// 点「分栏」就会「状态清了但界面不重建」→ 看着没反应（2026-10-25 Howe 真机）。
+  var panelLayoutEpoch = 0.obs;
   RxList<LiveSuperChatMessage> superChats = RxList<LiveSuperChatMessage>();
 
   /// 直播已开播时长文本（HH:mm:ss，每秒刷新；未激活为空串）
