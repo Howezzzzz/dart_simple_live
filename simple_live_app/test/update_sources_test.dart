@@ -38,16 +38,20 @@ void main() {
       expect(fresh.toSet().intersection(cdn.toSet()), isEmpty);
     });
 
-    test('新鲜源含 gh-proxy / ghproxy.cc 前缀与 raw 直连', () {
+    test('新鲜源含 gh-proxy / ghproxy.net / ghproxy.cc 前缀与 raw 直连', () {
       expect(fresh.any((u) => u.startsWith('https://gh-proxy.com/https://')), isTrue);
+      expect(fresh.any((u) => u.startsWith('https://ghproxy.net/https://')), isTrue);
       expect(fresh.any((u) => u.startsWith('https://ghproxy.cc/https://')), isTrue);
       expect(fresh.any((u) => u.startsWith('https://raw.githubusercontent.com/')), isTrue);
     });
 
-    test('CDN 源为 gitmirror 与 jsDelivr', () {
-      expect(cdn.any((u) => u.contains('gitmirror')), isTrue);
-      expect(cdn.any((u) => u.contains('jsdelivr')), isTrue);
-      expect(cdn.length, 2);
+    test('已不再包含已失效的 gitmirror 源（ISS-229，域名全网 NXDOMAIN）', () {
+      expect(all.any((u) => u.contains('gitmirror')), isFalse);
+    });
+
+    test('CDN 源仅 jsDelivr（gitmirror 已失效移除，2026-10-25）', () {
+      expect(cdn.length, 1);
+      expect(cdn.single, contains('jsdelivr'));
     });
 
     test('全部指向同一份 app_version.json 且互不重复', () {

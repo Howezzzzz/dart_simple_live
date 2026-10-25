@@ -164,17 +164,25 @@ class CommonRequest {
 
   static List<String> freshSources() => const [
         "https://gh-proxy.com/$rawDirectUrl",
+        _ghProxyNetUrl,
         "https://ghproxy.cc/$rawDirectUrl",
         rawDirectUrl,
       ];
 
-  /// **CDN 源**（可能滞后数小时，与新鲜源同时打、只作为补充）：gitmirror / jsDelivr。
-  static const String _gitMirrorUrl =
-      "https://raw.gitmirror.com/Howezzzzz/dart_simple_live/master/assets/app_version.json";
+  /// ghproxy.net 上的清单地址（与下载镜像白名单 [trustedMirrorPrefixes] 同一批）——
+  /// 供 [freshSources] 与 [checkUpdateGhProxyNet] 复用。
+  static const String _ghProxyNetUrl = "https://ghproxy.net/$rawDirectUrl";
+
+  /// **CDN 源**（可能滞后数小时，与新鲜源同时打、只作为补充）：jsDelivr。
+  ///
+  /// 2026-10-25（ISS-229）：原 gitmirror 源 `raw.gitmirror.com` **域名已失效**
+  /// （Google / 阿里 / 114 三家公共解析器一致 NXDOMAIN，服务疑似停运）→ 已移除；
+  /// 改以**前缀式镜像 ghproxy.net**（不缓存、可正常参与 quorum）作补充，放在
+  /// [freshSources]；CDN 侧现仅剩 jsDelivr（CI 发版后已自动 purge）。
   static const String _jsdelivrUrl =
       "https://cdn.jsdelivr.net/gh/Howezzzzz/dart_simple_live@master/assets/app_version.json";
 
-  static List<String> cdnSources() => const [_gitMirrorUrl, _jsdelivrUrl];
+  static List<String> cdnSources() => const [_jsdelivrUrl];
 
   /// 全部候选源（新鲜在前、CDN 兜底）——供测试与外部引用。
   static List<String> updateSources() => [...freshSources(), ...cdnSources()];
@@ -202,8 +210,9 @@ class CommonRequest {
     return v;
   }
 
-  /// 检查更新（单源：国内镜像 raw.gitmirror）——保留供单独调用/回退（已过可信校验）。
-  Future<VersionModel> checkUpdateGitMirror() => _fetchValidated(_gitMirrorUrl);
+  /// 检查更新（单源：国内镜像 ghproxy.net）——保留供单独调用/回退（已过可信校验）。
+  /// （2026-10-25 ISS-229：原 gitmirror 单源已随失效域名下线，换为 ghproxy.net。）
+  Future<VersionModel> checkUpdateGhProxyNet() => _fetchValidated(_ghProxyNetUrl);
 
   /// 检查更新（单源：jsDelivr）——保留供单独调用/回退（已过可信校验）。
   Future<VersionModel> checkUpdateJsDelivr() => _fetchValidated(_jsdelivrUrl);
@@ -217,8 +226,10 @@ class CommonRequest {
       "https://gh-proxy.com/https://raw.githubusercontent.com/Howezzzzz/dart_simple_live/master/assets/huya_config.json";
   static const String _huyaConfigSelfRawUrl =
       "https://raw.githubusercontent.com/Howezzzzz/dart_simple_live/master/assets/huya_config.json";
-  static const String _huyaConfigGitMirrorUrl =
-      "https://raw.gitmirror.com/slotsun/dart_simple_live/master/assets/huya_config.json";
+  /// 2026-10-25（ISS-229）：原第一源 gitmirror 域名已失效 → 换为前缀式镜像 ghproxy.net
+  /// （同一份上游 raw 内容，仍作「上游源优先」的第一源）。
+  static const String _huyaConfigUpstreamGhProxyUrl =
+      "https://ghproxy.net/https://raw.githubusercontent.com/slotsun/dart_simple_live/master/assets/huya_config.json";
   static const String _huyaConfigJsDelivrUrl =
       "https://cdn.jsdelivr.net/gh/slotsun/dart_simple_live@master/assets/huya_config.json";
 
@@ -227,7 +238,7 @@ class CommonRequest {
   /// 返回的 hysdk_ua 做**内容校验**（防第三方代理注入任意 UA，与清单可信校验同源哲学）。
   Future<Map<String, dynamic>> fetchHuyaConfig() async {
     final urls = <String>[
-      _huyaConfigGitMirrorUrl, // ① 上游（原第一源）
+      _huyaConfigUpstreamGhProxyUrl, // ① 上游（ghproxy.net 镜像）
       _huyaConfigJsDelivrUrl, // ② 上游
       _huyaConfigSelfUrl, // ③ 我们自己的（兜底，gh-proxy）
       _huyaConfigSelfRawUrl, // ④ 我们自己的（兜底，raw 直连）
