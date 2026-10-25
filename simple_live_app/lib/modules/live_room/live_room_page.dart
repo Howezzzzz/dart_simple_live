@@ -238,6 +238,12 @@ class LiveRoomPage extends GetView<LiveRoomController> {
         // 拖拽 = 本次房间手动宽度：不再动「按分辨率自适应」开关（2026-10-21 Howe：
         // 此前拖一下开关就被关掉且持久化、之后进房都不再自适应）；运行时标记覆盖 auto 派生，切房即恢复。
         onHorizontalDragStart: (_) {
+          // 用户一旦手动拖动 → 取消「强制形态」覆盖，交回常规判定：
+          // 拖到最小临界点（<180）以下即自动回到悬浮弹幕栏（Howe 2026-10-25）
+          if (controller.panelLayoutOverride != LiveRoomController.kPanelOverrideAuto) {
+            controller.panelLayoutOverride = LiveRoomController.kPanelOverrideAuto;
+            controller.panelLayoutEpoch.value++;
+          }
           if (settings.autoFitWindowWidth.value && !controller.panelManualOverride) {
             controller.panelManualOverride = true;
             // auto → 手动切换：把意图宽同步成当前渲染宽，避免第一帧从旧意图值跳变（Howe 2026-10-21）
