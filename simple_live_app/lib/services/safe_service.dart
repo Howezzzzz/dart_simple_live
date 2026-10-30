@@ -39,17 +39,31 @@ class SafeService extends GetxService {
   }
 
   /// 获取所有的解密账号（返回副本，不污染 DB 缓存对象）
+  /// - 安全模式关闭：原样返回
+  /// - 安全模式开启且密钥可用：返回解密后的副本
+  /// - 安全模式开启但密钥不可用：抹掉敏感字段后返回，避免密文/失效数据流进上层
+  ///   （吸收上游 2704a0209「解码失败密文不流进内存」）
   Future<List<Account>> getDecodeAccounts() async {
     final list = DBService.instance.getAllAccounts();
-    if (AppSettingsController.instance.appSafeEnable.value &&
-        AppSettingsController.instance.appStoreKey.value) {
+    if (!AppSettingsController.instance.appSafeEnable.value) {
+      return list;
+    }
+    if (AppSettingsController.instance.appStoreKey.value) {
       final key = await SecureStoreService.instance.getAppSecureKey();
       if (key == null || key.isEmpty) {
         return list;
       }
       return decodeAccounts(list, key);
     }
-    return list;
+    return [
+      for (final account in list)
+        account.copyWith(
+          id: account.id,
+          userName: '',
+          credential: '',
+          isActive: false,
+        ),
+    ];
   }
 
   /// 加密指定账号
@@ -83,8 +97,8 @@ class SafeService extends GetxService {
   /// webdavPassword
   Future<String> getDecodeWPassword() async {
     var wPassword = LocalStorageService.instance.getValue(LocalStorageService.kWebDAVPassword, '');
-    if (wPassword.isNotEmpty) {
-      if (AppSettingsController.instance.appSafeEnable.value && AppSettingsController.instance.appStoreKey.value) {
+    if (wPassword.isNotEmpty && AppSettingsController.instance.appSafeEnable.value) {
+      if (AppSettingsController.instance.appStoreKey.value) {
         var secretKey = await SecureStoreService.instance.getAppSecureKey();
         try {
           wPassword = await AesUtils.decrypt(wPassword, secretKey!);
@@ -92,6 +106,9 @@ class SafeService extends GetxService {
           Log.e('decode_webdav_password: $e', s);
           wPassword = '';
         }
+      } else {
+        // 密钥不可用：不把密文当密码外泄（吸收上游 2704a0209）
+        wPassword = '';
       }
     }
     return wPassword;
