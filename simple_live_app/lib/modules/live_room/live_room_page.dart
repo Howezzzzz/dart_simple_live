@@ -641,7 +641,20 @@ class LiveRoomPage extends GetView<LiveRoomController> {
                         label: const Text("关注"),
                       ),
               ),
-              const Expanded(child: Center()),
+              // 标题居中显示（Howe 2026-10-31）：顶栏标题保留，底栏中缝再放一份居中的标题
+              Expanded(
+                child: Obx(
+                  () => Center(
+                    child: Text(
+                      controller.detail.value?.title ?? "直播间",
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.titleSmall,
+                    ),
+                  ),
+                ),
+              ),
               TextButton.icon(
                 style: TextButton.styleFrom(
                   textStyle: const TextStyle(fontSize: 14),
