@@ -713,8 +713,14 @@ class DouyinSite implements LiveSite {
     } catch (e) {
       return;
     }
+    if (map.containsKey('cookie') && map['cookie'] is! String) {
+      CoreLog.w('DouyinSite.setSiteAttrs: cookie 字段类型异常（${map['cookie'].runtimeType}），已忽略');
+    }
     if (map['cookie'] is String) {
       _updateDouyinCookie(map['cookie'] as String);
+    }
+    if (map.containsKey('hlsFirst') && map['hlsFirst'] is! bool) {
+      CoreLog.w('DouyinSite.setSiteAttrs: hlsFirst 字段类型异常（${map['hlsFirst'].runtimeType}），已忽略');
     }
     if (map['hlsFirst'] is bool) {
       hlsFirst = map['hlsFirst'] as bool;
@@ -729,6 +735,9 @@ class DouyinSite implements LiveSite {
       map = jsonDecode(credential) as Map<String, dynamic>;
     } catch (e) {
       return info;
+    }
+    if (map.containsKey('cookie') && map['cookie'] is! String) {
+      CoreLog.w('DouyinSite.getAccountInfo: cookie 字段类型异常（${map['cookie'].runtimeType}），已忽略');
     }
     final cookie = map['cookie'] is String ? map['cookie'] as String : '';
     if (cookie.isEmpty) {

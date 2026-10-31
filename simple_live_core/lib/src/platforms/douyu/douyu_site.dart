@@ -376,12 +376,21 @@ class DouyuSite implements LiveSite {
     } catch (e) {
       return;
     }
+    if (map.containsKey('cookie') && map['cookie'] is! String) {
+      CoreLog.w('DouyuSite.setSiteAttrs: cookie 字段类型异常（${map['cookie'].runtimeType}），已忽略');
+    }
     if (map['cookie'] is String) {
       _cookie = map['cookie'] as String;
+    }
+    if (map.containsKey('dy_did') && map['dy_did'] is! String) {
+      CoreLog.w('DouyuSite.setSiteAttrs: dy_did 字段类型异常（${map['dy_did'].runtimeType}），已忽略');
     }
     if (map['dy_did'] is String) {
       _dy_did = map['dy_did'] as String;
       DouyuUtils.setDyDid(_dy_did);
+    }
+    if (map.containsKey('LTP0') && map['LTP0'] is! String) {
+      CoreLog.w('DouyuSite.setSiteAttrs: LTP0 字段类型异常（${map['LTP0'].runtimeType}），已忽略');
     }
     if (map['LTP0'] is String) {
       _ltp0 = map['LTP0'] as String;
