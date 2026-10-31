@@ -1,15 +1,15 @@
 {
-    "version": "1.08.44",
-    "version_num": 1008044,
-    "version_desc": "- 同步上游 dev 更新（2 个提交）：B站弹幕**屏蔽 2 元 SC**——价值 2 元的超级留言不再混进弹幕流（上游原话「2元SC, 不如不发」）\n- 加固：B站 / 抖音 / 斗鱼的**账号信息解析遇到凭据损坏不再报错**——凭据解析失败时返回空账号（界面显示未登录），程序不再崩\n- 本地加固：抖音 / 斗鱼读取凭据里的字段（cookie / 设备号等）增加**类型校验**，字段缺失或类型不对时直接跳过（并写一条 warn 日志便于排查）；B站账号请求复用已解析结果，少做一次解析",
+    "version": "1.08.45",
+    "version_num": 1008045,
+    "version_desc": "- 新：直播间**底部工具栏中间显示直播间标题**（居中、超长省略号），顶栏标题照旧保留（Howe 要求）",
     "prerelease": true,
     "download_url": "https://github.com/Howezzzzz/dart_simple_live/releases",
     "download_urls": {
-        "android": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.44/app-arm64-v8a-release.apk",
-        "windows": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.44/Slive-1.08.44+1008044-windows-setup.exe",
-        "macos": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.44/simple_live_app-1.08.44+1008044-macos.dmg",
-        "linux": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.44/Slive-x86_64-linux.deb",
-        "linux_flatpak": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.44/Slive-x86_64.flatpak"
+        "android": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.45/app-arm64-v8a-release.apk",
+        "windows": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.45/Slive-1.08.45+1008045-windows-setup.exe",
+        "macos": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.45/simple_live_app-1.08.45+1008045-macos.dmg",
+        "linux": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.45/Slive-x86_64-linux.deb",
+        "linux_flatpak": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.45/Slive-x86_64.flatpak"
     },
     "mirror_prefixes": [
         "https://gh-proxy.com/",
@@ -17,10 +17,10 @@
         "https://ghproxy.cc/"
     ],
     "download_sha256": {
-        "android": "5bf362a8ee9a0f796fe1b53f298bb01b7704bc0e0f8a7e9e8598d528ef68022e",
-        "windows": "9d8ced357f77d466aab8040f4f727a697d97b0412b4aceb3aae1c77f2c0e3fd1",
-        "macos": "3e63e36b1a25a3e6a6543468c2d7babb0c1a2a2395b78c642ce3e62298390b16",
-        "linux": "4be2543869d355605a9ecc1a795b3081698b0913d3866d605c38bcf2b256d8c8",
-        "linux_flatpak": "501581e2b2678521ba5800d46873bbdcc72d954707f3ed8ea6075569af68e998"
+        "android": "cc32ca531f6b29fc7524bf63a599b2bae18768ba7404defed361d69c7c8c974f",
+        "windows": "eede9abcfaea332856c61161c900ba90b826c3fd7599df46ac5fda81f842a0ae",
+        "macos": "db348385fc081ded748aa8bf665deb96c0311b2fe276fe6dcd85d38a50693f66",
+        "linux": "e7a5b610c3beeca5d4a0cdcbcfcad8b5c8d32c96d5826e45965f0a408de2783d",
+        "linux_flatpak": "ab943354bbed3a16ef73f007c519c2c8c0bcc2827060c7d2c3649afc258f16c5"
     }
 }
