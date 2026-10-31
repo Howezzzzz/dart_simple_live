@@ -1,15 +1,15 @@
 {
-    "version": "1.08.43",
-    "version_num": 1008043,
-    "version_desc": "- 同步上游 v1.8.15 批次（3 个提交）：本批**无新功能**，全是内部整理与加固\n- 加固：安全模式下**系统密钥取不到时，不再把加密后的密文当作凭据继续使用**——敏感字段直接置空、账号标记失效，WebDAV 密码返回空，消除脏数据流入内存/被同步上传的隐患\n- 整理：Flutter-Rust 生成层目录 `lib/src/rust` 迁移到 `lib/rust`（纯路径调整，不影响功能与使用）\n- 上游 1.8.15 更新说明里提到的弹幕表情包、斗鱼扫码登录（含 TV 版）、全屏自动弹 SC 等，**已在 1.08.38 / 1.08.40 批次同步**，本次不含",
+    "version": "1.08.44",
+    "version_num": 1008044,
+    "version_desc": "- 同步上游 dev 更新（2 个提交）：B站弹幕**屏蔽 2 元 SC**——价值 2 元的超级留言不再混进弹幕流（上游原话「2元SC, 不如不发」）\n- 加固：B站 / 抖音 / 斗鱼的**账号信息解析遇到凭据损坏不再报错**——凭据解析失败时返回空账号（界面显示未登录），程序不再崩\n- 本地加固：抖音 / 斗鱼读取凭据里的字段（cookie / 设备号等）增加**类型校验**，字段缺失或类型不对时直接跳过（并写一条 warn 日志便于排查）；B站账号请求复用已解析结果，少做一次解析",
     "prerelease": true,
     "download_url": "https://github.com/Howezzzzz/dart_simple_live/releases",
     "download_urls": {
-        "android": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.43/app-arm64-v8a-release.apk",
-        "windows": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.43/Slive-1.08.43+1008043-windows-setup.exe",
-        "macos": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.43/simple_live_app-1.08.43+1008043-macos.dmg",
-        "linux": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.43/Slive-x86_64-linux.deb",
-        "linux_flatpak": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.43/Slive-x86_64.flatpak"
+        "android": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.44/app-arm64-v8a-release.apk",
+        "windows": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.44/Slive-1.08.44+1008044-windows-setup.exe",
+        "macos": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.44/simple_live_app-1.08.44+1008044-macos.dmg",
+        "linux": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.44/Slive-x86_64-linux.deb",
+        "linux_flatpak": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.44/Slive-x86_64.flatpak"
     },
     "mirror_prefixes": [
         "https://gh-proxy.com/",
@@ -17,10 +17,10 @@
         "https://ghproxy.cc/"
     ],
     "download_sha256": {
-        "android": "f7d8f2a9d79da64ec70fddba92c3b7685a435caea4a1b37ccae7c936b28f4aa7",
-        "windows": "a21c647511c747963dab3e7d5ec36c124b13d463e99a255ee56f0636719e4404",
-        "macos": "1015a597e14b10f304f814020833f7829cf0391da3fac668dd3d8df1ebed1ec4",
-        "linux": "bd6d094e7abb9a10f1934504d8e613a8b8a4cdf7152708606f8406702c5023e2",
-        "linux_flatpak": "9d3bb94363197644c66dcbf9939b2ca3df485ca9d4379d8e8f8e2ba50d783fb6"
+        "android": "5bf362a8ee9a0f796fe1b53f298bb01b7704bc0e0f8a7e9e8598d528ef68022e",
+        "windows": "9d8ced357f77d466aab8040f4f727a697d97b0412b4aceb3aae1c77f2c0e3fd1",
+        "macos": "3e63e36b1a25a3e6a6543468c2d7babb0c1a2a2395b78c642ce3e62298390b16",
+        "linux": "4be2543869d355605a9ecc1a795b3081698b0913d3866d605c38bcf2b256d8c8",
+        "linux_flatpak": "501581e2b2678521ba5800d46873bbdcc72d954707f3ed8ea6075569af68e998"
     }
 }
