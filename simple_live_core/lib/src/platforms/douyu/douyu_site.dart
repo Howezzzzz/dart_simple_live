@@ -376,23 +376,30 @@ class DouyuSite implements LiveSite {
     } catch (e) {
       return;
     }
-    if (map.containsKey('cookie')) {
+    if (map['cookie'] is String) {
       _cookie = map['cookie'] as String;
     }
-    if (map.containsKey('dy_did')) {
+    if (map['dy_did'] is String) {
       _dy_did = map['dy_did'] as String;
       DouyuUtils.setDyDid(_dy_did);
     }
-    if (map.containsKey('LTP0')) {
+    if (map['LTP0'] is String) {
       _ltp0 = map['LTP0'] as String;
     }
   }
 
   @override
   Future<AccountInfo> getAccountInfo({required String credential}) async {
+    AccountInfo info = AccountInfo();
+    final Map<String, dynamic> map;
+    try {
+      map = jsonDecode(credential) as Map<String, dynamic>;
+    } catch (e) {
+      return info;
+    }
     setSiteAttrs(credential);
     var newCookie = await DouyuUtils.refreshCookie(did: _dy_did, ltp0: _ltp0, cookie: _cookie);
-    var newCredential = jsonDecode(credential) as Map<String, dynamic>;
+    var newCredential = map;
     newCredential['cookie'] = newCookie;
     return AccountInfo(
       uid: DouyuUtils.pickCookie(newCookie, 'acf_uid'),

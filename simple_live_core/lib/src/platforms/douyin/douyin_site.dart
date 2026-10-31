@@ -713,19 +713,24 @@ class DouyinSite implements LiveSite {
     } catch (e) {
       return;
     }
-    if (map.containsKey('cookie')) {
+    if (map['cookie'] is String) {
       _updateDouyinCookie(map['cookie'] as String);
     }
-    if (map.containsKey('hlsFirst')) {
+    if (map['hlsFirst'] is bool) {
       hlsFirst = map['hlsFirst'] as bool;
     }
   }
 
   @override
   Future<AccountInfo> getAccountInfo({required String credential}) async {
-    final map = jsonDecode(credential) as Map<String, dynamic>;
     AccountInfo info = AccountInfo();
-    var cookie = map['cookie'] as String;
+    final Map<String, dynamic> map;
+    try {
+      map = jsonDecode(credential) as Map<String, dynamic>;
+    } catch (e) {
+      return info;
+    }
+    final cookie = map['cookie'] is String ? map['cookie'] as String : '';
     if (cookie.isEmpty) {
       return info;
     }

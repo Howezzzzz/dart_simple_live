@@ -658,10 +658,16 @@ class BiliBiliSite implements LiveSite {
   @override
   Future<AccountInfo> getAccountInfo({required String credential}) async {
     AccountInfo res = AccountInfo();
+    final Map<String, dynamic> map;
+    try {
+      map = jsonDecode(credential) as Map<String, dynamic>;
+    } catch (e) {
+      return res;
+    }
     try {
       var result = await HttpClient.instance.getJson(
         "https://api.bilibili.com/x/member/web/account",
-        header: jsonDecode(credential),
+        header: map,
       );
       if (result["code"] == 0) {
         BiliBiliUserInfoModel info = BiliBiliUserInfoModel.fromJson(result["data"]);
