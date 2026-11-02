@@ -4,7 +4,7 @@ publish_to: none
 description: "Slive APP"
 environment: 
   sdk: '>=3.12.0 <4.0.0'   # 2026-10-22 插件现代化：wakelock_plus 1.8.1 要求 Dart >=3.12（原 >=3.0.5 已失真，同步为真实底线）
-  flutter: 3.47.8
+  flutter: 3.47.9
 
 dependencies: 
   flutter: 
@@ -87,7 +87,7 @@ dependencies:
       path: flutter_inappwebview
       ref: sbi_fx_pc/v6.2.0-beta.3
   connectivity_plus: ^7.0.0 # 网络状态
-  qr_code_scanner_plus: ^2.0.14 # 二维码扫描
+  qr_code_scanner_plus: ^2.3.2 # 二维码扫描
   flutter_secure_storage: ^11.2.0 # 密钥存储
 
   # 网络相关
