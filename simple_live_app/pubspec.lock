@@ -141,10 +141,10 @@ packages:
     dependency: "direct main"
     description:
       name: canvas_danmaku
-      sha256: "1ff071d027b1cf3320d4b58ff1aee6811de51ce39b5b5773c2e0d7693e02d401"
+      sha256: "636c25392c980f1d3b1c19ab00512d78c1ea61c089bc3a2a6f9db3cd71bdfefb"
       url: "https://pub.dev"
     source: hosted
-    version: "0.3.3"
+    version: "0.3.4"
   characters:
     dependency: transitive
     description:
@@ -249,22 +249,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.3.4"
-  cupertino_icons:
-    dependency: "direct main"
-    description:
-      name: cupertino_icons
-      sha256: "41e005c33bd814be4d3096aff55b1908d419fde52ca656c8c47719ec745873cd"
-      url: "https://pub.dev"
-    source: hosted
-    version: "1.0.9"
   cupertino_ui:
     dependency: "direct main"
     description:
       name: cupertino_ui
-      sha256: a47c4e7c66fd7444a063a602597fceb238f705c3f6b1322bc0053d0a2638ee6e
+      sha256: e003b87afde18cb396ec15928c7894063d64af04462c68df9a1404c461316dd2
       url: "https://pub.dev"
     source: hosted
-    version: "1.1.4"
+    version: "1.1.5"
   dart_sm:
     dependency: transitive
     description:
@@ -333,10 +325,10 @@ packages:
     dependency: "direct main"
     description:
       name: easy_refresh
-      sha256: "513a5dc82c044f8a9c9a3d600b3d5d3256070575bfd8761940533d8e209ba79b"
+      sha256: e8a3c60f940b53d7fb8365d5f14fbf2c2b157ba69f947dcccebed41736b0aacf
       url: "https://pub.dev"
     source: hosted
-    version: "3.5.1"
+    version: "4.0.0"
   extended_image:
     dependency: "direct main"
     description:
@@ -968,10 +960,10 @@ packages:
     dependency: "direct main"
     description:
       name: material_ui
-      sha256: e4031746f96c8316864d9b92bce375f1320a36ed56e166307e1e1bda9d90b4ab
+      sha256: feb289df1e5f9ed9522f9fe3d909432a7f7bc76943f16abad09f80a16cd25196
       url: "https://pub.dev"
     source: hosted
-    version: "1.8.0"
+    version: "1.9.0"
   media_kit:
     dependency: "direct main"
     description:
