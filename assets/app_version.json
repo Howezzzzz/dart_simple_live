@@ -1,15 +1,15 @@
 {
-    "version": "1.08.47",
-    "version_num": 1008047,
-    "version_desc": "- 同步上游 dev 更新：**Flutter 构建引擎 3.47.8 → 3.47.9**（纯构建引擎升级，无功能变化）\n- 随之对齐：二维码扫描 `qr_code_scanner_plus` 约束 `^2.0.14 → ^2.3.2`（锁文件本已解析到 2.3.2，仅补齐声明）\n- 修复：**Flatpak 打包**（上一轮构建失败点）——flatpak 清单里钉的 Flutter 仍是 3.47.8，与新要求的 3.47.9 不符，`pub get` 报 SDK 版本不满足直接中止；已把清单的 flutter t",
+    "version": "1.08.48",
+    "version_num": 1008048,
+    "version_desc": "- 同步上游 dev 更新（2 个提交）：\n- 插件升级一批：`hive_ce` 2.19.3→**2.22.0**、`hive_ce_flutter` 2.3.4→**2.5.0**、`easy_refresh` 3.5.1→**4.0.0**（大版本）、`canvas_danma\n- 上游同时把 flatpak 清单与 `.fvmrc` 补到 3.47.9（与本地上一版的修复内容一致）\n- CI：TV 预构建 workflow 增加“上传 APK 到 Artifacts”一步（#204，只影响 TV 测试包）",
     "prerelease": true,
     "download_url": "https://github.com/Howezzzzz/dart_simple_live/releases",
     "download_urls": {
-        "android": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.47/app-arm64-v8a-release.apk",
-        "windows": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.47/Slive-1.08.47+1008047-windows-setup.exe",
-        "macos": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.47/simple_live_app-1.08.47+1008047-macos.dmg",
-        "linux": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.47/Slive-x86_64-linux.deb",
-        "linux_flatpak": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.47/Slive-x86_64.flatpak"
+        "android": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.48/app-arm64-v8a-release.apk",
+        "windows": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.48/Slive-1.08.48+1008048-windows-setup.exe",
+        "macos": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.48/simple_live_app-1.08.48+1008048-macos.dmg",
+        "linux": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.48/Slive-x86_64-linux.deb",
+        "linux_flatpak": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.48/Slive-x86_64.flatpak"
     },
     "mirror_prefixes": [
         "https://gh-proxy.com/",
@@ -17,10 +17,10 @@
         "https://ghproxy.cc/"
     ],
     "download_sha256": {
-        "android": "c14d45f089fd1b5ba96334c72528d548e2b4c02037f3d63be1a9bfce74846e62",
-        "windows": "774337197d9a52489f298acf53623b608082d0c8980518fcbda61acc88e0c2c6",
-        "macos": "c7e743fb61e85e148fdca0eba2d5d0b82ac2b0981ebe1e7d8d584b839aeda9a3",
-        "linux": "88d6993dfc520426d02c886d07a6b2a00a08bde8d2dbfcdc5c08dd014bf5ab70",
-        "linux_flatpak": "23c761626e7fc28d3802009062ea782bf6f3b67c4f7a5a63d9e976f18fbac2a5"
+        "android": "34b89cfafa45ed021ecfe4aaaaf19d0e45bc9d2ae66b5e26eaa95ec8eed402c5",
+        "windows": "77338042b564c9e6f3fa9d3ccd027b7c44e7e85b86e3f9f72bd02c154d8fa033",
+        "macos": "f66dc444b93c0962db35701135c294786000c7a0a5392cb19fe3b9e05a4104f0",
+        "linux": "330022b892ef59327a5422acdccad5d0ea7c0d4cb78ad82cc44be6340f0dd068",
+        "linux_flatpak": "ee1b52e754c983ee3d40cb56084a8b2b7137cc58286bfd520816b088804a3f4a"
     }
 }
