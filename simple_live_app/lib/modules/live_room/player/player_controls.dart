@@ -532,6 +532,16 @@ Widget buildControls(
                 ),
                 IconButton(
                   onPressed: () {
+                    controller.setVideoState();
+                  },
+                  icon: Icon(
+                    controller.showVideoState.value ? RemixIcons.video_on_line : RemixIcons.video_off_line, // 修上游笔误（Remix 未定义，应 RemixIcons）
+                    size: 24,
+                    color: Colors.white,
+                  ),
+                ),
+                IconButton(
+                  onPressed: () {
                     controller.showDanmuSettingsSheet();
                   },
                   icon: const ImageIcon(

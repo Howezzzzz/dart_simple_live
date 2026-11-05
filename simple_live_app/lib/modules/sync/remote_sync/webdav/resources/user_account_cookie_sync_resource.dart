@@ -32,6 +32,10 @@ class UserAccountCookieSyncResource implements SyncResource<List<Account>> {
     for (var item in data) {
       await DBService.instance.addAccount(item);
     }
+    // 上游 4ba44a99 改为循环内逐条 emit(Account) 并删掉本条 `0` 信号；我方不采纳：
+    // 我方监听方（platform_service.dart，ISS-216 修复）靠「非 Account 载荷」触发 _initAccount()，
+    // 即从 DB 重载 accountList（解密 / 安全模式重加密）。逐条 Account 只会触发单个 accountLogin，
+    // 不会重载列表 → webdav 恢复后账号列表与安全模式状态脱节。故保留整体刷新信号。
     EventBus.instance.emit(Constant.kUpdateAccount, 0); // 0 = 「账号已整体变更」刷新信号（非 Account，监听方需区分，见 ISS-216）
   }
 
