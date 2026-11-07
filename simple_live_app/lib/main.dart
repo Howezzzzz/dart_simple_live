@@ -254,6 +254,14 @@ class MyApp extends StatelessWidget {
                             }
                           }
                         }
+                        if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.f5) {
+                          // F5 刷新当前直播间（仅 Windows 桌面端）
+                          // 注：KeyRepeatEvent 不属于 KeyDownEvent，长按不会重复触发
+                          if (Platform.isWindows) {
+                            EventBus.instance.emit(EventBus.kRefreshPressed, 0);
+                            return;
+                          }
+                        }
                       },
                       child: child!,
                     ),
