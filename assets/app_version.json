@@ -1,15 +1,15 @@
 {
-    "version": "1.08.50",
-    "version_num": 1008050,
-    "version_desc": "- fix(flatpak): 更新 rustup-init sha256（x86_64 + aarch64 均已过期，flatpak 构建校验失败）+ CHANGELOG\n- sync: 追加合并上游 dev 1 提交（纯音频模式：视频开关按钮 + VideoTrack 切换；修上游 Remix 笔误）+ CHANGELOG 1.08.49 增补\n- sync: 合并上游 dev 2 提交（插件升级 hive_ce/easy_refresh 4/canvas_danmaku + TV 预构建 CI #204）+ CHANGELOG 1.08.48\n- fix(flatpak): 同步补 flatpak 清单 flutter 版本 3.47.9（tag/commit）+ .fvmrc + CHANGELOG 1.08.47\n- sync: 合并上游 dev dd5cb664（Flutter 引擎升级 3.47.9 + qr_code_scanner_plus 约束对齐）+ CHANGELOG 1.08.46\n- feat(live_room): 底栏中间居中显示直播间标题（顶栏标题保留）+ CHANGELOG 1.08.45",
+    "version": "1.08.51",
+    "version_num": 1008051,
+    "version_desc": "- 新增：**Windows 端按 `F5` 刷新当前直播间**（等价于点刷新按钮：重新读取房间信息与直播流、重连弹幕、清空 superchat）。仅 Windows 桌面端生效",
     "prerelease": true,
     "download_url": "https://github.com/Howezzzzz/dart_simple_live/releases",
     "download_urls": {
-        "android": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.50/app-arm64-v8a-release.apk",
-        "windows": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.50/Slive-1.08.50+1008050-windows-setup.exe",
-        "macos": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.50/simple_live_app-1.08.50+1008050-macos.dmg",
-        "linux": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.50/Slive-x86_64-linux.deb",
-        "linux_flatpak": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.50/Slive-x86_64.flatpak"
+        "android": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.51/app-arm64-v8a-release.apk",
+        "windows": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.51/Slive-1.08.51+1008051-windows-setup.exe",
+        "macos": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.51/simple_live_app-1.08.51+1008051-macos.dmg",
+        "linux": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.51/Slive-x86_64-linux.deb",
+        "linux_flatpak": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.51/Slive-x86_64.flatpak"
     },
     "mirror_prefixes": [
         "https://gh-proxy.com/",
@@ -17,10 +17,10 @@
         "https://ghproxy.cc/"
     ],
     "download_sha256": {
-        "android": "b0b2dbab86ca8b7a5f0d65e42338dcab176edba985fa2769942f9e02ce459e8c",
-        "windows": "4494405dd1b36e8d9439bd667d607c52157c69ebe4aa48acef67e4d8fc091058",
-        "macos": "54570e2f193e56bb454719bcc833a766692a86634074e192f2f91ecf4787e106",
-        "linux": "754e7107acc8a9af0cdfdf4d9d50dd72e859390d366ec985e93744ba16cc898d",
-        "linux_flatpak": "2b9ed1d213ad04a696a465b9b6ec0103473ff23f57423b60af75a4258f5b0134"
+        "android": "ab73f6ef08632ab12fbd29c45813f963aee379d076c9f1b5f3751752cf2c4359",
+        "windows": "82522ea2c3e6876a85c13c80687b3d54052d3bb9c880f05d33643ddd0bd52335",
+        "macos": "86879cd7df4698d0b3549fce342b1c6142e9ebdf7b059fec463e0c3d626d070b",
+        "linux": "b5437ef86a1ffa0af231a1b342ba3b496ea2de96aeb6df655721247c28a04abd",
+        "linux_flatpak": "bc7b1b51af4bb4ad294252ae28bdc237a6228eaaf71097abb083d55404200a3c"
     }
 }
