@@ -40,6 +40,9 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 
 class LiveRoomController extends PlayerController with WidgetsBindingObserver {
   StreamSubscription<dynamic>? subscription;
+
+  /// F5 刷新当前直播间的事件订阅（仅 Windows 端会收到）
+  StreamSubscription<dynamic>? _refreshSubscription;
   final Site pSite;
   final String pRoomId;
   late LiveDanmaku liveDanmaku;
@@ -204,6 +207,9 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
       if (danmakuController?.option.fontSize != data as double) {
         updateDanmuOption(danmakuController?.option.copyWith(fontSize: data));
       }
+    });
+    _refreshSubscription = EventBus.instance.listen(EventBus.kRefreshPressed, (data) {
+      refreshRoom();
     });
     _initDanmakuMask();
     super.onInit();
@@ -1447,6 +1453,7 @@ ${error?.stackTrace}''');
   void onClose() {
     WidgetsBinding.instance.removeObserver(this);
     scrollController.removeListener(scrollListener);
+    _refreshSubscription?.cancel();
     autoExitTimer?.cancel();
     danmakuTimer?.cancel();
     liveDurationTimer?.cancel();

@@ -9,6 +9,9 @@ class EventBus {
 
   /// 用户按了Esc
   static const String kEscapePressed = "EscapePressed";
+
+  /// 用户按了 F5（刷新当前直播间，仅 Windows 桌面端）
+  static const String kRefreshPressed = "RefreshPressed";
   static EventBus? _instance;
 
   static EventBus get instance {
