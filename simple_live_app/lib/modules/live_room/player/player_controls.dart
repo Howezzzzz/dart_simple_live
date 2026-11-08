@@ -282,7 +282,7 @@ Widget buildFullControls(
                   ),
                   IconButton(
                     onPressed: () {
-                      showDanmakuSettings(controller);
+                      controller.showDanmuSettingsSheet();
                     },
                     icon: const ImageIcon(
                       AssetImage('assets/icons/icon_danmaku_setting.png'),
