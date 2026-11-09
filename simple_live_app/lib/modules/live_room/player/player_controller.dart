@@ -146,14 +146,24 @@ mixin PlayerMixin {
     if (!Platform.isWindows) return;
     final pp = player.platform;
     if (pp is! NativePlayer) return;
-    final desired = _rtxVsrChainApplied
-        ? rtxVsrVideoCrop(player.state.width ?? 0, player.state.height ?? 0)
-        : '';
+    final rawW = player.state.width ?? 0;
+    final rawH = player.state.height ?? 0;
+    final desired = _rtxVsrChainApplied ? rtxVsrVideoCrop(rawW, rawH) : '';
     if (desired == _lastRtxVsrCrop) return;
+    // 裁切后内容比例 ≠ 源补边比例，而 mpv 的渲染窗口（video-params 的 dw/dh）与界面布局
+    // 都按源比例算 → 画面在渲染窗口里上下留 2px（4K 下约 8px）黑边。用 video-aspect-override
+    // 把真实内容比例告诉 mpv：它会重算 dw/dh，渲染窗口与界面布局随之变对（ISS-251 修正版）。
+    // 未裁切时回填源比例（方像素下等同自动，避免残留改比例）。
+    final aspectValue = rtxVsrDisplayAspect(rawW, rawH) ??
+        ((rawW > 0 && rawH > 0) ? rawW / rawH : null);
     _enqueueCropWrite(() async {
       // 队列内再查一次：并发同值时只写第一笔，避免重复设置触发滤镜链重建。
       if (desired == _lastRtxVsrCrop) return;
       await pp.setProperty('video-crop', desired);
+      if (aspectValue != null) {
+        await pp.setProperty(
+            'video-aspect-override', aspectValue.toStringAsFixed(6));
+      }
       // 写入成功后才记缓存（复核 P3-3）：异常（dispose 竞态）时保持旧值，下次同步会重试。
       _lastRtxVsrCrop = desired;
       if (desired.isEmpty) return;
@@ -164,6 +174,7 @@ mixin PlayerMixin {
       final readback = (await pp.getProperty('video-crop')).trim();
       if (readback.replaceAll(' ', '') == desired) {
         Log.d('[VSR] 已写入底部补边裁切 video-crop=$desired'
+            ' aspect=${aspectValue?.toStringAsFixed(6)}'
             '（源 ${player.state.width}x${player.state.height}）');
       } else {
         Log.w('[VSR] video-crop 未生效：期望 $desired，回读 "$readback"'
@@ -183,18 +194,6 @@ mixin PlayerMixin {
     });
     _cropWriteQueue = next;
     return next;
-  }
-
-  /// 给 UI 上报的视频高度：Windows 且 VSR 补边裁切生效时去掉底部补边（如 544 → 540）。
-  ///
-  /// 播放区的自适应面板宽度逻辑按上报尺寸的比例计算（目标无黑边）。裁切后画面真实比例
-  /// 已变成 16:9，若仍按补边高度（544）上报，播放区会偏「高」→ 裁切后上下留黑条（ISS-251）。
-  int _uiVideoHeight(int w, int h) {
-    if (!Platform.isWindows ||
-        !AppSettingsController.instance.enableRtxVsr.value) {
-      return h;
-    }
-    return rtxVsrDisplayHeight(w, h);
   }
 
   /// 视频控制器
@@ -531,7 +530,7 @@ mixin PlayerSystemMixin on PlayerMixin, PlayerStateMixin, PlayerDanmakuMixin {
     if (w <= 0 || h <= 0) return;
     // 供页面判定覆盖式面板（分辨率变化时也能刷新；RISK-17）
     videoWidthRx.value = w;
-    videoHeightRx.value = _uiVideoHeight(w, h);
+    videoHeightRx.value = h;
     Size? playerSize;
     double? contentWidth;
     try {
@@ -1049,8 +1048,7 @@ class PlayerController extends BaseController
       // 供页面判定覆盖式面板；否则在未开自适应或处于全屏时该值恒为 0 → 永不折叠。
       if ((player.state.width ?? 0) > 0 && (player.state.height ?? 0) > 0) {
         videoWidthRx.value = player.state.width!;
-        videoHeightRx.value =
-            _uiVideoHeight(player.state.width!, player.state.height!);
+        videoHeightRx.value = player.state.height!;
       }
       if (player.state.width == null) {
         return;
@@ -1070,8 +1068,7 @@ class PlayerController extends BaseController
       _syncRtxVsrCrop();
       if ((player.state.width ?? 0) > 0 && (player.state.height ?? 0) > 0) {
         videoWidthRx.value = player.state.width!;
-        videoHeightRx.value =
-            _uiVideoHeight(player.state.width!, player.state.height!);
+        videoHeightRx.value = player.state.height!;
       }
       isVertical.value = (player.state.height ?? 9) > (player.state.width ?? 16);
       if (AppSettingsController.instance.autoFitWindowWidth.value &&

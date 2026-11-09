@@ -56,12 +56,13 @@ String rtxVsrVideoCrop(int width, int height, {int scale = rtxVsrScale}) {
   return '${width * scale}x${(height - pad) * scale}+0+0';
 }
 
-/// 供 UI 布局使用的「显示高度」：VSR 补边裁切生效时去掉底部补边（如 544 → 540）。
+/// VSR 裁切生效时画面真实的显示比例（宽/高），如 960x544 → 960/540（16:9）。
 ///
-/// 播放区按上报的视频尺寸比例自适应（目标：无黑边）。裁切后画面真实比例是
-/// 「去掉补边」的比例（16:9），若仍按补边高度上报，播放区会偏「高」→ 裁切后上下留黑边。
-/// 裁切不生效时原样返回。
-int rtxVsrDisplayHeight(int width, int height) {
+/// 裁切后内容比例 ≠ 源补边比例，而 mpv 的渲染窗口（video-params 的 dw/dh）与界面布局都
+/// 按「源比例」算 → 画面在窗口里上下留 2px（4K 下约 8px）黑边。把该真实比例通过
+/// `video-aspect-override` 告诉 mpv 即可校正。无裁切时返回 null（调用方按源比例处理）。
+double? rtxVsrDisplayAspect(int width, int height) {
   final pad = rtxVsrBottomPadRows(width, height);
-  return pad > 0 ? height - pad : height;
+  if (pad <= 0) return null;
+  return width / (height - pad);
 }
