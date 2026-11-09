@@ -225,8 +225,12 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
   }
 
   void _initHotKeyWhenFull() {
-    // P0-1（ISS-237）：HotKeyService 仅桌面端注册（main.dart 非 Android/iOS 分支），
-    // 移动端直接 Get.find 会抛异常导致进房崩溃（上游 31f40ed 带入，此处守卫兑底）
+    // 热键仅 PC 端初始化（上游 ab86ddcc fix）
+    if (Platform.isAndroid || Platform.isIOS) {
+      return;
+    }
+    // P0-1（ISS-237）兜底：HotKeyService 仅桌面端注册（main.dart 非 Android/iOS 分支），
+    // 未注册时 Get.find 会抛异常导致进房崩溃（上游 31f40ed 带入）
     if (!Get.isRegistered<HotKeyService>()) {
       return;
     }
