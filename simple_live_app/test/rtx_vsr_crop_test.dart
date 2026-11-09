@@ -104,4 +104,20 @@ void main() {
       expect(rtxVsrDisplayAspect(960, 500), isNull);
     });
   });
+
+  group('rtxVsrRenderSize（VSR 渲染尺寸）', () {
+    test('补边流按放大后并去补边（960x544 → 1920x1080）', () {
+      expect(rtxVsrRenderSize(960, 544), (1920, 1080));
+      expect(rtxVsrRenderSize(1920, 1088), (3840, 2160));
+    });
+
+    test('无补边时按放大后原尺寸（1280x720 → 2560x1440）', () {
+      expect(rtxVsrRenderSize(1280, 720), (2560, 1440));
+    });
+
+    test('非法尺寸返回 null', () {
+      expect(rtxVsrRenderSize(0, 0), isNull);
+      expect(rtxVsrRenderSize(960, 0), isNull);
+    });
+  });
 }

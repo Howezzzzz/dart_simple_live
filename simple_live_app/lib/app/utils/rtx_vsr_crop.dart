@@ -66,3 +66,13 @@ double? rtxVsrDisplayAspect(int width, int height) {
   if (pad <= 0) return null;
   return width / (height - pad);
 }
+
+/// VSR 放大后的渲染尺寸（放大后、已裁掉底部补边），如 960x544 → 1920x1080。
+///
+/// 用于让 mpv 按此尺寸渲染（RISK-59）：否则 mpv 按“源尺寸”渲染，会把 VSR 放大成果
+/// 缩回源尺寸再被 Flutter 拉大，放大丢失。尺寸非法时返回 null（调用方保持默认）。
+(int, int)? rtxVsrRenderSize(int width, int height) {
+  if (width <= 0 || height <= 0) return null;
+  final pad = rtxVsrBottomPadRows(width, height);
+  return (width * rtxVsrScale, (height - pad) * rtxVsrScale);
+}

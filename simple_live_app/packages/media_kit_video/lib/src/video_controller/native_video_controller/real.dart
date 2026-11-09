@@ -98,12 +98,17 @@ class NativeVideoController extends PlatformVideoController {
         videoParamsWidth = width;
         videoParamsHeight = height;
 
+        // [Slive 定制] 若已通过 setSize() 指定显式输出尺寸，优先使用它，避免视频参数变化时
+        // 被复位成“源尺寸”（用于 RISK-59：让 mpv 按 VSR 放大后的尺寸渲染）。
+        final outWidth = this.width ?? width;
+        final outHeight = this.height ?? height;
+
         await _channel.invokeMethod(
           'VideoOutputManager.SetSize',
           {
             'handle': handle.toString(),
-            'width': width.toString(),
-            'height': height.toString(),
+            'width': outWidth.toString(),
+            'height': outHeight.toString(),
           },
         );
       }),

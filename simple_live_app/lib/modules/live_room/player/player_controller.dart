@@ -164,6 +164,16 @@ mixin PlayerMixin {
         await pp.setProperty(
             'video-aspect-override', aspectValue.toStringAsFixed(6));
       }
+      // RISK-59：让 mpv 按 VSR 放大后的尺寸（去补边）渲染，而非源尺寸——否则放大成果
+      // 被缩回、再被 Flutter 拉大，等于白烧 Tensor Core。未开 VSR 时恢复默认（源尺寸）。
+      final renderSize =
+          _rtxVsrChainApplied ? rtxVsrRenderSize(rawW, rawH) : null;
+      if (renderSize != null) {
+        await videoController
+            .setSize(width: renderSize.$1, height: renderSize.$2);
+      } else {
+        await videoController.setSize();
+      }
       // 写入成功后才记缓存（复核 P3-3）：异常（dispose 竞态）时保持旧值，下次同步会重试。
       _lastRtxVsrCrop = desired;
       if (desired.isEmpty) return;
@@ -175,6 +185,7 @@ mixin PlayerMixin {
       if (readback.replaceAll(' ', '') == desired) {
         Log.d('[VSR] 已写入底部补边裁切 video-crop=$desired'
             ' aspect=${aspectValue?.toStringAsFixed(6)}'
+            ' renderSize=${renderSize?.$1}x${renderSize?.$2}'
             '（源 ${player.state.width}x${player.state.height}）');
       } else {
         Log.w('[VSR] video-crop 未生效：期望 $desired，回读 "$readback"'
