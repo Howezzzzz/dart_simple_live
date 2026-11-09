@@ -769,6 +769,14 @@ class LiveRoomPage extends GetView<LiveRoomController> {
         child: AspectRatio(aspectRatio: bottomAlignAspect, child: video),
       );
     }
+    // 播放区尺寸变化（窗口缩放/面板拖动/进退全屏）→ 防抖重算 VSR 自适应倍数。
+    video = NotificationListener<SizeChangedLayoutNotification>(
+      onNotification: (_) {
+        controller.scheduleRtxVsrSync();
+        return false;
+      },
+      child: SizeChangedLayoutNotifier(child: video),
+    );
     return video;
   }
 

@@ -112,11 +112,13 @@ mixin PlayerMixin {
       // 放大倍数与 rtx_vsr_crop.dart 的 rtxVsrScale 单一事实来源（复核 P3-4）：
       // 手动写两处 scale 会脱钩——倍数调大时裁切矩形落在放大帧内 → 裁错且无 safe-fail。
       await pp.setProperty('vf', 'd3d11vpp=scale=$rtxVsrScale:scaling-mode=nvidia');
+      _lastRtxVsrScale = rtxVsrScale;
       _rtxVsrChainApplied = true;
     } else if (Platform.isWindows) {
       // 关闭 VSR 时必须摘掉已挂上的滤镜链（复核 P2-1）：只改标志不摘链的话，
       // 同一会话 F5/切清晰度重初始化后，链仍在放大画面、裁切却被清空 → 绿条复现且 VSR 代价照付。
       await pp.setProperty('vf', '');
+      _lastRtxVsrScale = null;
       _rtxVsrChainApplied = false;
     }
     // 同步底部补边裁切（VSR 开启才裁；关闭时显式清空，避免切线路等场景残留上次的裁切）
@@ -130,6 +132,12 @@ mixin PlayerMixin {
   /// 不能只用裁切值当键：无补边流的裁切值都是空串，切分辨率/切直播间时会误判「未变化」
   /// → 渲染尺寸与显示比例漏更（复核 P0）。
   String? _lastRtxVsrSignature;
+
+  /// 当前已挂上的 VSR 倍数（null = 未挂链），用于判断是否需要重挂滤镜链。
+  double? _lastRtxVsrScale;
+
+  /// 播放区尺寸变化的防抖计时器（合并密集 resize 事件，避免滤镜链反复重挂）。
+  Timer? _vsrSyncDebounce;
 
   /// 串行队列：width/height 双监听并发调用时按序执行，避免交错产生竞态假告警（复核 P3-2）。
   Future<void> _cropWriteQueue = Future<void>.value();
@@ -153,22 +161,47 @@ mixin PlayerMixin {
     // 尺寸未知（如 initializePlayer 在 open 之前那次调用）先不处理：否则会把空值写进去重
     // 缓存，令随后无补边流（裁切值为空串）的真实尺寸事件被误判为「未变化」而漏更（复核 P0）。
     if (rawW <= 0 || rawH <= 0) return;
-    final desired = _rtxVsrChainApplied ? rtxVsrVideoCrop(rawW, rawH) : '';
+    // 自适应倍数：让 VSR 放大目标 ≈ 播放区物理分辨率（源低就多放大）；拿不到播放区
+    // 尺寸时沿用固定 2x 兜底；S≤1.05（源≥播放区）返回 null → 不挂 VSR（整体关闭）。
+    double? scale;
+    if (_rtxVsrChainApplied) {
+      final area = _playerAreaPhysicalSize();
+      scale = area == null
+          ? rtxVsrScale
+          : rtxVsrAdaptiveScale(
+              areaW: area.$1, areaH: area.$2, srcW: rawW, srcH: rawH);
+    }
+    final s = scale; // 捕获为 final，便于闭包里做空值提升
+    final enable = _rtxVsrChainApplied && s != null;
+    final desired =
+        enable ? rtxVsrVideoCrop(rawW, rawH, scale: s ?? rtxVsrScale) : '';
     // 裁切后内容比例 ≠ 源补边比例，而 mpv 的渲染窗口（video-params 的 dw/dh）与界面布局
     // 都按源比例算 → 画面在渲染窗口里上下留 2px（4K 下约 8px）黑边。用 video-aspect-override
     // 把真实内容比例告诉 mpv：它会重算 dw/dh，渲染窗口与界面布局随之变对（ISS-251）。
     // 未裁切时回填源比例（方像素下等同自动，避免残留改比例）。
-    final aspectValue = rtxVsrDisplayAspect(rawW, rawH) ?? (rawW / rawH);
-    // RISK-59：让 mpv 按 VSR 放大后的尺寸（去补边）渲染，而非源尺寸——否则放大成果
+    final aspectValue =
+        (enable ? rtxVsrDisplayAspect(rawW, rawH) : null) ?? (rawW / rawH);
+    // RISK-59：让 mpv 按 VSR 输出尺寸（去补边）渲染，而非源尺寸——否则放大成果
     // 被缩回、再被 Flutter 拉大，等于白烧 Tensor Core。未开 VSR 时恢复默认（源尺寸）。
     final renderSize =
-        _rtxVsrChainApplied ? rtxVsrRenderSize(rawW, rawH) : null;
-    // 去重签名：裁切值 + 源尺寸 + 链状态（**不能只用裁切值当键**，见字段注释）。
-    final signature = '$desired|${rawW}x$rawH|$_rtxVsrChainApplied';
+        enable ? rtxVsrRenderSize(rawW, rawH, scale: s ?? rtxVsrScale) : null;
+    // 去重签名：倍数 + 裁切值 + 源尺寸 + 链状态（**不能只用裁切值当键**，见字段注释）。
+    final signature = '${s ?? -1}|$desired|${rawW}x$rawH|$_rtxVsrChainApplied';
     if (signature == _lastRtxVsrSignature) return;
     _enqueueCropWrite(() async {
       // 队列内再查一次：并发同值时只写第一笔，避免重复设置触发滤镜链重建。
       if (signature == _lastRtxVsrSignature) return;
+      // 倍数变化才重挂滤镜链（重挂会重建 D3D11 链路、可能闪一帧 → 仅桶变化时做）。
+      if (enable && s != null) {
+        if (s != _lastRtxVsrScale) {
+          await pp.setProperty('vf',
+              'd3d11vpp=scale=${s.toStringAsFixed(2)}:scaling-mode=nvidia');
+          _lastRtxVsrScale = s;
+        }
+      } else if (_lastRtxVsrScale != null) {
+        await pp.setProperty('vf', '');
+        _lastRtxVsrScale = null;
+      }
       await pp.setProperty('video-crop', desired);
       await pp.setProperty(
           'video-aspect-override', aspectValue.toStringAsFixed(6));
@@ -188,6 +221,7 @@ mixin PlayerMixin {
       final readback = (await pp.getProperty('video-crop')).trim();
       if (readback.replaceAll(' ', '') == desired) {
         Log.d('[VSR] 已写入底部补边裁切 video-crop=$desired'
+            ' scale=${s?.toStringAsFixed(2)}'
             ' aspect=${aspectValue.toStringAsFixed(6)}'
             ' renderSize=${renderSize?.$1}x${renderSize?.$2}'
             '（源 ${player.state.width}x${player.state.height}）');
@@ -209,6 +243,33 @@ mixin PlayerMixin {
     });
     _cropWriteQueue = next;
     return next;
+  }
+
+  /// 防抖入口：播放区尺寸变化（窗口缩放/面板拖动/进退全屏）等场景调用。
+  void scheduleRtxVsrSync() {
+    _vsrSyncDebounce?.cancel();
+    _vsrSyncDebounce = Timer(const Duration(milliseconds: 250), () {
+      _syncRtxVsrCrop();
+    });
+  }
+
+  /// 播放区（Video widget）的物理像素尺寸；不可得时返回 null（调用方走固定 2x 兜底）。
+  (int, int)? _playerAreaPhysicalSize() {
+    try {
+      final ctx = globalPlayerKey.currentContext;
+      if (ctx == null) return null;
+      final size = ctx.size;
+      if (size == null) return null;
+      if (size.width < 2 || size.height < 2) return null;
+      final dpr = MediaQuery.maybeOf(ctx)?.devicePixelRatio ?? 1.0;
+      final w = (size.width * dpr).round();
+      final h = (size.height * dpr).round();
+      if (w < 2 || h < 2) return null;
+      return (w, h);
+    } catch (e) {
+      Log.d('[VSR] 取播放区尺寸失败: $e');
+      return null;
+    }
   }
 
   /// 视频控制器

@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 // NVIDIA RTX VSR（Windows）底部补边裁切计算（纯逻辑，便于单测）。
 //
 // 背景（2026-11-09 实测，见 文件/Slive/证据/VSR绿条-20261109/）：
@@ -30,8 +32,8 @@
 //   ③ 裁后高度为偶数（4:2:0 帧高必须为偶数；例如 848x480 裁后 477 是奇数 → 不是补边）
 // 其他比例（4:3 等）一律不动。
 
-/// VSR 滤镜的放大倍数（与 player_controller 里 `vf=d3d11vpp=scale=…` 保持一致）。
-const int rtxVsrScale = 2;
+/// VSR 滤镜的**默认**放大倍数（兜底用；自适应倍数见 [rtxVsrAdaptiveScale]）。
+const double rtxVsrScale = 2.0;
 
 /// 计算需要从画面底部裁掉的行数（**源尺寸**口径）；0 表示不需要裁切。
 int rtxVsrBottomPadRows(int width, int height) {
@@ -50,11 +52,15 @@ int rtxVsrBottomPadRows(int width, int height) {
 /// **注意坐标系**：mpv 由 VO 在滤镜之后应用，故这里返回的是**放大后**的尺寸
 /// （`width*scale` / `(height-pad)*scale`），保留画面顶部、裁掉底部补边。
 /// 无需裁切时返回空串（mpv 约定：空串=取消手动裁切、恢复容器裁切信息）。
-String rtxVsrVideoCrop(int width, int height, {int scale = rtxVsrScale}) {
+String rtxVsrVideoCrop(int width, int height, {double scale = rtxVsrScale}) {
   final pad = rtxVsrBottomPadRows(width, height);
   if (pad <= 0) return '';
-  return '${width * scale}x${(height - pad) * scale}+0+0';
+  // 非整数倍数下输出可能为奇数，4:2:0 色度要求偶数 → 向下取偶。
+  return '${_evenFloor(width * scale)}x${_evenFloor((height - pad) * scale)}+0+0';
 }
+
+/// 向下取偶（4:2:0 帧尺寸要求）。
+int _evenFloor(num v) => (v / 2).floor() * 2;
 
 /// VSR 裁切生效时画面真实的显示比例（宽/高），如 960x544 → 960/540（16:9）。
 ///
@@ -67,16 +73,47 @@ double? rtxVsrDisplayAspect(int width, int height) {
   return width / (height - pad);
 }
 
-/// VSR 放大后的渲染尺寸（放大后、已裁掉底部补边），如 960x544 → 1920x1080。
+/// VSR 放大后的渲染尺寸（放大后、已裁掉底部补边），如 960x544@2 → 1920x1080。
 ///
 /// 用于让 mpv 按此尺寸渲染（RISK-59）：否则 mpv 按“源尺寸”渲染，会把 VSR 放大成果
-/// 缩回源尺寸再被 Flutter 拉大，放大丢失。尺寸非法时返回 null（调用方保持默认）。
-(int, int)? rtxVsrRenderSize(int width, int height) {
+/// 缩回源尺寸再被 Flutter 拉大，放大丢失。尺寸非法或单边超 8192（sanity）时返回 null。
+(int, int)? rtxVsrRenderSize(int width, int height,
+    {double scale = rtxVsrScale}) {
   if (width <= 0 || height <= 0) return null;
   final pad = rtxVsrBottomPadRows(width, height);
-  final outHeight = (height - pad) * rtxVsrScale;
-  // 封顶：输出高超过 2160（4K）就不强制显式尺寸——源已属高分辨率、VSR 收益有限，
-  // 而 8K 画布会爆显存/掉帧。调用方据此保持默认（源尺寸，复核 P2）。
-  if (outHeight > 2160) return null;
-  return (width * rtxVsrScale, outHeight);
+  final outW = _evenFloor(width * scale);
+  final outH = _evenFloor((height - pad) * scale);
+  if (outW <= 0 || outH <= 0) return null;
+  // sanity：单边超 8192 视为异常（显存/驱动上限），不设显式尺寸。
+  if (outW > 8192 || outH > 8192) return null;
+  return (outW, outH);
+}
+
+/// VSR 自适应倍数的上限（驱动/硬件经验上限）。
+const double rtxVsrMaxScale = 4.0;
+
+/// 计算「自适应倍数」S：让 VSR 放大目标 ≈ 播放区物理分辨率（源低就多放大）。
+///
+/// 公式：`r = min(areaW/srcW, areaH/(srcH-pad))`——取 fit 比例，保证输出不超出播放区、
+/// 避免二次上采样；**向上**取到 0.25 步长，夹取 [1, rtxVsrMaxScale]。
+/// `r ≤ 1.05`（源已 ≥ 播放区，VSR 无意义）或参数非法或未裁切输出过大（>8192）
+/// → 返回 null（调用方不挂 VSR）。
+double? rtxVsrAdaptiveScale({
+  required int areaW,
+  required int areaH,
+  required int srcW,
+  required int srcH,
+}) {
+  if (areaW <= 0 || areaH <= 0 || srcW <= 0 || srcH <= 0) return null;
+  final pad = rtxVsrBottomPadRows(srcW, srcH);
+  final contentH = srcH - pad;
+  if (contentH <= 0) return null;
+  final r = math.min(areaW / srcW, areaH / contentH);
+  if (r <= 1.05) return null;
+  var s = (r / 0.25).ceilToDouble() * 0.25;
+  if (s < 1.0) s = 1.0;
+  if (s > rtxVsrMaxScale) s = rtxVsrMaxScale;
+  // sanity：未裁切输出任一边过大（显存/驱动上限）→ 不挂。
+  if (srcW * s > 8192 || srcH * s > 8192) return null;
+  return s;
 }

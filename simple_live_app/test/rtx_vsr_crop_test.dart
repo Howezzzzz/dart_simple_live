@@ -115,15 +115,75 @@ void main() {
       expect(rtxVsrRenderSize(1280, 720), (2560, 1440));
     });
 
+    test('可按倍数参数化（960x544 @3 → 2880x1620）', () {
+      expect(rtxVsrRenderSize(960, 544, scale: 3), (2880, 1620));
+      expect(rtxVsrRenderSize(960, 544, scale: 1.5), (1440, 810));
+    });
+
     test('非法尺寸返回 null', () {
       expect(rtxVsrRenderSize(0, 0), isNull);
       expect(rtxVsrRenderSize(960, 0), isNull);
     });
 
-    test('输出高超过 2160 时返回 null（封顶，避免 8K 画布）', () {
-      expect(rtxVsrRenderSize(3840, 2160), isNull); // 7680x4320
-      expect(rtxVsrRenderSize(2560, 1440), isNull); // 5120x2880
-      expect(rtxVsrRenderSize(1920, 1080), (3840, 2160)); // 恰好 2160，允许
+    test('单边超 8192（sanity）返回 null', () {
+      expect(rtxVsrRenderSize(3840, 2160), (7680, 4320)); // 未超限
+      expect(rtxVsrRenderSize(4096, 2160, scale: 4), isNull); // 16384 > 8192
+    });
+  });
+
+  group('rtxVsrAdaptiveScale（自适应倍数：目标≈播放区物理分辨率）', () {
+    test('源低就多放大：540p 到 4K 播放区 → 4', () {
+      expect(
+          rtxVsrAdaptiveScale(
+              areaW: 3840, areaH: 2160, srcW: 960, srcH: 544),
+          4.0);
+    });
+
+    test('720p → 4K 得 3；→ 1080p 得 1.5', () {
+      expect(
+          rtxVsrAdaptiveScale(
+              areaW: 3840, areaH: 2160, srcW: 1280, srcH: 720),
+          3.0);
+      expect(
+          rtxVsrAdaptiveScale(
+              areaW: 1920, areaH: 1080, srcW: 1280, srcH: 720),
+          1.5);
+    });
+
+    test('0.25 步长向上取；夹取上限 4', () {
+      expect(
+          rtxVsrAdaptiveScale(
+              areaW: 1920, areaH: 1080, srcW: 960, srcH: 544),
+          2.0);
+      expect(
+          rtxVsrAdaptiveScale(
+              areaW: 2560, areaH: 1440, srcW: 960, srcH: 544),
+          2.75);
+      expect(
+          rtxVsrAdaptiveScale(
+              areaW: 7680, areaH: 4320, srcW: 960, srcH: 544),
+          4.0);
+    });
+
+    test('源≥播放区 → null（不挂 VSR）', () {
+      expect(
+          rtxVsrAdaptiveScale(
+              areaW: 1920, areaH: 1080, srcW: 1920, srcH: 1080),
+          isNull);
+      expect(
+          rtxVsrAdaptiveScale(
+              areaW: 1280, areaH: 720, srcW: 1920, srcH: 1080),
+          isNull);
+    });
+
+    test('非法尺寸 → null', () {
+      expect(
+          rtxVsrAdaptiveScale(areaW: 0, areaH: 0, srcW: 960, srcH: 544),
+          isNull);
+      expect(
+          rtxVsrAdaptiveScale(
+              areaW: 1920, areaH: 1080, srcW: 0, srcH: 0),
+          isNull);
     });
   });
 }
