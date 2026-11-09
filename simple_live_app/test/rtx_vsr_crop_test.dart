@@ -91,4 +91,17 @@ void main() {
       expect(rtxVsrVideoCrop(0, 0), '');
     });
   });
+
+  group('rtxVsrDisplayHeight（UI 显示高度：裁切生效时去补边）', () {
+    test('补边流去掉底部补边（544→540 / 1088→1080）', () {
+      expect(rtxVsrDisplayHeight(960, 544), 540);
+      expect(rtxVsrDisplayHeight(1920, 1088), 1080);
+    });
+
+    test('无补边时原样返回', () {
+      expect(rtxVsrDisplayHeight(1280, 720), 720);
+      expect(rtxVsrDisplayHeight(640, 480), 480);
+      expect(rtxVsrDisplayHeight(960, 500), 500);
+    });
+  });
 }

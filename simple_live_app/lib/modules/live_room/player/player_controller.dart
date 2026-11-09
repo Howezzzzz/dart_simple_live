@@ -185,6 +185,18 @@ mixin PlayerMixin {
     return next;
   }
 
+  /// 给 UI 上报的视频高度：Windows 且 VSR 补边裁切生效时去掉底部补边（如 544 → 540）。
+  ///
+  /// 播放区的自适应面板宽度逻辑按上报尺寸的比例计算（目标无黑边）。裁切后画面真实比例
+  /// 已变成 16:9，若仍按补边高度（544）上报，播放区会偏「高」→ 裁切后上下留黑条（ISS-251）。
+  int _uiVideoHeight(int w, int h) {
+    if (!Platform.isWindows ||
+        !AppSettingsController.instance.enableRtxVsr.value) {
+      return h;
+    }
+    return rtxVsrDisplayHeight(w, h);
+  }
+
   /// 视频控制器
   late final videoController = VideoController(
     player,
@@ -519,7 +531,7 @@ mixin PlayerSystemMixin on PlayerMixin, PlayerStateMixin, PlayerDanmakuMixin {
     if (w <= 0 || h <= 0) return;
     // 供页面判定覆盖式面板（分辨率变化时也能刷新；RISK-17）
     videoWidthRx.value = w;
-    videoHeightRx.value = h;
+    videoHeightRx.value = _uiVideoHeight(w, h);
     Size? playerSize;
     double? contentWidth;
     try {
@@ -1037,7 +1049,8 @@ class PlayerController extends BaseController
       // 供页面判定覆盖式面板；否则在未开自适应或处于全屏时该值恒为 0 → 永不折叠。
       if ((player.state.width ?? 0) > 0 && (player.state.height ?? 0) > 0) {
         videoWidthRx.value = player.state.width!;
-        videoHeightRx.value = player.state.height!;
+        videoHeightRx.value =
+            _uiVideoHeight(player.state.width!, player.state.height!);
       }
       if (player.state.width == null) {
         return;
@@ -1057,7 +1070,8 @@ class PlayerController extends BaseController
       _syncRtxVsrCrop();
       if ((player.state.width ?? 0) > 0 && (player.state.height ?? 0) > 0) {
         videoWidthRx.value = player.state.width!;
-        videoHeightRx.value = player.state.height!;
+        videoHeightRx.value =
+            _uiVideoHeight(player.state.width!, player.state.height!);
       }
       isVertical.value = (player.state.height ?? 9) > (player.state.width ?? 16);
       if (AppSettingsController.instance.autoFitWindowWidth.value &&
