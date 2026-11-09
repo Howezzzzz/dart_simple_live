@@ -23,6 +23,7 @@ import 'package:simple_live_app/app/custom_throttle.dart';
 import 'package:simple_live_app/app/log.dart';
 import 'package:simple_live_app/app/utils.dart';
 import 'package:simple_live_app/app/utils/panel_width.dart';
+import 'package:simple_live_app/app/utils/rtx_vsr_crop.dart';
 import 'package:simple_live_app/services/local_storage_service.dart';
 import 'package:simple_live_app/modules/live_room/danmaku/danmaku_emoticon.dart';
 import 'package:simple_live_core/simple_live_core.dart';
@@ -108,8 +109,80 @@ mixin PlayerMixin {
     // NVIDIA RTX VSR 支持 (Windows 平台)
     if (Platform.isWindows && AppSettingsController.instance.enableRtxVsr.value) {
       await pp.setProperty('hwdec', 'd3d11va');
-      await pp.setProperty('vf', 'd3d11vpp=scale=2:scaling-mode=nvidia');
+      // 放大倍数与 rtx_vsr_crop.dart 的 rtxVsrScale 单一事实来源（复核 P3-4）：
+      // 手动写两处 scale 会脱钩——倍数调大时裁切矩形落在放大帧内 → 裁错且无 safe-fail。
+      await pp.setProperty('vf', 'd3d11vpp=scale=$rtxVsrScale:scaling-mode=nvidia');
+      _rtxVsrChainApplied = true;
+    } else if (Platform.isWindows) {
+      // 关闭 VSR 时必须摘掉已挂上的滤镜链（复核 P2-1）：只改标志不摘链的话，
+      // 同一会话 F5/切清晰度重初始化后，链仍在放大画面、裁切却被清空 → 绿条复现且 VSR 代价照付。
+      await pp.setProperty('vf', '');
+      _rtxVsrChainApplied = false;
     }
+    // 同步底部补边裁切（VSR 开启才裁；关闭时显式清空，避免切线路等场景残留上次的裁切）
+    await _syncRtxVsrCrop();
+  }
+
+  /// 本次播放是否已挂上 VSR 滤镜链（决定能否动 video-crop）。
+  bool _rtxVsrChainApplied = false;
+
+  /// 记录最近一次**写入成功**的 video-crop，避免重复设置导致滤镜链反复重建。
+  String? _lastRtxVsrCrop;
+
+  /// 串行队列：width/height 双监听并发调用时按序执行，避免交错产生竞态假告警（复核 P3-2）。
+  Future<void> _cropWriteQueue = Future<void>.value();
+
+  /// Windows 下按 VSR 状态同步 mpv 的底部补边裁切。
+  ///
+  /// VSR 把画面放大 2 倍，而编码按 16 对齐补边（如 540p 流实际帧高 544），
+  /// D3D11 视频处理器只写“真实内容高度”，末尾未写入的行显示为绿色 → 画面底部绿条。
+  /// 用 mpv `--video-crop` 裁掉补边；**坐标空间是滤镜之后的帧**（见 rtx_vsr_crop.dart 注释）。
+  ///
+  /// 两种状态都写：开了 → 裁切值；没开（或未挂上滤镜链）→ 空串（取消手动裁切）。
+  Future<void> _syncRtxVsrCrop() async {
+    // 注：不引用 _playerDisposed（它在 PlayerController 内，mixin 不可见）；
+    // 播放器已 dispose 时 media_kit 的 setProperty/getProperty 会抛 AssertionError
+    // 或 StateError（_checkNativeHandle），由 _enqueueCropWrite 的 catch 兜底。
+    if (!Platform.isWindows) return;
+    final pp = player.platform;
+    if (pp is! NativePlayer) return;
+    final desired = _rtxVsrChainApplied
+        ? rtxVsrVideoCrop(player.state.width ?? 0, player.state.height ?? 0)
+        : '';
+    if (desired == _lastRtxVsrCrop) return;
+    _enqueueCropWrite(() async {
+      // 队列内再查一次：并发同值时只写第一笔，避免重复设置触发滤镜链重建。
+      if (desired == _lastRtxVsrCrop) return;
+      await pp.setProperty('video-crop', desired);
+      // 写入成功后才记缓存（复核 P3-3）：异常（dispose 竞态）时保持旧值，下次同步会重试。
+      _lastRtxVsrCrop = desired;
+      if (desired.isEmpty) return;
+      // 回读校验（参考音量均衡 af 的做法）：media_kit 的 setProperty 不返回错误，
+      // 属性缺失/语法级拒绝时会静默失败 → 回读一次让失败可见（RISK-58）。
+      // 注意：回读只能证明“属性被接受”，不能证明 VO 逐帧应用成功（越界值由 mpv
+      // 在应用阶段忽略并打印日志）——成功日志措辞按此收敛为“已写入”。
+      final readback = (await pp.getProperty('video-crop')).trim();
+      if (readback.replaceAll(' ', '') == desired) {
+        Log.d('[VSR] 已写入底部补边裁切 video-crop=$desired'
+            '（源 ${player.state.width}x${player.state.height}）');
+      } else {
+        Log.w('[VSR] video-crop 未生效：期望 $desired，回读 "$readback"'
+            '（源 ${player.state.width}x${player.state.height}）—— 可能 libmpv 不支持该属性');
+      }
+    });
+  }
+
+  /// 串行执行一次 video-crop 写入（参考 _enqueueVolumeNorm 的既有惯例）。
+  Future<void> _enqueueCropWrite(Future<void> Function() task) {
+    final next = _cropWriteQueue.then((_) async {
+      try {
+        await task();
+      } catch (e) {
+        Log.d('[VSR] 设置 video-crop 失败: $e');
+      }
+    });
+    _cropWriteQueue = next;
+    return next;
   }
 
   /// 视频控制器
@@ -959,6 +1032,7 @@ class PlayerController extends BaseController
     });
     _widthSubscription = player.stream.width.listen((event) {
       Log.d('width:$event  W:${(player.state.width)}  H:${(player.state.height)}');
+      _syncRtxVsrCrop();
       // RISK-17：分辨率一到就记下来（与「自适应/自动全屏」等设置解耦），
       // 供页面判定覆盖式面板；否则在未开自适应或处于全屏时该值恒为 0 → 永不折叠。
       if ((player.state.width ?? 0) > 0 && (player.state.height ?? 0) > 0) {
@@ -980,6 +1054,7 @@ class PlayerController extends BaseController
     });
     _heightSubscription = player.stream.height.listen((event) {
       Log.d('height:$event  W:${(player.state.width)}  H:${(player.state.height)}');
+      _syncRtxVsrCrop();
       if ((player.state.width ?? 0) > 0 && (player.state.height ?? 0) > 0) {
         videoWidthRx.value = player.state.width!;
         videoHeightRx.value = player.state.height!;
