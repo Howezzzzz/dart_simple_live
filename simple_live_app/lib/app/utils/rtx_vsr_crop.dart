@@ -74,5 +74,9 @@ double? rtxVsrDisplayAspect(int width, int height) {
 (int, int)? rtxVsrRenderSize(int width, int height) {
   if (width <= 0 || height <= 0) return null;
   final pad = rtxVsrBottomPadRows(width, height);
-  return (width * rtxVsrScale, (height - pad) * rtxVsrScale);
+  final outHeight = (height - pad) * rtxVsrScale;
+  // 封顶：输出高超过 2160（4K）就不强制显式尺寸——源已属高分辨率、VSR 收益有限，
+  // 而 8K 画布会爆显存/掉帧。调用方据此保持默认（源尺寸，复核 P2）。
+  if (outHeight > 2160) return null;
+  return (width * rtxVsrScale, outHeight);
 }

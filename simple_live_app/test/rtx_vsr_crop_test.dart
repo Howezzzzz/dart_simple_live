@@ -119,5 +119,11 @@ void main() {
       expect(rtxVsrRenderSize(0, 0), isNull);
       expect(rtxVsrRenderSize(960, 0), isNull);
     });
+
+    test('输出高超过 2160 时返回 null（封顶，避免 8K 画布）', () {
+      expect(rtxVsrRenderSize(3840, 2160), isNull); // 7680x4320
+      expect(rtxVsrRenderSize(2560, 1440), isNull); // 5120x2880
+      expect(rtxVsrRenderSize(1920, 1080), (3840, 2160)); // 恰好 2160，允许
+    });
   });
 }

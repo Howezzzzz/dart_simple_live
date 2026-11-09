@@ -126,8 +126,10 @@ mixin PlayerMixin {
   /// 本次播放是否已挂上 VSR 滤镜链（决定能否动 video-crop）。
   bool _rtxVsrChainApplied = false;
 
-  /// 记录最近一次**写入成功**的 video-crop，避免重复设置导致滤镜链反复重建。
-  String? _lastRtxVsrCrop;
+  /// 记录最近一次**已应用**的 VSR 同步签名（裁切值 + 源尺寸 + 链状态），用于去重。
+  /// 不能只用裁切值当键：无补边流的裁切值都是空串，切分辨率/切直播间时会误判「未变化」
+  /// → 渲染尺寸与显示比例漏更（复核 P0）。
+  String? _lastRtxVsrSignature;
 
   /// 串行队列：width/height 双监听并发调用时按序执行，避免交错产生竞态假告警（复核 P3-2）。
   Future<void> _cropWriteQueue = Future<void>.value();
@@ -148,26 +150,28 @@ mixin PlayerMixin {
     if (pp is! NativePlayer) return;
     final rawW = player.state.width ?? 0;
     final rawH = player.state.height ?? 0;
+    // 尺寸未知（如 initializePlayer 在 open 之前那次调用）先不处理：否则会把空值写进去重
+    // 缓存，令随后无补边流（裁切值为空串）的真实尺寸事件被误判为「未变化」而漏更（复核 P0）。
+    if (rawW <= 0 || rawH <= 0) return;
     final desired = _rtxVsrChainApplied ? rtxVsrVideoCrop(rawW, rawH) : '';
-    if (desired == _lastRtxVsrCrop) return;
     // 裁切后内容比例 ≠ 源补边比例，而 mpv 的渲染窗口（video-params 的 dw/dh）与界面布局
     // 都按源比例算 → 画面在渲染窗口里上下留 2px（4K 下约 8px）黑边。用 video-aspect-override
-    // 把真实内容比例告诉 mpv：它会重算 dw/dh，渲染窗口与界面布局随之变对（ISS-251 修正版）。
+    // 把真实内容比例告诉 mpv：它会重算 dw/dh，渲染窗口与界面布局随之变对（ISS-251）。
     // 未裁切时回填源比例（方像素下等同自动，避免残留改比例）。
-    final aspectValue = rtxVsrDisplayAspect(rawW, rawH) ??
-        ((rawW > 0 && rawH > 0) ? rawW / rawH : null);
+    final aspectValue = rtxVsrDisplayAspect(rawW, rawH) ?? (rawW / rawH);
+    // RISK-59：让 mpv 按 VSR 放大后的尺寸（去补边）渲染，而非源尺寸——否则放大成果
+    // 被缩回、再被 Flutter 拉大，等于白烧 Tensor Core。未开 VSR 时恢复默认（源尺寸）。
+    final renderSize =
+        _rtxVsrChainApplied ? rtxVsrRenderSize(rawW, rawH) : null;
+    // 去重签名：裁切值 + 源尺寸 + 链状态（**不能只用裁切值当键**，见字段注释）。
+    final signature = '$desired|${rawW}x$rawH|$_rtxVsrChainApplied';
+    if (signature == _lastRtxVsrSignature) return;
     _enqueueCropWrite(() async {
       // 队列内再查一次：并发同值时只写第一笔，避免重复设置触发滤镜链重建。
-      if (desired == _lastRtxVsrCrop) return;
+      if (signature == _lastRtxVsrSignature) return;
       await pp.setProperty('video-crop', desired);
-      if (aspectValue != null) {
-        await pp.setProperty(
-            'video-aspect-override', aspectValue.toStringAsFixed(6));
-      }
-      // RISK-59：让 mpv 按 VSR 放大后的尺寸（去补边）渲染，而非源尺寸——否则放大成果
-      // 被缩回、再被 Flutter 拉大，等于白烧 Tensor Core。未开 VSR 时恢复默认（源尺寸）。
-      final renderSize =
-          _rtxVsrChainApplied ? rtxVsrRenderSize(rawW, rawH) : null;
+      await pp.setProperty(
+          'video-aspect-override', aspectValue.toStringAsFixed(6));
       if (renderSize != null) {
         await videoController
             .setSize(width: renderSize.$1, height: renderSize.$2);
@@ -175,7 +179,7 @@ mixin PlayerMixin {
         await videoController.setSize();
       }
       // 写入成功后才记缓存（复核 P3-3）：异常（dispose 竞态）时保持旧值，下次同步会重试。
-      _lastRtxVsrCrop = desired;
+      _lastRtxVsrSignature = signature;
       if (desired.isEmpty) return;
       // 回读校验（参考音量均衡 af 的做法）：media_kit 的 setProperty 不返回错误，
       // 属性缺失/语法级拒绝时会静默失败 → 回读一次让失败可见（RISK-58）。
@@ -184,7 +188,7 @@ mixin PlayerMixin {
       final readback = (await pp.getProperty('video-crop')).trim();
       if (readback.replaceAll(' ', '') == desired) {
         Log.d('[VSR] 已写入底部补边裁切 video-crop=$desired'
-            ' aspect=${aspectValue?.toStringAsFixed(6)}'
+            ' aspect=${aspectValue.toStringAsFixed(6)}'
             ' renderSize=${renderSize?.$1}x${renderSize?.$2}'
             '（源 ${player.state.width}x${player.state.height}）');
       } else {
