@@ -129,6 +129,10 @@ mixin PlayerMixin {
     // 持久化；未知时交给首帧探测（自带 set+回读），探测成功后本进程后续进房即享预挂。
     // 复核 P1-5：预挂也走串行队列（_enqueueVolumeNorm），避免与热切换的 set af 交错
     // （进房瞬间拨开关时，后落地的 set 会把已关的均衡又打开且状态标 false）。
+    // glm 复核 P2：initializePlayer 可能因切清晰度/重开被再次调用——重置首帧钩子，
+    // 让 open 后的 playing 重发时再跑一次自愈+复查（否则一次性钩子跳过，open 清链
+    // 后本房静默失去均衡且无人重挂）。
+    _volumeNormInitialized = false;
     if (!_volumeNormApplied &&
         volumeNormShouldPreApply(
           userOn: AppSettingsController.instance.volumeNorm.value,
@@ -192,6 +196,10 @@ mixin PlayerMixin {
   /// 音量均衡：日志防线记录是否武装（预挂/热开/探测起即武装，窗末终裁一次后解除；
   /// 与抑制窗解耦——记录只认武装，不依赖 _suppressErrorRetry，真机 P0 ISS-278）
   bool _volumeNormLogArmed = false;
+
+  /// 音量均衡：终裁代际计数器（仅音量均衡自身操作递增；与 _suppressToken 解耦——
+  /// VSR 重挂 vf 也递增 _suppressToken，共用会让 VSR 误取消音量均衡待决终裁，glm 复核 P1）
+  int _volumeNormToken = 0;
 
   /// 音量均衡：操作串行队列（探测/应用/移除按发起顺序执行，避免并发交错导致 af 与状态标记不一致）
   Future<void> _volumeNormQueue = Future<void>.value();
@@ -276,7 +284,11 @@ mixin PlayerMixin {
     final token = ++_suppressToken;
     _suppressErrorRetry = true;
     // 不复位失败标志：预挂已武装，此处只消费（kimi 排查 ISS-278）
-    _scheduleVolumeNormAdjudication(token, source: '首帧复查');
+    _scheduleVolumeNormAdjudication(
+      vnToken: ++_volumeNormToken,
+      suppressToken: token,
+      source: '首帧复查',
+    );
   }
 
   /// 音量均衡：抑制窗末终裁一次（消费日志防线标志 + 回读），失败则清链并禁用。
@@ -287,17 +299,21 @@ mixin PlayerMixin {
   /// 失败处理与「核心不支持」同语义：清链 + applied=false + persist(false) + 置灰 +
   /// toast（kimi 排查 ISS-278：单房失败自愈会在系统性故障下变成每房 toast 循环，
   /// 统一持久化禁用、新版本/重建后自然重探）。
-  void _scheduleVolumeNormAdjudication(int token, {required String source}) {
+  void _scheduleVolumeNormAdjudication({
+    required int vnToken,
+    required int suppressToken,
+    required String source,
+  }) {
     final pp = player.platform;
     if (pp is! NativePlayer) {
       return;
     }
     Future.delayed(const Duration(milliseconds: 2000), () async {
-      if (token != _suppressToken || _playerDisposed) {
-        return; // 已被更新操作取代或资源已释放（新操作的释放逻辑自会收尾）
+      if (vnToken != _volumeNormToken || _playerDisposed) {
+        return; // 已被更新的音量均衡操作取代或资源已释放（新操作的释放逻辑自会收尾）
       }
       if (!_volumeNormLogArmed) {
-        _scheduleSuppressRelease(token);
+        _scheduleSuppressRelease(suppressToken);
         return;
       }
       _volumeNormLogArmed = false; // 终裁一次后解除武装
@@ -314,20 +330,30 @@ mixin PlayerMixin {
         Log.logPrint(e);
       }
       if (failed) {
-        _volumeNormApplied = false;
-        try {
-          await pp.setProperty('af', '', waitForInitialization: false);
-        } catch (_) {}
-        PlayerMixin.afLoudnormSupported = false;
-        _persistCapability(false);
-        AppSettingsController.instance.setVolumeNormSupported(false);
-        Log.w('音量均衡：$source 终裁未通过（logFailure=$_volumeNormLogFailure af="$readbackNote"）→ 已清链并禁用开关');
-        SmartDialog.showToast("当前播放核心不支持音量均衡，开关已禁用");
+        // glm 复核 P3：清链/持久化入队执行（终裁不在队列内，体内 await 期间新热开
+        // 可能落地，被旧终裁误清并误 persist false）；入队后再查一次代际与 disposed。
+        await _enqueueVolumeNorm(() async {
+          if (vnToken != _volumeNormToken || _playerDisposed) {
+            return; // 排队期间被新操作取代：放弃清理
+          }
+          _volumeNormApplied = false;
+          try {
+            await pp.setProperty('af', '', waitForInitialization: false);
+          } catch (_) {}
+          PlayerMixin.afLoudnormSupported = false;
+          _persistCapability(false);
+          AppSettingsController.instance.setVolumeNormSupported(false);
+          Log.w('音量均衡：$source 终裁未通过（logFailure=$_volumeNormLogFailure af="$readbackNote"）→ 已清链并禁用开关');
+          // glm 复核 P3：toast 前复查 disposed（终裁体内 await 期间可能已退房）
+          if (!_playerDisposed) {
+            SmartDialog.showToast("当前播放核心不支持音量均衡，开关已禁用");
+          }
+        });
       } else if (readbackNote != null && !volumeNormSupportedFromReadback(readbackNote)) {
         // 回读失链（如 open 复位选项级链）：仅诊断记录，不判失败（下房预挂自愈）
         Log.d('音量均衡：$source 终裁回读失链（af="$readbackNote"）——疑似 open 复位，下房自愈');
       }
-      _scheduleSuppressRelease(token);
+      _scheduleSuppressRelease(suppressToken);
     });
   }
 
@@ -1309,6 +1335,24 @@ class PlayerController extends BaseController
           // 复核（真机 P0，ISS-278）：首帧的两条路径统一入队，与热切换/探测严格串行；
           // 探测与复查的成败判定都在抑制窗末终裁（playing 事件早于 af 图构建，立即读必漏）。
           _enqueueVolumeNorm(() async {
+            // glm 复核 P2：切清晰度重开（initializePlayer+open 复用同一控制器）时 open
+            // 可能清空选项级 af 链（RISK-71）——applied 残留 true 会让预挂短路、此处
+            // 复查也短路 → 本房静默失去均衡。先回读自愈：失链则重置 applied，让 sync
+            // 走 apply(true) 重挂（重新武装+终裁，运行时失败同样会被抓住）。
+            if (_volumeNormApplied) {
+              final pp = player.platform;
+              if (pp is NativePlayer) {
+                try {
+                  final rb = await pp.getProperty('af', waitForInitialization: false);
+                  if (!volumeNormSupportedFromReadback(rb)) {
+                    Log.d('音量均衡：首帧回读失链（af="$rb"）——open 已清链，重挂中');
+                    _volumeNormApplied = false;
+                  }
+                } catch (e) {
+                  Log.logPrint(e);
+                }
+              }
+            }
             await _syncVolumeNorm();
             if (_volumeNormApplied &&
                 PlayerMixin.afLoudnormSupported == true &&
@@ -1466,8 +1510,11 @@ class PlayerController extends BaseController
       return;
     }
     // 链已挂上但「运行时是否真的建链成功」→ 窗末终裁（失败日志异步到达）
+    final vnToken = ++_volumeNormToken;
     Future.delayed(const Duration(milliseconds: 2000), () async {
-      if (token != _suppressToken || _playerDisposed) {
+      if (vnToken != _volumeNormToken || _playerDisposed) {
+        // glm 复核 P3：终裁被更新的音量均衡操作取代时能力停留 null（本房不再重探，
+        // 下房预挂/探测重来）——低频边角，可接受。
         return;
       }
       _volumeNormLogArmed = false;
@@ -1588,7 +1635,28 @@ class PlayerController extends BaseController
     if (enable && _volumeNormApplied) {
       // 复核（真机 P0，ISS-278）：热开也预约窗末终裁——
       // 旧逻辑 set 成功即 applied=true、无任何复核，破构建上热开静默无效。
-      _scheduleVolumeNormAdjudication(token, source: '热切换开启');
+      // glm 复核 P2：热开再做一次回读校验（setProperty 忽略 mpv 返回码，解析期静默
+      // 拒绝且无 af 前缀日志时终裁只信标志会放行）——失链当场清链、不预约终裁。
+      String? readback;
+      try {
+        readback = await pp.getProperty('af');
+      } catch (e) {
+        Log.logPrint(e);
+      }
+      if (readback != null && !volumeNormSupportedFromReadback(readback)) {
+        _volumeNormLogArmed = false; // 链没挂上：取消终裁（无失败可消费）
+        _volumeNormApplied = false;
+        try {
+          await pp.setProperty('af', '');
+        } catch (_) {}
+        Log.w('音量均衡：热开回读未确认（af="$readback"）→ 已清链，能力现状维持待下房');
+      } else {
+        _scheduleVolumeNormAdjudication(
+          vnToken: ++_volumeNormToken,
+          suppressToken: token,
+          source: '热切换开启',
+        );
+      }
     }
     _scheduleSuppressRelease(token);
   }
