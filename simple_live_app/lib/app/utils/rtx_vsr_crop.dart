@@ -92,6 +92,74 @@ double? rtxVsrDisplayAspect(int width, int height) {
 /// VSR 自适应倍数的上限（驱动/硬件经验上限）。
 const double rtxVsrMaxScale = 4.0;
 
+/// VSR 滤镜链字符串（倍数保留 2 位小数）。
+String rtxVsrVfChain(double scale) =>
+    'd3d11vpp=scale=${scale.toStringAsFixed(2)}:scaling-mode=nvidia';
+
+/// 一次 VSR 同步的「决策结果」（纯逻辑，便于单测）。
+class RtxVsrPlan {
+  const RtxVsrPlan({
+    required this.applied,
+    this.scale,
+    required this.crop,
+    required this.aspect,
+    this.renderSize,
+  });
+
+  /// 是否应挂 VSR 链（开了且倍数有效）。
+  final bool applied;
+
+  /// 实际使用的倍数（applied=false 时为 null）。
+  final double? scale;
+
+  /// mpv `video-crop` 值（空串 = 取消手动裁切）。
+  final String crop;
+
+  /// 显示比例（写 `video-aspect-override`）。
+  final double aspect;
+
+  /// 渲染画布尺寸（null = 恢复默认）。
+  final (int, int)? renderSize;
+}
+
+/// 计算一次同步的决策（纯函数，无副作用）。
+///
+/// [enabled] 为链状态（用户开关）；[areaW]/[areaH] 为播放区物理尺寸（null = 不可得，走固定
+/// 2x 兜底）；[srcW]/[srcH] 为源分辨率。
+RtxVsrPlan rtxVsrPlan({
+  required bool enabled,
+  int? areaW,
+  int? areaH,
+  required int srcW,
+  required int srcH,
+}) {
+  if (srcW <= 0 || srcH <= 0) {
+    return const RtxVsrPlan(applied: false, crop: '', aspect: 1.0);
+  }
+  double? scale;
+  if (enabled) {
+    scale = (areaW == null || areaH == null)
+        ? rtxVsrScale
+        : rtxVsrAdaptiveScale(
+            areaW: areaW, areaH: areaH, srcW: srcW, srcH: srcH);
+  }
+  final s = scale;
+  final applied = enabled && s != null;
+  final crop = applied ? rtxVsrVideoCrop(srcW, srcH, scale: s ?? rtxVsrScale) : '';
+  final aspect =
+      (applied ? rtxVsrDisplayAspect(srcW, srcH) : null) ?? (srcW / srcH);
+  final renderSize = applied
+      ? rtxVsrRenderSize(srcW, srcH, scale: s ?? rtxVsrScale)
+      : null;
+  return RtxVsrPlan(
+    applied: applied,
+    scale: s,
+    crop: crop,
+    aspect: aspect,
+    renderSize: renderSize,
+  );
+}
+
 /// 计算「自适应倍数」S：让 VSR 放大目标 ≈ 播放区物理分辨率（源低就多放大）。
 ///
 /// 公式：`r = min(areaW/srcW, areaH/(srcH-pad))`——取 fit 比例，保证输出不超出播放区、

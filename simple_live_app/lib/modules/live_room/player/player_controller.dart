@@ -161,30 +161,22 @@ mixin PlayerMixin {
     // 尺寸未知（如 initializePlayer 在 open 之前那次调用）先不处理：否则会把空值写进去重
     // 缓存，令随后无补边流（裁切值为空串）的真实尺寸事件被误判为「未变化」而漏更（复核 P0）。
     if (rawW <= 0 || rawH <= 0) return;
-    // 自适应倍数：让 VSR 放大目标 ≈ 播放区物理分辨率（源低就多放大）；拿不到播放区
-    // 尺寸时沿用固定 2x 兜底；S≤1.05（源≥播放区）返回 null → 不挂 VSR（整体关闭）。
-    double? scale;
-    if (_rtxVsrChainApplied) {
-      final area = _playerAreaPhysicalSize();
-      scale = area == null
-          ? rtxVsrScale
-          : rtxVsrAdaptiveScale(
-              areaW: area.$1, areaH: area.$2, srcW: rawW, srcH: rawH);
-    }
-    final s = scale; // 捕获为 final，便于闭包里做空值提升
-    final enable = _rtxVsrChainApplied && s != null;
-    final desired =
-        enable ? rtxVsrVideoCrop(rawW, rawH, scale: s ?? rtxVsrScale) : '';
-    // 裁切后内容比例 ≠ 源补边比例，而 mpv 的渲染窗口（video-params 的 dw/dh）与界面布局
-    // 都按源比例算 → 画面在渲染窗口里上下留 2px（4K 下约 8px）黑边。用 video-aspect-override
-    // 把真实内容比例告诉 mpv：它会重算 dw/dh，渲染窗口与界面布局随之变对（ISS-251）。
-    // 未裁切时回填源比例（方像素下等同自动，避免残留改比例）。
-    final aspectValue =
-        (enable ? rtxVsrDisplayAspect(rawW, rawH) : null) ?? (rawW / rawH);
-    // RISK-59：让 mpv 按 VSR 输出尺寸（去补边）渲染，而非源尺寸——否则放大成果
-    // 被缩回、再被 Flutter 拉大，等于白烧 Tensor Core。未开 VSR 时恢复默认（源尺寸）。
-    final renderSize =
-        enable ? rtxVsrRenderSize(rawW, rawH, scale: s ?? rtxVsrScale) : null;
+    // 纯逻辑决策（自适应倍数 / 裁切 / 显示比例 / 画布），便于单测（见 rtx_vsr_crop.dart）。
+    // 自适应倍数：目标 ≈ 播放区物理分辨率（源低就多放大）；拿不到播放区尺寸走固定 2x 兜底；
+    // S≤1.05（源≥播放区）→ 不挂 VSR。
+    final area = _rtxVsrChainApplied ? _playerAreaPhysicalSize() : null;
+    final plan = rtxVsrPlan(
+      enabled: _rtxVsrChainApplied,
+      areaW: area?.$1,
+      areaH: area?.$2,
+      srcW: rawW,
+      srcH: rawH,
+    );
+    final s = plan.scale; // 捕获为 final，便于闭包里做空值提升
+    final enable = plan.applied;
+    final desired = plan.crop;
+    final aspectValue = plan.aspect;
+    final renderSize = plan.renderSize;
     // 去重签名：倍数 + 裁切值 + 源尺寸 + 链状态（**不能只用裁切值当键**，见字段注释）。
     final signature = '${s ?? -1}|$desired|${rawW}x$rawH|$_rtxVsrChainApplied';
     if (signature == _lastRtxVsrSignature) return;
@@ -194,8 +186,7 @@ mixin PlayerMixin {
       // 倍数变化才重挂滤镜链（重挂会重建 D3D11 链路、可能闪一帧 → 仅桶变化时做）。
       if (enable && s != null) {
         if (s != _lastRtxVsrScale) {
-          await pp.setProperty('vf',
-              'd3d11vpp=scale=${s.toStringAsFixed(2)}:scaling-mode=nvidia');
+          await pp.setProperty('vf', rtxVsrVfChain(s));
           _lastRtxVsrScale = s;
         }
       } else if (_lastRtxVsrScale != null) {
@@ -1039,6 +1030,13 @@ class PlayerController extends BaseController
       }
       _syncVolumeNorm();
     });
+    // VSR：直播间接开关即生效（复用音量均衡的热切换范式：worker + 串行队列 + 错误抑制）
+    _rtxVsrWorker = ever(AppSettingsController.instance.enableRtxVsr, (bool on) {
+      if (_playerDisposed || !Platform.isWindows) {
+        return;
+      }
+      _applyRtxVsrSetting();
+    });
     super.onInit();
   }
 
@@ -1060,6 +1058,9 @@ class PlayerController extends BaseController
 
   /// 音量均衡：热切换监听器句柄（onClose 必须释放；裸 ever() 退房后断言，PR #195 教训）
   Worker? _volumeNormWorker;
+
+  /// VSR：开关热切换监听器句柄（onClose 必须释放，PR #195 教训）
+  Worker? _rtxVsrWorker;
 
   /// 音量均衡：操作串行队列（探测/应用/移除按发起顺序执行，避免并发交错导致 af 与状态标记不一致）
   Future<void> _volumeNormQueue = Future<void>.value();
@@ -1341,6 +1342,33 @@ class PlayerController extends BaseController
     });
   }
 
+  /// 应用 NVIDIA RTX VSR 设置（进房与直播间接开关共用）：更新链状态并立即同步。
+  ///
+  /// 重挂/摘除滤镜链会让 mpv 重建 D3D11 链路，期间可能冒 `stream.error` → 被当成
+  /// 媒体错误去重拉流/切线路（PR #195 教训）→ 用音量均衡同款抑制窗口兜住。
+  /// 不走 250ms 防抖（用户点了要立即生效），串行安全由 `_syncRtxVsrCrop` 内部队列兜底。
+  Future<void> _applyRtxVsrSetting() async {
+    if (_playerDisposed || !Platform.isWindows) return;
+    final pp = player.platform;
+    if (pp is! NativePlayer) return;
+    final enabled = AppSettingsController.instance.enableRtxVsr.value;
+    _rtxVsrChainApplied = enabled;
+    if (!enabled) _lastRtxVsrScale = null;
+    _lastRtxVsrSignature = null; // 强制重算（开关变化必须重挂/摘链）
+    final token = ++_suppressToken;
+    _suppressErrorRetry = true;
+    try {
+      if (enabled) {
+        // d3d11vpp 需要 D3D11 硬件帧上下文
+        await pp.setProperty('hwdec', 'd3d11va');
+      }
+      await _syncRtxVsrCrop();
+    } catch (e) {
+      Log.d('[VSR] 热切换失败: $e');
+    }
+    _scheduleSuppressRelease(token);
+  }
+
   Future<void> toggleOSDStats() async {
     showOSDStats.value = !showOSDStats.value;
     if (player.platform is NativePlayer) {
@@ -1457,6 +1485,8 @@ class PlayerController extends BaseController
     _playerDisposed = true;
     _volumeNormWorker?.dispose();
     _volumeNormWorker = null;
+    _rtxVsrWorker?.dispose();
+    _rtxVsrWorker = null;
     if (smallWindowState.value) {
       exitSmallWindow();
     }

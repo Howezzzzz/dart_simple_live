@@ -11,6 +11,7 @@ import 'package:remixicon/remixicon.dart';
 import 'package:simple_live_app/app/app_style.dart';
 import 'package:simple_live_app/app/log.dart';
 import 'package:simple_live_app/app/controller/app_settings_controller.dart';
+import 'package:simple_live_app/app/utils/rtx_vsr_notice.dart';
 import 'package:simple_live_app/app/sites.dart';
 import 'package:simple_live_app/app/utils/panel_width.dart';
 import 'package:simple_live_app/modules/live_room/danmaku/chat_emoticon_span.dart';
@@ -1289,6 +1290,24 @@ class LiveRoomPage extends GetView<LiveRoomController> {
                   ),
                 ),
               ),
+              if (Platform.isWindows) AppStyle.divider,
+              if (Platform.isWindows)
+                Obx(
+                  () => SettingsSwitch(
+                    title: "NVIDIA RTX VSR",
+                    subtitle: "N卡视频超分增强，切换立即生效（可能闪一帧）",
+                    value: AppSettingsController.instance.enableRtxVsr.value,
+                    onChanged: (e) async {
+                      if (e) {
+                        // 须知弹窗与设置页共用（避免文案漂移）
+                        final confirm = await showRtxVsrConfirmDialog();
+                        if (!confirm) return;
+                      }
+                      // 点即生效：只改设置；播放器侧 ever worker 会立即重挂/摘链
+                      AppSettingsController.instance.setEnableRtxVsr(e);
+                    },
+                  ),
+                ),
             ],
           ),
         ),
