@@ -61,11 +61,11 @@ bool volumeNormLogIndicatesFailure(String line) {
   return inAudioScope && volumeNormFilterErrorKeywords.any(lower.contains);
 }
 
-/// 是否需要把链挂上：用户开启且能力「已知支持」。
+/// 是否需要把链挂上：用户开启且能力「已知支持」（严格判定，==true）。
 ///
-/// 注：与 volumeNormShouldPreApply 语义现已完全一致（预挂收紧后，阶段4 第3轮
-/// 复核判其为无生产调用点的死代码）——保留仅作测试锚点（决策表），生产代码直接
-/// 判 `afLoudnormSupported == true`。
+/// 注：与 volumeNormShouldPreApply **不同**（v2 起：后者为 !=false 宽松判定，供探测式
+/// 预挂用）；本函数无生产调用点（阶段4 第3轮判为死代码），保留仅作测试锚点（决策表），
+/// 生产代码直接判 `afLoudnormSupported == true`。
 bool volumeNormShouldApply({required bool userOn, required bool? supported}) => userOn && supported == true;
 
 /// 起流前是否需要预挂链：用户开启且能力「不是已知不支持」。

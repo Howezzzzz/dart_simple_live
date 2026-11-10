@@ -208,13 +208,13 @@ mixin PlayerMixin {
   /// 音量均衡：起流前预挂链（由 `initializePlayer` 在 `player.open` 之前调用，经串行队列执行）。
   ///
   /// v2（优雅版，ISS-274）：**探测式预挂**——能力未知（null）也挂（volumeNormShouldPreApply
-  /// 语义：非已知不支持即预挂），set 后回读当场判定并持久化能力：
-  /// - 回读含两滤镜 → 链已生效（applied=true）；能力若未知则定为支持并持久化 true →
-  ///   **首个房间也零等待**（RISK-69 的 1–3s 未处理窗消除）；
-  /// - 回读不含 → 不存在/参数非法的滤镜在 libavfilter 解析期即被拒（EV-411 实证），
-  ///   必清链（set af=''）+ applied=false；能力若未知则定为不支持并持久化 false + 置灰。
-  ///   「判定失败必清链 + persist false」封死 qwen P0-2 的「错误能力持久化 true / 整场无声」路径。
-  /// 失败不阻塞起流：异常路径仅记录，首帧探测仍兜底（如 platform 非 NativePlayer）。
+  /// 语义：非已知不支持即预挂），set 后回读校验链已挂上（applied 标记）。
+  /// 复核（v2 第 2 轮，ISS-275）：**不在此刻持久化能力**——起流前无音频，解析期通过≠运行时
+  /// 建链成功；能力判定推迟到首帧（播放中）：null 能力走既有探测（_probeVolumeNormCapability，
+  /// 自带开窗+日志防线+持久化），已知支持走首帧复查（_verifyVolumeNormFirstFrame）。
+  /// 由此「运行时 init 失败」不会被 persist(true) 固化、「回读瞬时失败」也不会被
+  /// persist(false) 永久误杀（qwen P1/P2 修复）。
+  /// 失败不阻塞起流：异常路径仅记录（applied=false），首帧按能力状态探测/复查兜底。
   /// 复核 P1-1：预挂**不**开错误抑制窗——它发生在起流建连期，2s 抑制窗会吞掉真实
   /// 建连错误（死链/鉴权失败 → 黑屏不重拉流）。af 写入失败本不产生 stream.error
   /// （PR #195 的抑制窗针对播放中重建链路场景），无需窗口。
@@ -239,33 +239,48 @@ mixin PlayerMixin {
       // 复核 P0-3：预挂后立即回读校验——media_kit 的 setProperty 忽略 mpv 返回码，
       // 「滤镜不存在/参数非法」会静默失败；不回读会把未生效的链标记成已挂。
       final readback = await pp.getProperty('af', waitForInitialization: false);
-      if (volumeNormSupportedFromReadback(readback)) {
-        _volumeNormApplied = true;
-        // 能力未知 → 当场定为支持并持久化（v2：首房零等待，不再等首帧探测）
-        if (afLoudnormSupported == null) {
-          afLoudnormSupported = true;
-          _persistCapability(true);
-          AppSettingsController.instance.setVolumeNormSupported(true);
-        }
-      } else {
-        // 链未挂上：清链保证与 mpv 状态一致；能力未知则当场定为不支持并持久化
-        //（「判定失败必 persist false」，封死错误能力持久化 true 路径）。
-        _volumeNormApplied = false;
+      _volumeNormApplied = volumeNormSupportedFromReadback(readback);
+      if (!_volumeNormApplied) {
+        // 链未挂上（解析期拒绝）：清链保证与 mpv 状态一致；**不持久化能力**——
+        // 能力判定交给首帧（null→探测 / 已知→复查），避免瞬时失败被永久 persist false。
         await pp.setProperty('af', '', waitForInitialization: false);
-        if (afLoudnormSupported == null) {
-          afLoudnormSupported = false;
-          _persistCapability(false);
-          AppSettingsController.instance.setVolumeNormSupported(false);
-          SmartDialog.showToast("当前播放核心不支持音量均衡，开关已禁用");
-        } else {
-          // 已知支持却回读失败（数值级异常，罕见）：记录，首帧探测仍兜底
-          Log.w('音量均衡：预挂回读未确认（af="$readback"）');
-        }
+        Log.w('音量均衡：预挂回读未确认（af="$readback"），能力判定推迟到首帧');
       }
     } catch (e) {
       Log.logPrint(e);
       _volumeNormApplied = false;
     }
+  }
+
+  /// 音量均衡：首帧复查（播放中，仅对「已知支持 + 已预挂」的房间执行一次）。
+  ///
+  /// 复核（v2 第 2 轮，ISS-275）：预挂成功路径上日志防线无消费点、首帧 _applyVolumeNorm
+  /// 因 applied==true 短路 → 「解析期通过但运行时建链失败」无人兜底（P1）。此处播放中
+  /// 开 2s 抑制+日志窗（P1-1 只禁起流建连期，播放中开窗=原探测设计，符合 PR #195 范式），
+  /// 回读 + 日志防线双查：失败则清链+applied=false+toast（**不持久化**——已知能力有历史
+  /// 证据，单房失败自愈重试，避免误永久禁用）。
+  Future<void> _verifyVolumeNormFirstFrame() async {
+    final pp = player.platform;
+    if (pp is! NativePlayer || !_volumeNormApplied) {
+      return;
+    }
+    final token = ++_suppressToken;
+    _suppressErrorRetry = true;
+    _volumeNormLogFailure = false;
+    try {
+      final readback = await pp.getProperty('af');
+      if (!volumeNormSupportedFromReadback(readback) || _volumeNormLogFailure) {
+        _volumeNormApplied = false;
+        try {
+          await pp.setProperty('af', '');
+        } catch (_) {}
+        Log.w('音量均衡：首帧复查未通过（af="$readback" logFailure=$_volumeNormLogFailure）→ 本房自动关闭');
+        SmartDialog.showToast("音量均衡未能生效，已自动关闭");
+      }
+    } catch (e) {
+      Log.logPrint(e);
+    }
+    _scheduleSuppressRelease(token);
   }
 
   /// 音量均衡：持久化能力探测结果（带 App 版本前缀，版本变化即失效重探）。
@@ -1244,6 +1259,13 @@ class PlayerController extends BaseController
         if (!_volumeNormInitialized) {
           _volumeNormInitialized = true;
           _syncVolumeNorm();
+          // 复核（v2 第 2 轮，ISS-275）：已知支持 + 已预挂的房间，首帧复查一次
+          // （运行时建链失败兜底；能力未知的房间由 _syncVolumeNorm → 探测处理）。
+          if (_volumeNormApplied &&
+              PlayerMixin.afLoudnormSupported == true &&
+              AppSettingsController.instance.volumeNorm.value) {
+            _verifyVolumeNormFirstFrame();
+          }
         }
       }
     });
@@ -1259,7 +1281,8 @@ class PlayerController extends BaseController
       // 由 _probeVolumeNormCapability 结合回读结果判定「不支持」。
       // 复核 P0-2：event 是 PlayerLog（prefix/level/text），需拼成行文本再判关键字。
       // 复核 P0-4：关键字是通用措辞，必须限定音频作用域（volumeNormLogIndicatesFailure
-      // 内部要求出现 dynaudnorm/loudnorm/[af]），否则 VSR 重挂 vf（d3d11vpp）的报错
+      // 内部要求出现 dynaudnorm/loudnorm 或行首裸前缀 `af `——media_kit 的 PlayerLog.prefix
+      // 无方括号，阶段4 第3轮 P3 修正），否则 VSR 重挂 vf（d3d11vpp）的报错
       // 会落进共用抑制窗 → 音量均衡被误判不支持并持久化禁用、开关置灰。
       if (_suppressErrorRetry && volumeNormLogIndicatesFailure('${event.prefix} ${event.text}')) {
         Log.d("音量均衡：日志命中滤镜错误关键字 → 判定链未挂上：${event.prefix} ${event.text}");
