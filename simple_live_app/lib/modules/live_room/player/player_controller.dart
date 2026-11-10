@@ -189,6 +189,10 @@ mixin PlayerMixin {
   /// 音量均衡：抑制窗口内播放器日志是否报出滤镜链失败（静默降级防线）
   bool _volumeNormLogFailure = false;
 
+  /// 音量均衡：日志防线记录是否武装（预挂/热开/探测起即武装，窗末终裁一次后解除；
+  /// 与抑制窗解耦——记录只认武装，不依赖 _suppressErrorRetry，真机 P0 ISS-278）
+  bool _volumeNormLogArmed = false;
+
   /// 音量均衡：操作串行队列（探测/应用/移除按发起顺序执行，避免并发交错导致 af 与状态标记不一致）
   Future<void> _volumeNormQueue = Future<void>.value();
 
@@ -231,7 +235,11 @@ mixin PlayerMixin {
         )) {
       return;
     }
+    // 复核（真机 P0，ISS-278）：武装日志防线记录——起流后 mpv 建 af 图若失败，
+    // 失败日志在播放事件之后异步到达；qwen 排查：media_kit play() 返回时即发
+    // playing（早于图构建），只有「预挂起持续记录、窗末终裁消费」才抓得到。
     _volumeNormLogFailure = false;
+    _volumeNormLogArmed = true;
     try {
       // 复核 P2-7：起流前 set 无需等待播放器/视频控制器初始化（mpv 在初始化时应用
       // 该选项）；waitForInitialization:false 避免进房起流被 setProperty 阻塞。
@@ -255,32 +263,65 @@ mixin PlayerMixin {
   /// 音量均衡：首帧复查（播放中，仅对「已知支持 + 已预挂」的房间执行一次）。
   ///
   /// 复核（v2 第 2 轮，ISS-275）：预挂成功路径上日志防线无消费点、首帧 _applyVolumeNorm
-  /// 因 applied==true 短路 → 「解析期通过但运行时建链失败」无人兜底（P1）。此处播放中
-  /// 开 2s 抑制+日志窗（P1-1 只禁起流建连期，播放中开窗=原探测设计，符合 PR #195 范式），
-  /// 回读 + 日志防线双查：失败则清链+applied=false+toast（**不持久化**——已知能力有历史
-  /// 证据，单房失败自愈重试，避免误永久禁用）。
+  /// 因 applied==true 短路 → 「解析期通过但运行时建链失败」无人兜底（P1）。
+  /// 复核（真机 P0，ISS-278）：media_kit 的 playing 事件在 play() 返回时即发出
+  /// （real.dart 立即 add(true)），**早于** mpv 建音频滤镜图 → 立即回读/查标志是
+  /// 「系统性过早」，v1.08.62 真机即此形态（失败日志到达时复查已结束）。
+  /// 因此只开 2s 抑制窗 + 预约窗末终裁（_scheduleVolumeNormAdjudication）：终裁时
+  /// 失败日志必然已到（播放开始后数百 ms 内），回读+日志双查才有效。
   Future<void> _verifyVolumeNormFirstFrame() async {
-    final pp = player.platform;
-    if (pp is! NativePlayer || !_volumeNormApplied) {
+    if (player.platform is! NativePlayer || !_volumeNormApplied) {
       return;
     }
     final token = ++_suppressToken;
     _suppressErrorRetry = true;
-    _volumeNormLogFailure = false;
-    try {
-      final readback = await pp.getProperty('af');
-      if (!volumeNormSupportedFromReadback(readback) || _volumeNormLogFailure) {
+    // 不复位失败标志：预挂已武装，此处只消费（kimi 排查 ISS-278）
+    _scheduleVolumeNormAdjudication(token, source: '首帧复查');
+  }
+
+  /// 音量均衡：抑制窗末终裁一次（消费日志防线标志 + 回读），失败则清链并禁用。
+  ///
+  /// 终裁语义（真机 P0，ISS-278）：预挂/热开/探测都只武装记录（_volumeNormLogArmed），
+  /// 真正判成败放在播放开始后的窗末——此时 mpv 已尝试建 af 图，失败日志（lavfi
+  /// configure 失败 / Disabling filter ... because it has failed）必然已入记录。
+  /// 失败处理与「核心不支持」同语义：清链 + applied=false + persist(false) + 置灰 +
+  /// toast（kimi 排查 ISS-278：单房失败自愈会在系统性故障下变成每房 toast 循环，
+  /// 统一持久化禁用、新版本/重建后自然重探）。
+  void _scheduleVolumeNormAdjudication(int token, {required String source}) {
+    final pp = player.platform;
+    Future.delayed(const Duration(milliseconds: 2000), () async {
+      if (token != _suppressToken || _playerDisposed) {
+        return; // 已被更新操作取代或资源已释放（新操作的释放逻辑自会收尾）
+      }
+      if (!_volumeNormLogArmed) {
+        _scheduleSuppressRelease(token);
+        return;
+      }
+      _volumeNormLogArmed = false; // 终裁一次后解除武装
+      var failed = _volumeNormLogFailure;
+      try {
+        if (!failed) {
+          final readback = await pp.getProperty('af', waitForInitialization: false);
+          if (!volumeNormSupportedFromReadback(readback)) {
+            failed = true; // 终裁回读失链（如 open 复位了选项级链）
+          }
+        }
+      } catch (e) {
+        Log.logPrint(e);
+      }
+      if (failed) {
         _volumeNormApplied = false;
         try {
-          await pp.setProperty('af', '');
+          await pp.setProperty('af', '', waitForInitialization: false);
         } catch (_) {}
-        Log.w('音量均衡：首帧复查未通过（af="$readback" logFailure=$_volumeNormLogFailure）→ 本房自动关闭');
-        SmartDialog.showToast("音量均衡未能生效，已自动关闭");
+        PlayerMixin.afLoudnormSupported = false;
+        _persistCapability(false);
+        AppSettingsController.instance.setVolumeNormSupported(false);
+        Log.w('音量均衡：$source 终裁未通过（logFailure=$_volumeNormLogFailure）→ 已清链并禁用开关');
+        SmartDialog.showToast("当前播放核心不支持音量均衡，开关已禁用");
       }
-    } catch (e) {
-      Log.logPrint(e);
-    }
-    _scheduleSuppressRelease(token);
+      _scheduleSuppressRelease(token);
+    });
   }
 
   /// 音量均衡：持久化能力探测结果（带 App 版本前缀，版本变化即失效重探）。
@@ -1258,14 +1299,16 @@ class PlayerController extends BaseController
         // 音量均衡：首帧播放后一次性同步（能力未知时顺带探测，必须播放中做）
         if (!_volumeNormInitialized) {
           _volumeNormInitialized = true;
-          _syncVolumeNorm();
-          // 复核（v2 第 2 轮，ISS-275）：已知支持 + 已预挂的房间，首帧复查一次
-          // （运行时建链失败兜底；能力未知的房间由 _syncVolumeNorm → 探测处理）。
-          if (_volumeNormApplied &&
-              PlayerMixin.afLoudnormSupported == true &&
-              AppSettingsController.instance.volumeNorm.value) {
-            _verifyVolumeNormFirstFrame();
-          }
+          // 复核（真机 P0，ISS-278）：首帧的两条路径统一入队，与热切换/探测严格串行；
+          // 探测与复查的成败判定都在抑制窗末终裁（playing 事件早于 af 图构建，立即读必漏）。
+          _enqueueVolumeNorm(() async {
+            await _syncVolumeNorm();
+            if (_volumeNormApplied &&
+                PlayerMixin.afLoudnormSupported == true &&
+                AppSettingsController.instance.volumeNorm.value) {
+              await _verifyVolumeNormFirstFrame();
+            }
+          });
         }
       }
     });
@@ -1277,14 +1320,15 @@ class PlayerController extends BaseController
     });
     _logSubscription = player.stream.log.listen((event) {
       Log.d("播放器日志：$event");
-      // 音量均衡静默降级防线（复核建议）：抑制窗口内命中滤镜错误关键字即标记失败，
-      // 由 _probeVolumeNormCapability 结合回读结果判定「不支持」。
+      // 音量均衡静默降级防线（复核建议）：武装期内命中滤镜错误关键字即标记失败，
+      // 由首帧/探测/热开的窗末终裁消费（真机 P0 ISS-278：记录与抑制窗解耦——失败日志
+      // 可能早于/晚于抑制窗，只有「预挂起持续记录、窗末终裁」才不漏）。
       // 复核 P0-2：event 是 PlayerLog（prefix/level/text），需拼成行文本再判关键字。
       // 复核 P0-4：关键字是通用措辞，必须限定音频作用域（volumeNormLogIndicatesFailure
       // 内部要求出现 dynaudnorm/loudnorm 或行首裸前缀 `af `——media_kit 的 PlayerLog.prefix
       // 无方括号，阶段4 第3轮 P3 修正），否则 VSR 重挂 vf（d3d11vpp）的报错
       // 会落进共用抑制窗 → 音量均衡被误判不支持并持久化禁用、开关置灰。
-      if (_suppressErrorRetry && volumeNormLogIndicatesFailure('${event.prefix} ${event.text}')) {
+      if (_volumeNormLogArmed && volumeNormLogIndicatesFailure('${event.prefix} ${event.text}')) {
         Log.d("音量均衡：日志命中滤镜错误关键字 → 判定链未挂上：${event.prefix} ${event.text}");
         _volumeNormLogFailure = true;
       }
@@ -1387,10 +1431,12 @@ class PlayerController extends BaseController
     }
     final token = ++_suppressToken;
     _suppressErrorRetry = true;
-    var supported = false;
-    // 复核 P0-4：探测入口无条件复位失败标志——旧逻辑只在「未预挂」分支复位，
-    // 标志一旦被 VSR 日志误置就粘性残留，探测永远判失败（开关持久化置灰）。
+    // 复核（真机 P0，ISS-278）：探测入口复位 + 武装日志防线——成败判定推迟到
+    // 窗末终裁（playing 事件早于 af 图构建，立即读标志必漏；失败日志在播放开始后
+    // 数百 ms 内到达）。旧逻辑「回读后立即读标志」在真机上系统性漏判。
     _volumeNormLogFailure = false;
+    _volumeNormLogArmed = true;
+    var chainSet = true;
     try {
       // 起流前已预挂（_volumeNormApplied=true）时只回读校验、不再 set：
       // set 会重建整条链并重置 loudnorm 收敛状态 → 进房第一秒响度又爬一遍。
@@ -1400,11 +1446,43 @@ class PlayerController extends BaseController
       // 回读校验：mpv 对非法/不存在的滤镜会拒绝写入并保持旧值，
       // 因此回读必须同时包含 dynaudnorm 与 loudnorm 才算支持（只查 loudnorm 不严）。
       final readback = await pp.getProperty('af');
-      supported = volumeNormSupportedFromReadback(readback) && !_volumeNormLogFailure;
+      chainSet = volumeNormSupportedFromReadback(readback);
     } catch (e) {
       Log.logPrint(e);
-      supported = false;
+      chainSet = false;
     }
+    if (!chainSet) {
+      // 解析期拒绝（滤镜缺失/参数非法）：当场判不支持（EV-411：这类失败在解析期
+      // 即被拒，回读即真相，无需等终裁）
+      _volumeNormLogArmed = false;
+      _finishVolumeNormProbe(supported: false, token: token);
+      return;
+    }
+    // 链已挂上但「运行时是否真的建链成功」→ 窗末终裁（失败日志异步到达）
+    Future.delayed(const Duration(milliseconds: 2000), () async {
+      if (token != _suppressToken || _playerDisposed) {
+        return;
+      }
+      _volumeNormLogArmed = false;
+      var failed = _volumeNormLogFailure;
+      try {
+        if (!failed) {
+          final readback = await pp.getProperty('af', waitForInitialization: false);
+          if (!volumeNormSupportedFromReadback(readback)) {
+            failed = true;
+          }
+        }
+      } catch (e) {
+        Log.logPrint(e);
+        failed = true;
+      }
+      _finishVolumeNormProbe(supported: !failed, token: token);
+    });
+  }
+
+  /// 音量均衡：探测终裁落地（能力持久化 + UI 同步 + 链状态收敛）。
+  Future<void> _finishVolumeNormProbe({required bool supported, required int token}) async {
+    final pp = player.platform;
     PlayerMixin.afLoudnormSupported = supported;
     _persistCapability(supported);
     AppSettingsController.instance.setVolumeNormSupported(supported);
@@ -1421,6 +1499,7 @@ class PlayerController extends BaseController
       _volumeNormApplied = false;
     }
     if (!supported) {
+      Log.w('音量均衡：探测终裁未通过（logFailure=$_volumeNormLogFailure）→ 清链并禁用开关');
       SmartDialog.showToast("当前播放核心不支持音量均衡，开关已禁用");
     }
     _scheduleSuppressRelease(token);
@@ -1484,6 +1563,17 @@ class PlayerController extends BaseController
           SmartDialog.showToast("音量均衡关闭失败，请重试");
         }
       }
+    }
+    if (enable && _volumeNormApplied) {
+      // 复核（真机 P0，ISS-278）：热开也武装日志防线并预约窗末终裁——
+      // 旧逻辑 set 成功即 applied=true、无任何复核，破构建上热开静默无效。
+      _volumeNormLogFailure = false;
+      _volumeNormLogArmed = true;
+      _scheduleVolumeNormAdjudication(token, source: '热切换开启');
+    } else if (!enable) {
+      // 关闭：解除武装，避免旧失败记录污染后续房间
+      _volumeNormLogArmed = false;
+      _volumeNormLogFailure = false;
     }
     _scheduleSuppressRelease(token);
   }
