@@ -24,16 +24,16 @@ import 'package:simple_live_app/app/log.dart';
 import 'package:simple_live_app/app/utils.dart';
 import 'package:simple_live_app/app/utils/panel_width.dart';
 import 'package:simple_live_app/app/utils/rtx_vsr_crop.dart';
+import 'package:simple_live_app/app/utils/volume_norm.dart';
 import 'package:simple_live_app/services/local_storage_service.dart';
 import 'package:simple_live_app/modules/live_room/danmaku/danmaku_emoticon.dart';
 import 'package:simple_live_core/simple_live_core.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:window_manager/window_manager.dart';
 
-/// 音量均衡滤镜：EBU R128 loudnorm 单遍动态模式（面向直播场景）
-/// I=-16 目标响度 LUFS / TP=-1.5 真峰值 dBTP / LRA=11 响度范围
-/// 单遍动态模式无前瞻延迟；相比 dynaudnorm 更贴近响度标准，跨直播间响度一致性更好
-const String volumeNormFilter = 'loudnorm=I=-16:TP=-1.5:LRA=11';
+// 音量均衡滤镜链与纯逻辑见 app/utils/volume_norm.dart
+// （两段：dynaudnorm 轻压 + loudnorm 定标准；选用依据见该文件头注释与
+//   文件/Slive/文档/音量均衡-方案调研-20261110.md）。
 
 /// 音量均衡探测期错误抑制时长：mpv 的 af 写入失败会以 stream.error 事件异步到达，
 /// 需在 set 之后留出窗口，避免误触发 mediaError 重拉流（PR #195 教训）
@@ -120,6 +120,16 @@ mixin PlayerMixin {
       await pp.setProperty('vf', '');
       _lastRtxVsrScale = null;
       _rtxVsrChainApplied = false;
+    }
+    // 音量均衡：**起流前**预挂滤镜链（此处早于 live_room_controller 的 player.open）。
+    // 旧的「首帧播放后才挂」会让进房头 1–3s 完全没有处理（两轮复核整合结论）。
+    // 幂等：已挂则不重复 set —— set 会重建整条链并重置 loudnorm 的收敛状态。
+    if (!_volumeNormApplied &&
+        volumeNormShouldPreApply(
+          userOn: AppSettingsController.instance.volumeNorm.value,
+          supported: afLoudnormSupported,
+        )) {
+      await _preApplyVolumeNorm();
     }
     // 同步底部补边裁切（VSR 开启才裁；关闭时显式清空，避免切线路等场景残留上次的裁切）
     await _syncRtxVsrCrop();
@@ -1081,6 +1091,9 @@ class PlayerController extends BaseController
   /// 音量均衡：本房间首帧播放的一次性探测是否已执行
   bool _volumeNormInitialized = false;
 
+  /// 音量均衡：抑制窗口内播放器日志是否报出滤镜链失败（静默降级防线）
+  bool _volumeNormLogFailure = false;
+
   /// 音量均衡：热切换监听器句柄（onClose 必须释放；裸 ever() 退房后断言，PR #195 教训）
   Worker? _volumeNormWorker;
 
@@ -1139,6 +1152,12 @@ class PlayerController extends BaseController
     });
     _logSubscription = player.stream.log.listen((event) {
       Log.d("播放器日志：$event");
+      // 音量均衡静默降级防线（复核建议）：抑制窗口内命中滤镜错误关键字即标记失败，
+      // 由 _probeVolumeNormCapability 结合回读结果判定「不支持」。
+      if (_suppressErrorRetry && volumeNormLogIndicatesFailure(event)) {
+        Log.d("音量均衡：日志命中滤镜错误关键字 → 判定链未挂上：$event");
+        _volumeNormLogFailure = true;
+      }
     });
     _widthSubscription = player.stream.width.listen((event) {
       Log.d('width:$event  W:${(player.state.width)}  H:${(player.state.height)}');
@@ -1216,7 +1235,7 @@ class PlayerController extends BaseController
         return;
       }
       if (AppSettingsController.instance.volumeNorm.value) {
-        if (afLoudnormSupported == true) {
+        if (volumeNormShouldApply(userOn: true, supported: afLoudnormSupported)) {
           await _applyVolumeNorm(enable: true);
         }
       } else if (_volumeNormApplied) {
@@ -1238,6 +1257,27 @@ class PlayerController extends BaseController
     return next;
   }
 
+  /// 音量均衡：起流前预挂链（由 `initializePlayer` 在 `player.open` 之前调用）。
+  ///
+  /// 失败不阻塞起流：仅记录，交由首帧回读校验兜底（不支持会自动还原并置灰开关）。
+  Future<void> _preApplyVolumeNorm() async {
+    final pp = player.platform;
+    if (pp is! NativePlayer) {
+      return;
+    }
+    final token = ++_suppressToken;
+    _suppressErrorRetry = true;
+    _volumeNormLogFailure = false;
+    try {
+      await pp.setProperty('af', volumeNormFilter);
+      _volumeNormApplied = true;
+    } catch (e) {
+      Log.logPrint(e);
+      _volumeNormApplied = false;
+    }
+    _scheduleSuppressRelease(token);
+  }
+
   /// 音量均衡：探测能力（设置 af → 回读校验），探测后按用户意愿还原或保持
   Future<void> _probeVolumeNormCapability() async {
     if (_playerDisposed) {
@@ -1251,11 +1291,17 @@ class PlayerController extends BaseController
     _suppressErrorRetry = true;
     var supported = false;
     try {
-      await pp.setProperty('af', volumeNormFilter);
-      // 回读校验：af 为未知滤镜时 mpv 会拒绝写入并保持旧值，
-      // 因此回读是否包含 loudnorm 即可判定二进制是否支持
+      // 起流前已预挂（_volumeNormApplied=true）时只回读校验、不再 set：
+      // set 会重建整条链并重置 loudnorm 收敛状态 → 进房第一秒响度又爬一遍。
+      if (!_volumeNormApplied) {
+        _volumeNormLogFailure = false;
+        await pp.setProperty('af', volumeNormFilter);
+      }
+      // 回读校验：mpv 对非法/不存在的滤镜会拒绝写入并保持旧值，
+      // 因此回读必须同时包含 dynaudnorm 与 loudnorm 才算支持（只查 loudnorm 不严）。
       final readback = await pp.getProperty('af');
-      supported = readback.contains('loudnorm');
+      supported =
+          volumeNormSupportedFromReadback(readback) && !_volumeNormLogFailure;
     } catch (e) {
       Log.logPrint(e);
       supported = false;
@@ -1318,7 +1364,7 @@ class PlayerController extends BaseController
         // 关闭失败：回读真实状态，避免 UI 显示与实际听感不一致
         try {
           final readback = await pp.getProperty('af');
-          _volumeNormApplied = readback.contains('loudnorm');
+          _volumeNormApplied = volumeNormSupportedFromReadback(readback);
         } catch (e2) {
           Log.logPrint(e2);
           // 回读也失败：保守保持「已应用」，下次关闭会重试
