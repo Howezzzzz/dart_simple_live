@@ -289,6 +289,9 @@ mixin PlayerMixin {
   /// 统一持久化禁用、新版本/重建后自然重探）。
   void _scheduleVolumeNormAdjudication(int token, {required String source}) {
     final pp = player.platform;
+    if (pp is! NativePlayer) {
+      return;
+    }
     Future.delayed(const Duration(milliseconds: 2000), () async {
       if (token != _suppressToken || _playerDisposed) {
         return; // 已被更新操作取代或资源已释放（新操作的释放逻辑自会收尾）
@@ -1483,6 +1486,9 @@ class PlayerController extends BaseController
   /// 音量均衡：探测终裁落地（能力持久化 + UI 同步 + 链状态收敛）。
   Future<void> _finishVolumeNormProbe({required bool supported, required int token}) async {
     final pp = player.platform;
+    if (pp is! NativePlayer) {
+      return;
+    }
     PlayerMixin.afLoudnormSupported = supported;
     _persistCapability(supported);
     AppSettingsController.instance.setVolumeNormSupported(supported);
