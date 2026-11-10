@@ -87,7 +87,7 @@ jobs:
         working-directory: ./buildscripts
         run: |
           # 在 --enable-filter=equalizer 后追加 loudnorm/dynaudnorm/aresample（对齐 Windows 自建 libmpv 的滤镜）
-          sed -i 's/^[[:space:]]*--enable-filter=equalizer \\$/&\n\t--enable-filter=loudnorm \\/\n\t--enable-filter=dynaudnorm \\/\n\t--enable-filter=aresample \\/' flavors/default.sh
+          sed -i 's/^[[:space:]]*--enable-filter=equalizer \\$/&\n\t--enable-filter=loudnorm \\ \n\t--enable-filter=dynaudnorm \\ \n\t--enable-filter=aresample \\/' flavors/default.sh
           grep -n "enable-filter" flavors/default.sh
           # 断言补丁确实生效（防止 sed 锚点失配时静默 no-op 导致产物缺滤镜）
           for filt in loudnorm dynaudnorm aresample; do

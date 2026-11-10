@@ -159,7 +159,7 @@ jobs:
           ninja -C build_x86_64 update
           ninja -C build_x86_64 mpv
 
-            - name: Verify filters present in built libmpv-2.dll (防静默降级)
+      - name: Verify filters present in built libmpv-2.dll (防静默降级)
         run: |
           set -euo pipefail
           dll=$(find build_x86_64 -name "libmpv-2.dll" | head -1)
