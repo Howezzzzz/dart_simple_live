@@ -121,38 +121,38 @@ jobs:
             grep -qxF "        --enable-filter=${filt}" packages/ffmpeg.cmake || { echo "::error::patch verification failed: ${filt}"; exit 1; }
           done
 
-      # 2026-11-10：上游 fontconfig main 前进（11-09 Fontations scanner 改动 fcdir.c、meson 等），
-      # 使 packages/fontconfig-*.patch 上下文失配 → git am 回退 --3way 时，因 tree:0 替身克隆取不到
-      # 基线 blob（sha1 information is lacking）→ patch 失败、整包构建红（run 42832843213）。
-      # 修法：把 fontconfig 源码钉到 2026-10-21 已知good提交（与 10-22 成功构建同态）。
-      # 本地已验证：该提交上 git apply --check 干净通过，当前 main 上失败。
-      - name: Pin fontconfig source (上游 main 漂移致 patch 失配)
+      # 2026-11-10：若干上游包用浮动分支（GIT_TAG main）自带补丁，上游前进后补丁上下文失配 → 包的 patch 步骤红。
+      # 已触发：fontconfig（gitlab，git am --3way 因 tree:0 替身克隆取不到基线 blob）、libvpl（github，git apply 硬失败）。
+      # 修法：把这些包的源码钉到最后一次成功构建(2026-10-22)前的已知good提交，并遵守本构建系统约定——
+      #       钉 commit hash 时必须删掉 GIT_REMOTE_NAME，否则 force-update 会对 detached HEAD 跑 git reset --hard @{u} → fatal。
+      # 本地均已用真身源码逐一验证：补丁在这些提交上 git apply --check 干净通过，且在各自当前上游 main 上失败。
+      - name: Pin drifting patched sources (fontconfig/libvpl)
         run: |
           python3 - <<'PY'
           import sys
-          path = "packages/fontconfig.cmake"
-          sha = "b25ffeabd15b76f86c0c6736f6df2f1b89858010"
-          src = open(path, encoding="utf-8").read()
-          # 1) 钉死源码到已知good提交（浮动 main 漂移致 patch 上下文失配）
-          a1 = "GIT_TAG main\n"
-          if src.count(a1) != 1:
-              sys.exit(f"ERROR: GIT_TAG anchor not unique/missing in {path}")
-          src = src.replace(a1, f"GIT_TAG {sha}\n", 1)
-          # 2) 删掉 GIT_REMOTE_NAME（本构建系统约定：钉 commit hash 时不得设 GIT_REMOTE_NAME，
-          #    否则 force-update 会对 detached HEAD 执行 `git reset --hard @{u}`
-          #    → fatal: HEAD does not point to a branch（见 cmake/custom_steps.cmake force_rebuild_git））
-          a2 = "    GIT_REMOTE_NAME origin\n"
-          if src.count(a2) != 1:
-              sys.exit(f"ERROR: GIT_REMOTE_NAME anchor not unique/missing in {path}")
-          src = src.replace(a2, "", 1)
-          open(path, "w", encoding="utf-8").write(src)
-          print("patched", path)
+          PINS = {
+              "packages/fontconfig.cmake": "b25ffeabd15b76f86c0c6736f6df2f1b89858010",  # fontconfig main @2026-10-21
+              "packages/libvpl.cmake":     "674d015bcb294bc39fa276e99a652ea045423e82",  # intel/libvpl main @2026-07-13
+          }
+          for path, sha in PINS.items():
+              src = open(path, encoding="utf-8").read()
+              a1 = "GIT_TAG main\n"
+              if src.count(a1) != 1:
+                  sys.exit(f"ERROR: GIT_TAG main not unique/missing in {path} (found {src.count(a1)})")
+              src = src.replace(a1, f"GIT_TAG {sha}\n", 1)
+              a2 = "    GIT_REMOTE_NAME origin\n"
+              if src.count(a2) != 1:
+                  sys.exit(f"ERROR: GIT_REMOTE_NAME origin not unique/missing in {path} (found {src.count(a2)})")
+              src = src.replace(a2, "", 1)
+              open(path, "w", encoding="utf-8").write(src)
+              print("pinned", path, "->", sha)
           PY
-          grep -qF "GIT_TAG b25ffeabd15b76f86c0c6736f6df2f1b89858010" packages/fontconfig.cmake || { echo "::error::fontconfig pin verification failed"; exit 1; }
-          ! grep -qF "GIT_REMOTE_NAME" packages/fontconfig.cmake || { echo "::error::fontconfig GIT_REMOTE_NAME still present"; exit 1; }
-          grep -n "GIT_TAG\|GIT_REMOTE_NAME" packages/fontconfig.cmake || true
-          # 3) 清掉缓存里可能残留的 fontconfig 源码，强制按新钉的 SHA 重新 clone
-          rm -rf src_packages/fontconfig
+          grep -qF "GIT_TAG b25ffeabd15b76f86c0c6736f6df2f1b89858010" packages/fontconfig.cmake || { echo "::error::fontconfig pin verify failed"; exit 1; }
+          grep -qF "GIT_TAG 674d015bcb294bc39fa276e99a652ea045423e82" packages/libvpl.cmake || { echo "::error::libvpl pin verify failed"; exit 1; }
+          if grep -qF "GIT_REMOTE_NAME" packages/fontconfig.cmake packages/libvpl.cmake; then echo "::error::GIT_REMOTE_NAME still present"; exit 1; fi
+          grep -n "GIT_TAG" packages/fontconfig.cmake packages/libvpl.cmake
+          # 清掉缓存里可能残留的源码，强制按新钉的 SHA 重新 clone
+          rm -rf src_packages/fontconfig src_packages/libvpl
 
       # 2026-10-22：上游 libopenmpt 0.7.12 的 tarball 链接失效（lib.openmpt.org 疑撤旧版）→
       # 按序探测可用源（0.7.12 原链 / 0.7.13 / buildroot 镜像），取第一个可用者，并同步 URL_HASH。
