@@ -2,29 +2,29 @@
   "schema": 1,
   "bundles": {
     "android_arm64": {
-      "url": "https://github.com/Howezzzzz/dart_simple_live/releases/download/libmpv-android-custom-v2/default-arm64-v8a.jar",
-      "sha256": "0df9c043a7d32ea4995ba0ecf8cbe72e569436355d2b3e24a40d2c5d94b6409d",
+      "url": "https://github.com/Howezzzzz/dart_simple_live/releases/download/libmpv-android-custom-v3/default-arm64-v8a.jar",
+      "sha256": "dad2d085111dc1fd07635b93434a680abe6be3cce5be9725278d2b9791df6ab1",
       "format": "zip",
       "root": "lib/arm64-v8a",
       "library": "libmpv.so"
     },
     "android_arm": {
-      "url": "https://github.com/Howezzzzz/dart_simple_live/releases/download/libmpv-android-custom-v2/default-armeabi-v7a.jar",
-      "sha256": "b448394fef0cd39531f94772cbcfd7529163f616b6b9f97ef80b25d7d1226328",
+      "url": "https://github.com/Howezzzzz/dart_simple_live/releases/download/libmpv-android-custom-v3/default-armeabi-v7a.jar",
+      "sha256": "ebdca3875cb618e9d3e45b590bfe5c5611f4ce53af76710eae75967acf3608a8",
       "format": "zip",
       "root": "lib/armeabi-v7a",
       "library": "libmpv.so"
     },
     "android_x64": {
-      "url": "https://github.com/Howezzzzz/dart_simple_live/releases/download/libmpv-android-custom-v2/default-x86_64.jar",
-      "sha256": "7a17bf22239487195c233eac0b36fbd1f7070b54780725a237e4845fbb6b8091",
+      "url": "https://github.com/Howezzzzz/dart_simple_live/releases/download/libmpv-android-custom-v3/default-x86_64.jar",
+      "sha256": "b4bdc45a29d530d1d4369fbff13f31104b86ec23aa503af95b1d24964dbfab48",
       "format": "zip",
       "root": "lib/x86_64",
       "library": "libmpv.so"
     },
     "android_ia32": {
-      "url": "https://github.com/Howezzzzz/dart_simple_live/releases/download/libmpv-android-custom-v2/default-x86.jar",
-      "sha256": "4938994f3b7c049f3f6aeeaadf3f9b511abbefc41c67a139ad70cec09410d7cf",
+      "url": "https://github.com/Howezzzzz/dart_simple_live/releases/download/libmpv-android-custom-v3/default-x86.jar",
+      "sha256": "ad6f0d482df1595c741b0bceea9b2bf0ba53b009ec8f33d84527ccebc10d6057",
       "format": "zip",
       "root": "lib/x86",
       "library": "libmpv.so"
