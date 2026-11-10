@@ -76,9 +76,9 @@ void main() {
       expect(volumeNormShouldApply(userOn: false, supported: true), isFalse);
     });
 
-    test('volumeNormShouldPreApply：仅「用户开 + 已知支持」才预挂（复核 P0-3）', () {
+    test('volumeNormShouldPreApply：用户开且「非已知不支持」即预挂（v2 探测式预挂，ISS-274）', () {
       expect(volumeNormShouldPreApply(userOn: true, supported: true), isTrue);
-      expect(volumeNormShouldPreApply(userOn: true, supported: null), isFalse);
+      expect(volumeNormShouldPreApply(userOn: true, supported: null), isTrue);
       expect(volumeNormShouldPreApply(userOn: true, supported: false), isFalse);
       expect(volumeNormShouldPreApply(userOn: false, supported: true), isFalse);
     });

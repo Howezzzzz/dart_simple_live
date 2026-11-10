@@ -68,12 +68,11 @@ bool volumeNormLogIndicatesFailure(String line) {
 /// 判 `afLoudnormSupported == true`。
 bool volumeNormShouldApply({required bool userOn, required bool? supported}) => userOn && supported == true;
 
-/// 起流前是否需要预挂链：用户开启且能力「已知支持」。
+/// 起流前是否需要预挂链：用户开启且能力「不是已知不支持」。
 ///
-/// 复核 P0-3 收紧：能力未知（null）时**不**预挂——media_kit 的 setProperty 忽略
-/// mpv 返回码，非法/不存在的滤镜会静默失败；未知即预挂会把「未生效的链」标记成
-/// 已应用（_volumeNormApplied=true），起流期音频初始化失败（无声）且首帧探测跳过
-/// set 只回读，把错误能力持久化为 true（跨重启、整场无声）。能力未知时交给首帧
-/// 探测（探测自带 set+回读），探测成功后本进程后续进房（能力已知支持）即享预挂，
-/// 消除旧的「首帧后才挂」造成的 1–3s 未处理窗。
-bool volumeNormShouldPreApply({required bool userOn, required bool? supported}) => userOn && supported == true;
+/// v2（优雅版，ISS-274）：能力未知（null）也预挂——预挂即探测（set + 回读），
+/// 回读当场判定能力并持久化：支持则链已生效（**首房零等待**，RISK-69 消除）；
+/// 不支持则清链并持久化 false。安全性依据：libavfilter 解析期即拒绝不存在的
+/// 滤镜/非法参数（mpv 同引擎，EV-411 实证）；且判定失败路径必清链 + persist false，
+/// 封死「错误能力持久化 true / 整场无声」路径（原 P0-3 的担忧场景）。
+bool volumeNormShouldPreApply({required bool userOn, required bool? supported}) => userOn && supported != false;

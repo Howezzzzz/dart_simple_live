@@ -207,7 +207,14 @@ mixin PlayerMixin {
 
   /// 音量均衡：起流前预挂链（由 `initializePlayer` 在 `player.open` 之前调用，经串行队列执行）。
   ///
-  /// 失败不阻塞起流：仅记录，交由首帧回读校验兜底（不支持会自动还原并置灰开关）。
+  /// v2（优雅版，ISS-274）：**探测式预挂**——能力未知（null）也挂（volumeNormShouldPreApply
+  /// 语义：非已知不支持即预挂），set 后回读当场判定并持久化能力：
+  /// - 回读含两滤镜 → 链已生效（applied=true）；能力若未知则定为支持并持久化 true →
+  ///   **首个房间也零等待**（RISK-69 的 1–3s 未处理窗消除）；
+  /// - 回读不含 → 不存在/参数非法的滤镜在 libavfilter 解析期即被拒（EV-411 实证），
+  ///   必清链（set af=''）+ applied=false；能力若未知则定为不支持并持久化 false + 置灰。
+  ///   「判定失败必清链 + persist false」封死 qwen P0-2 的「错误能力持久化 true / 整场无声」路径。
+  /// 失败不阻塞起流：异常路径仅记录，首帧探测仍兜底（如 platform 非 NativePlayer）。
   /// 复核 P1-1：预挂**不**开错误抑制窗——它发生在起流建连期，2s 抑制窗会吞掉真实
   /// 建连错误（死链/鉴权失败 → 黑屏不重拉流）。af 写入失败本不产生 stream.error
   /// （PR #195 的抑制窗针对播放中重建链路场景），无需窗口。
@@ -230,17 +237,45 @@ mixin PlayerMixin {
       // 该选项）；waitForInitialization:false 避免进房起流被 setProperty 阻塞。
       await pp.setProperty('af', volumeNormFilter, waitForInitialization: false);
       // 复核 P0-3：预挂后立即回读校验——media_kit 的 setProperty 忽略 mpv 返回码，
-      // 「滤镜不存在/参数非法」会静默失败；不回读会把未生效的链标记成已挂，
-      // 进而让首帧探测跳过 set 只回读、把错误能力持久化为 true（跨重启、整场无声）。
+      // 「滤镜不存在/参数非法」会静默失败；不回读会把未生效的链标记成已挂。
       final readback = await pp.getProperty('af', waitForInitialization: false);
-      _volumeNormApplied = volumeNormSupportedFromReadback(readback);
-      if (!_volumeNormApplied) {
-        Log.w('音量均衡：预挂回读未确认（af="$readback"），留待首帧探测兜底');
+      if (volumeNormSupportedFromReadback(readback)) {
+        _volumeNormApplied = true;
+        // 能力未知 → 当场定为支持并持久化（v2：首房零等待，不再等首帧探测）
+        if (afLoudnormSupported == null) {
+          afLoudnormSupported = true;
+          _persistCapability(true);
+          AppSettingsController.instance.setVolumeNormSupported(true);
+        }
+      } else {
+        // 链未挂上：清链保证与 mpv 状态一致；能力未知则当场定为不支持并持久化
+        //（「判定失败必 persist false」，封死错误能力持久化 true 路径）。
+        _volumeNormApplied = false;
+        await pp.setProperty('af', '', waitForInitialization: false);
+        if (afLoudnormSupported == null) {
+          afLoudnormSupported = false;
+          _persistCapability(false);
+          AppSettingsController.instance.setVolumeNormSupported(false);
+          SmartDialog.showToast("当前播放核心不支持音量均衡，开关已禁用");
+        } else {
+          // 已知支持却回读失败（数值级异常，罕见）：记录，首帧探测仍兜底
+          Log.w('音量均衡：预挂回读未确认（af="$readback"）');
+        }
       }
     } catch (e) {
       Log.logPrint(e);
       _volumeNormApplied = false;
     }
+  }
+
+  /// 音量均衡：持久化能力探测结果（带 App 版本前缀，版本变化即失效重探）。
+  /// 声明在 PlayerMixin：探测式预挂（_preApplyVolumeNorm，v2 ISS-274）也写能力，
+  /// mixin 无 on 约束必须自持被引用成员（复核 P0-1）。
+  void _persistCapability(bool supported) {
+    LocalStorageService.instance.setValue(
+      LocalStorageService.kVolumeNormSupported,
+      "${Utils.packageInfo.version}:$supported",
+    );
   }
 
   /// 串行队列：width/height 双监听并发调用时按序执行，避免交错产生竞态假告警（复核 P3-2）。
@@ -1441,13 +1476,6 @@ class PlayerController extends BaseController
       return null;
     }
     return raw.substring(prefix.length) == "true";
-  }
-
-  void _persistCapability(bool supported) {
-    LocalStorageService.instance.setValue(
-      LocalStorageService.kVolumeNormSupported,
-      "${Utils.packageInfo.version}:$supported",
-    );
   }
 
   /// 应用 NVIDIA RTX VSR 设置（进房与直播间接开关共用）：更新链状态并立即同步。
