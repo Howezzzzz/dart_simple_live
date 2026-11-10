@@ -96,6 +96,24 @@ const double rtxVsrMaxScale = 4.0;
 String rtxVsrVfChain(double scale) =>
     'd3d11vpp=scale=${scale.toStringAsFixed(2)}:scaling-mode=nvidia';
 
+/// 依据「是否启用 / 本次倍数 / 当前已挂倍数」决定对 `vf` 的动作（纯逻辑，便于回归测试）。
+/// 返回 (`'none'|'set'|'clear'`, 链字符串或空串)。
+///
+/// 关键：摘链判断依赖「当前已挂倍数非空」——**不能在决定动作前把它清 null**，
+/// 否则关闭时摘链分支永远不命中，链留在 mpv 里（绿条复现）。
+(String, String) rtxVsrVfAction({
+  required bool enable,
+  required double? scale,
+  required double? currentScale,
+}) {
+  if (enable && scale != null) {
+    if (scale == currentScale) return ('none', '');
+    return ('set', rtxVsrVfChain(scale));
+  }
+  if (currentScale != null) return ('clear', '');
+  return ('none', '');
+}
+
 /// 一次 VSR 同步的「决策结果」（纯逻辑，便于单测）。
 class RtxVsrPlan {
   const RtxVsrPlan({

@@ -68,6 +68,46 @@ void main() {
       expect(rtxVsrVfChain(1.5), 'd3d11vpp=scale=1.50:scaling-mode=nvidia');
       expect(rtxVsrVfChain(3), 'd3d11vpp=scale=3.00:scaling-mode=nvidia');
     });
+
+    test('rtxVsrVfAction：摘链判断依赖 currentScale（阶段4 复核 P0 回归）', () {
+      // 关 + 已挂链 → 必须 clear（复核 P0：不得在决定动作前把 currentScale 清 null）
+      expect(rtxVsrVfAction(enable: false, scale: null, currentScale: 2.0),
+          ('clear', ''));
+      // 关 + 未挂链 → none（零写入）
+      expect(rtxVsrVfAction(enable: false, scale: null, currentScale: null),
+          ('none', ''));
+      // 开 + 同倍数 → none（不重挂）
+      expect(rtxVsrVfAction(enable: true, scale: 2.0, currentScale: 2.0),
+          ('none', ''));
+      // 开 + 换倍数 → set（链字符串正确）
+      final setAction =
+          rtxVsrVfAction(enable: true, scale: 3.0, currentScale: 2.0);
+      expect(setAction.$1, 'set');
+      expect(setAction.$2, 'd3d11vpp=scale=3.00:scaling-mode=nvidia');
+      // 开但倍数无效（源≥播放区）+ 已挂链 → clear
+      expect(rtxVsrVfAction(enable: true, scale: null, currentScale: 2.0),
+          ('clear', ''));
+    });
+
+    test('rtxVsrAdaptiveScale：1.05 边界 / 8192 sanity / 无播放区兜底', () {
+      // r 恰好 1.05 → 关闭
+      expect(
+          rtxVsrAdaptiveScale(
+              areaW: 1008, areaH: 567, srcW: 960, srcH: 544),
+          isNull);
+      // 略大于 1.05 → 向上取 0.25 → 1.25
+      expect(
+          rtxVsrAdaptiveScale(
+              areaW: 1056, areaH: 594, srcW: 960, srcH: 544),
+          1.25);
+      // sanity：未裁切输出单边 >8192 → null（4096 源 × 4 = 16384）
+      expect(
+          rtxVsrAdaptiveScale(
+              areaW: 16384, areaH: 8640, srcW: 4096, srcH: 2160),
+          isNull);
+      // 无播放区尺寸时 rtxVsrPlan 走固定 2x 兜底（含超大源）
+      expect(rtxVsrPlan(enabled: true, srcW: 3840, srcH: 2160).scale, 2.0);
+    });
   });
 
   group('rtx_vsr_crop 补充：非整数倍数向下取偶', () {

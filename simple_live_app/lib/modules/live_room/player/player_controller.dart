@@ -111,7 +111,7 @@ mixin PlayerMixin {
       await pp.setProperty('hwdec', 'd3d11va');
       // 放大倍数与 rtx_vsr_crop.dart 的 rtxVsrScale 单一事实来源（复核 P3-4）：
       // 手动写两处 scale 会脱钩——倍数调大时裁切矩形落在放大帧内 → 裁错且无 safe-fail。
-      await pp.setProperty('vf', 'd3d11vpp=scale=$rtxVsrScale:scaling-mode=nvidia');
+      await pp.setProperty('vf', rtxVsrVfChain(rtxVsrScale));
       _lastRtxVsrScale = rtxVsrScale;
       _rtxVsrChainApplied = true;
     } else if (Platform.isWindows) {
@@ -138,6 +138,27 @@ mixin PlayerMixin {
 
   /// 播放区尺寸变化的防抖计时器（合并密集 resize 事件，避免滤镜链反复重挂）。
   Timer? _vsrSyncDebounce;
+
+  /// 错误抑制（音量均衡探测/切换 + VSR 重挂滤镜链共用；PR #195 教训）：抑制窗口内
+  /// mpv 的 stream.error 直接跳过，避免被误当媒体错误去重拉流/切线路。
+  /// 注：声明在 mixin 内——VSR 的同步逻辑在 mixin，需库内可见。
+  bool _suppressErrorRetry = false;
+  int _suppressToken = 0;
+
+  /// 播放器已释放标记（异步回调短路，防止已释放播放器断言）。
+  bool _playerDisposed = false;
+
+  /// 延迟解除错误抑制（mpv 错误事件可能略晚于 setProperty 返回）。
+  void _scheduleSuppressRelease(int token) {
+    Future.delayed(volumeNormSuppressDuration, () {
+      if (_playerDisposed) {
+        return;
+      }
+      if (token == _suppressToken) {
+        _suppressErrorRetry = false;
+      }
+    });
+  }
 
   /// 串行队列：width/height 双监听并发调用时按序执行，避免交错产生竞态假告警（复核 P3-2）。
   Future<void> _cropWriteQueue = Future<void>.value();
@@ -183,15 +204,26 @@ mixin PlayerMixin {
     _enqueueCropWrite(() async {
       // 队列内再查一次：并发同值时只写第一笔，避免重复设置触发滤镜链重建。
       if (signature == _lastRtxVsrSignature) return;
-      // 倍数变化才重挂滤镜链（重挂会重建 D3D11 链路、可能闪一帧 → 仅桶变化时做）。
-      if (enable && s != null) {
-        if (s != _lastRtxVsrScale) {
-          await pp.setProperty('vf', rtxVsrVfChain(s));
-          _lastRtxVsrScale = s;
+      final (vfAction, vfValue) = rtxVsrVfAction(
+          enable: enable, scale: s, currentScale: _lastRtxVsrScale);
+      if (vfAction != 'none') {
+        // 写/摘 vf 会重建 D3D11 链路，期间可能冒 stream.error → 误触重拉流（PR #195）：
+        // 所有会动 vf 的路径（开关、切分辨率、resize 防抖）统一在此加抑制窗。
+        final token = ++_suppressToken;
+        _suppressErrorRetry = true;
+        try {
+          if (vfAction == 'set') {
+            // d3d11vpp 需 D3D11 硬件帧上下文
+            await pp.setProperty('hwdec', 'd3d11va');
+            await pp.setProperty('vf', vfValue);
+            _lastRtxVsrScale = s;
+          } else {
+            await pp.setProperty('vf', '');
+            _lastRtxVsrScale = null;
+          }
+        } finally {
+          _scheduleSuppressRelease(token);
         }
-      } else if (_lastRtxVsrScale != null) {
-        await pp.setProperty('vf', '');
-        _lastRtxVsrScale = null;
       }
       await pp.setProperty('video-crop', desired);
       await pp.setProperty(
@@ -1043,13 +1075,6 @@ class PlayerController extends BaseController
   /// 音量均衡：进程级能力缓存（null=未探测；libmpv 构建固定，探测一次即可）
   static bool? afLoudnormSupported;
 
-  /// 音量均衡：探测/切换期间抑制错误重试（af 写入失败会以 stream.error 到达，
-  /// 不抑制会误触发 mediaError→重拉流/切线路，PR #195 的实测缺陷）
-  bool _suppressErrorRetry = false;
-
-  /// 音量均衡：抑制令牌（并发/时序保护，仅最新令牌允许解除抑制）
-  int _suppressToken = 0;
-
   /// 音量均衡：本房间是否已应用 af
   bool _volumeNormApplied = false;
 
@@ -1064,9 +1089,6 @@ class PlayerController extends BaseController
 
   /// 音量均衡：操作串行队列（探测/应用/移除按发起顺序执行，避免并发交错导致 af 与状态标记不一致）
   Future<void> _volumeNormQueue = Future<void>.value();
-
-  /// 播放器已释放标记（异步回调短路，防止已释放播放器断言）
-  bool _playerDisposed = false;
 
   StreamSubscription<String>? _errorSubscription;
   StreamSubscription? _completedSubscription;
@@ -1330,18 +1352,6 @@ class PlayerController extends BaseController
     );
   }
 
-  void _scheduleSuppressRelease(int token) {
-    // 延迟解除抑制：mpv 错误事件可能略晚于 setProperty 返回
-    Future.delayed(volumeNormSuppressDuration, () {
-      if (_playerDisposed) {
-        return;
-      }
-      if (token == _suppressToken) {
-        _suppressErrorRetry = false;
-      }
-    });
-  }
-
   /// 应用 NVIDIA RTX VSR 设置（进房与直播间接开关共用）：更新链状态并立即同步。
   ///
   /// 重挂/摘除滤镜链会让 mpv 重建 D3D11 链路，期间可能冒 `stream.error` → 被当成
@@ -1353,20 +1363,16 @@ class PlayerController extends BaseController
     if (pp is! NativePlayer) return;
     final enabled = AppSettingsController.instance.enableRtxVsr.value;
     _rtxVsrChainApplied = enabled;
-    if (!enabled) _lastRtxVsrScale = null;
-    _lastRtxVsrSignature = null; // 强制重算（开关变化必须重挂/摘链）
-    final token = ++_suppressToken;
-    _suppressErrorRetry = true;
+    // 强制重算（开关变化必须重挂/摘链）。
+    _lastRtxVsrSignature = null;
+    // 注：**不清 `_lastRtxVsrScale`**——它是「mpv 实际已挂链」的唯一记录，摘链判断依赖它非空；
+    // 在决定动作前清空会导致关闭时永不摘链→绿条复现（阶段4 复核 P0）。
+    // hwdec 与错误抑制由 `_syncRtxVsrCrop` 内部统一处理。
     try {
-      if (enabled) {
-        // d3d11vpp 需要 D3D11 硬件帧上下文
-        await pp.setProperty('hwdec', 'd3d11va');
-      }
       await _syncRtxVsrCrop();
     } catch (e) {
       Log.d('[VSR] 热切换失败: $e');
     }
-    _scheduleSuppressRelease(token);
   }
 
   Future<void> toggleOSDStats() async {
