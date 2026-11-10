@@ -121,6 +121,30 @@ jobs:
             grep -qxF "        --enable-filter=${filt}" packages/ffmpeg.cmake || { echo "::error::patch verification failed: ${filt}"; exit 1; }
           done
 
+      # 2026-11-10：上游 fontconfig main 前进（11-09 Fontations scanner 改动 fcdir.c、meson 等），
+      # 使 packages/fontconfig-*.patch 上下文失配 → git am 回退 --3way 时，因 tree:0 替身克隆取不到
+      # 基线 blob（sha1 information is lacking）→ patch 失败、整包构建红（run 42832843213）。
+      # 修法：把 fontconfig 源码钉到 2026-10-21 已知good提交（与 10-22 成功构建同态）。
+      # 本地已验证：该提交上 git apply --check 干净通过，当前 main 上失败。
+      - name: Pin fontconfig source (上游 main 漂移致 patch 失配)
+        run: |
+          python3 - <<'PY'
+          import sys
+          path = "packages/fontconfig.cmake"
+          sha = "b25ffeabd15b76f86c0c6736f6df2f1b89858010"
+          anchor = "GIT_TAG main\n"
+          with open(path, encoding="utf-8") as f:
+              src = f.read()
+          n = src.count(anchor)
+          if n != 1:
+              sys.exit(f"ERROR: anchor not unique/missing in {path} (found {n})")
+          with open(path, "w", encoding="utf-8") as f:
+              f.write(src.replace(anchor, f"GIT_TAG {sha}\n", 1))
+          print("patched", path)
+          PY
+          grep -qF "GIT_TAG b25ffeabd15b76f86c0c6736f6df2f1b89858010" packages/fontconfig.cmake || { echo "::error::fontconfig pin verification failed"; exit 1; }
+          grep -n "GIT_TAG" packages/fontconfig.cmake
+
       # 2026-10-22：上游 libopenmpt 0.7.12 的 tarball 链接失效（lib.openmpt.org 疑撤旧版）→
       # 按序探测可用源（0.7.12 原链 / 0.7.13 / buildroot 镜像），取第一个可用者，并同步 URL_HASH。
       - name: Fix libopenmpt source URL (原 0.7.12 链失效，探测可用源)
