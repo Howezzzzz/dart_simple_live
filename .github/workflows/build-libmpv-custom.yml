@@ -4,7 +4,7 @@
 #
 # 内容：
 #   1. 锁定 commit 拉取 Predidit/libmpv-win32-video-cmake 构建系统
-#   2. 给 packages/ffmpeg.cmake 追加 loudnorm / dynaudnorm / speechnorm 三个原生滤镜
+#   2. 给 packages/ffmpeg.cmake 追加 loudnorm / dynaudnorm / speechnorm / aresample 四个原生滤镜
 #      （上游 --disable-filters 后仅启用 overlay/equalizer，故动态响度滤镜全部缺失）
 #   3. 构建并打包，产物改名 mpv-dev-x86_64-slive-custom.7z
 #   4. 计算 SHA256 写入 Summary，并发布到 GitHub Release（tag 可指定）
@@ -21,7 +21,7 @@ on:
       release_tag:
         description: 'Release tag (asset: mpv-dev-x86_64-slive-custom.7z)'
         required: false
-        default: 'libmpv-custom-v3'
+        default: 'libmpv-custom-v4'
         type: string
 
 permissions:
@@ -33,7 +33,7 @@ concurrency:
 
 jobs:
   build_mpv:
-    name: Build libmpv x86_64 (+loudnorm/dynaudnorm/speechnorm)
+    name: Build libmpv x86_64 (+loudnorm/dynaudnorm/speechnorm/aresample)
     runs-on: ubuntu-latest
     timeout-minutes: 350
     container:
@@ -104,6 +104,7 @@ jobs:
               "        --enable-filter=loudnorm\n"
               "        --enable-filter=dynaudnorm\n"
               "        --enable-filter=speechnorm\n"
+              "        --enable-filter=aresample\n"
           )
           with open(path, encoding="utf-8") as f:
               src = f.read()
@@ -116,7 +117,7 @@ jobs:
           PY
           echo "--- filter lines after patch ---"
           grep -n -- '--enable-filter' packages/ffmpeg.cmake
-          for filt in loudnorm dynaudnorm speechnorm; do
+          for filt in loudnorm dynaudnorm speechnorm aresample; do
             grep -qxF "        --enable-filter=${filt}" packages/ffmpeg.cmake || { echo "::error::patch verification failed: ${filt}"; exit 1; }
           done
 
@@ -157,6 +158,24 @@ jobs:
         run: |
           ninja -C build_x86_64 update
           ninja -C build_x86_64 mpv
+
+            - name: Verify filters present in built libmpv-2.dll (防静默降级)
+        run: |
+          set -euo pipefail
+          dll=$(find build_x86_64 -name "libmpv-2.dll" | head -1)
+          if [[ -z "$dll" ]]; then
+            echo "::error::libmpv-2.dll not found in build tree"
+            exit 1
+          fi
+          echo "checking $(basename "$dll")"
+          for filt in loudnorm dynaudnorm speechnorm aresample; do
+            if strings "$dll" | grep -q "^${filt}$"; then
+              echo "OK: ${filt} present"
+            else
+              echo "::error::${filt} NOT found in libmpv-2.dll — 构建未启用滤镜，产物不可用"
+              exit 1
+            fi
+          done
 
       - name: Package
         run: |
