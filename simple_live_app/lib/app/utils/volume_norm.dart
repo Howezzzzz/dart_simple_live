@@ -51,16 +51,21 @@ const List<String> volumeNormFilterErrorKeywords = <String>[
 /// 复核 P0-4：mpv 的滤镜错误关键字（cannot find filter 等）是通用措辞——VSR 重挂
 /// vf（d3d11vpp）失败同样会命中；不限定作用域会把 VSR 故障误判成音量均衡不支持
 /// 并持久化禁用（开关置灰、误报 toast）。因此额外要求行内出现音量均衡音频滤镜
-/// 上下文：两个滤镜名之一，或 mpv 的 af 日志前缀（[af]）。
+/// 上下文：两个滤镜名之一，或 mpv 的 af 裸前缀（行首 `af `；media_kit 的
+/// PlayerLog.prefix 是无方括号裸名，如 af/vd/ad——阶段4 第3轮复核 P3 修正）。
 /// 注：本防线只兜「链创建失败但属性被接受」的边角；主门禁是回读校验
 /// （volumeNormSupportedFromReadback）。
 bool volumeNormLogIndicatesFailure(String line) {
   final lower = line.toLowerCase();
-  final inAudioScope = lower.contains('dynaudnorm') || lower.contains('loudnorm') || lower.contains('[af]');
+  final inAudioScope = lower.contains('dynaudnorm') || lower.contains('loudnorm') || lower.startsWith('af ');
   return inAudioScope && volumeNormFilterErrorKeywords.any(lower.contains);
 }
 
 /// 是否需要把链挂上：用户开启且能力「已知支持」。
+///
+/// 注：与 volumeNormShouldPreApply 语义现已完全一致（预挂收紧后，阶段4 第3轮
+/// 复核判其为无生产调用点的死代码）——保留仅作测试锚点（决策表），生产代码直接
+/// 判 `afLoudnormSupported == true`。
 bool volumeNormShouldApply({required bool userOn, required bool? supported}) => userOn && supported == true;
 
 /// 起流前是否需要预挂链：用户开启且能力「已知支持」。

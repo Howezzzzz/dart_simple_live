@@ -1408,10 +1408,15 @@ class PlayerController extends BaseController
           if (readback.trim().isNotEmpty) {
             // 复核 P2-1：残留**部分**链（如只清了 loudnorm 剩 dynaudnorm）也视为
             // 「仍在均衡」——只按「整条链」判定会把残留链误标成已关闭（UI 关、
-            // 实际还在均衡）。再清一次；仍失败则落入 catch 保持「已应用」待重试。
+            // 实际还在均衡）。再清一次。
             await pp.setProperty('af', '');
+            // 复核（阶段4 第3轮 P3）：复清后再回读确认——setProperty 忽略 mpv 返回码，
+            // 静默拒绝时残留链仍在，不能直接标已关（UI 关、实际仍均衡）。
+            final after = await pp.getProperty('af');
+            _volumeNormApplied = after.trim().isNotEmpty;
+          } else {
+            _volumeNormApplied = false;
           }
-          _volumeNormApplied = false;
         } catch (e2) {
           Log.logPrint(e2);
           // 回读/复清也失败：保守保持「已应用」，下次关闭会重试

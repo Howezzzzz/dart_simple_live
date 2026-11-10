@@ -44,11 +44,13 @@ void main() {
   });
 
   group('volumeNormLogIndicatesFailure（静默降级防线，复核 P0-4 限定音频作用域）', () {
-    test('音频滤镜错误关键字命中（须含滤镜名或 [af] 前缀，大小写不敏感）', () {
-      expect(volumeNormLogIndicatesFailure('[af] Cannot find filter dynaudnorm'), isTrue);
+    test('音频滤镜错误关键字命中（须含滤镜名或 af 裸前缀，大小写不敏感）', () {
+      expect(volumeNormLogIndicatesFailure('af Cannot find filter dynaudnorm'), isTrue);
       expect(volumeNormLogIndicatesFailure('Cannot find filter dynaudnorm'), isTrue);
       expect(volumeNormLogIndicatesFailure('no such filter: loudnorm'), isTrue);
       expect(volumeNormLogIndicatesFailure('Unknown filter dynaudnorm'), isTrue);
+      // 阶段4 第3轮 P3：泛化链错误（无滤镜名）靠 af 裸前缀命中
+      expect(volumeNormLogIndicatesFailure('af Failed to create filter chain'), isTrue);
     });
 
     test('VSR/视频滤镜报错不误报（回归 P0-4：有通用关键字但无音频作用域必须放行）', () {
