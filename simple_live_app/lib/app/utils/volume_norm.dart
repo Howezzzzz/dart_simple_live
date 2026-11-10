@@ -42,15 +42,16 @@ bool volumeNormSupportedFromReadback(String readback) =>
 /// 2026-11-10 真机 P0（ISS-276）：旧关键字只覆盖「创建期拒绝」，漏了实际形态——
 /// `failed to configure the filter graph`（lavfi 图配置失败，如缺 aresample 时
 /// 无格式转换桥）+ `Disabling filter ... because it has failed.`（mpv 禁用失败滤镜）。
-/// 两形态已补入；`'aresample' filter not present`（prefix: ffmpeg）刻意不收——
-/// 它必伴随 af 前缀的 Disabling 行（后者已命中），且 ffmpeg 前缀作用域过宽易误报。
+/// 实际信号取后者的 af 前缀行（含滤镜名，天然限音频）；`'aresample' filter not present`
+/// （prefix: ffmpeg）与 `failed to configure the filter graph`（prefix: lavfi）都刻意不收——
+/// 它们必伴随 af 前缀 Disabling 行（覆盖完整），且 ffmpeg/lavfi 裸前缀作用域过宽：
+/// 未来若 vf 也用 lavfi 滤镜会误报（qwen 重跑 P2-1，防 P0-4 同类回归）。
 const List<String> volumeNormFilterErrorKeywords = <String>[
   'cannot find filter',
   'no such filter',
   'unknown filter',
   'failed to create filter',
   'cannot initialize a filter',
-  'failed to configure the filter graph',
   'because it has failed',
 ];
 
@@ -58,17 +59,15 @@ const List<String> volumeNormFilterErrorKeywords = <String>[
 ///
 /// 复核 P0-4：mpv 的滤镜错误关键字是通用措辞——VSR 重挂 vf（d3d11vpp）失败同样会命中；
 /// 不限定作用域会把 VSR 故障误判成音量均衡不支持并持久化禁用。因此额外要求行内出现
-/// 音量均衡音频滤镜上下文：两个滤镜名之一，或 mpv 的 af 裸前缀（行首 `af `），或
-/// lavfi 前缀（`lavfi `——af 链的 lavfi 图配置失败；当前 vf 无 lavfi 滤镜，安全）。
+/// 音量均衡音频滤镜上下文：两个滤镜名之一，或 mpv 的 af 裸前缀（行首 `af `）。
+/// 不纳入 lavfi/ffmpeg 裸前缀：本次真机失败的 lavfi 图配置行必伴随 af 前缀的
+/// Disabling 行（信号完整），裸前缀作用域会为未来可能的 vf-lavfi 误报开门（qwen 重跑
+/// P2-1 确认，防 P0-4 同类回归）。
 /// 注：本防线只兜运行时失败/链创建失败；主门禁是回读校验
 /// （volumeNormSupportedFromReadback，只能验证属性层，验不出运行时图构建失败）。
 bool volumeNormLogIndicatesFailure(String line) {
   final lower = line.toLowerCase();
-  final inAudioScope =
-      lower.contains('dynaudnorm') ||
-      lower.contains('loudnorm') ||
-      lower.startsWith('af ') ||
-      lower.startsWith('lavfi ');
+  final inAudioScope = lower.contains('dynaudnorm') || lower.contains('loudnorm') || lower.startsWith('af ');
   return inAudioScope && volumeNormFilterErrorKeywords.any(lower.contains);
 }
 

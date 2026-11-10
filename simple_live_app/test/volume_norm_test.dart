@@ -53,12 +53,13 @@ void main() {
       expect(volumeNormLogIndicatesFailure('af Failed to create filter chain'), isTrue);
     });
 
-    test('真机 P0 形态：运行时 lavfi 图配置失败（ISS-276/278：缺 aresample → 滤镜被 Disabling）', () {
-      // 真机 v1.08.62 日志原样（prefix 拼行后传入）
+    test('真机 P0 形态：运行时 af 链被禁用（ISS-276/278：缺 aresample → 两滤镜被 Disabling）', () {
+      // 真机 v1.08.62 日志原样（prefix 拼行后传入）——af 前缀行含滤镜名是可靠信号
       expect(volumeNormLogIndicatesFailure('af Disabling filter dynaudnorm.00 because it has failed.'), isTrue);
       expect(volumeNormLogIndicatesFailure('af Disabling filter loudnorm.00 because it has failed.'), isTrue);
-      expect(volumeNormLogIndicatesFailure('lavfi failed to configure the filter graph'), isTrue);
-      // 先行的 aresample 提示（ffmpeg 前缀）刻意不收——它必伴随 af 前缀 Disabling 行
+      // lavfi/ffmpeg 裸前缀刻意不收（qwen 重跑 P2-1，防未来 vf-lavfi 误报）：
+      // 它们必伴随 af 前缀 Disabling 行，覆盖无损
+      expect(volumeNormLogIndicatesFailure('lavfi failed to configure the filter graph'), isFalse);
       expect(volumeNormLogIndicatesFailure("ffmpeg 'aresample' filter not present, cannot convert formats."), isFalse);
     });
 
