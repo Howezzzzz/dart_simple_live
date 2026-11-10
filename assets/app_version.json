@@ -1,15 +1,15 @@
 {
-    "version": "1.08.61",
-    "version_num": 1008061,
-    "version_desc": "- 修复：直播间里**关闭 NVIDIA RTX VSR 后滤镜链未摘除**的问题（会导致画面底部绿条复现）\n- 修复：缩放窗口 / 进出全屏触发的滤镜链重挂补上错误抑制，避免被误判为播放错误而重连",
+    "version": "1.08.62",
+    "version_num": 1008062,
+    "version_desc": "- 优化：**音量均衡升级为两段处理**——先轻压动态、再按 EBU R128 定标准响度；不同直播间之间「同样音量下的声音大小」差异明显变小（实测跨房间响度离散从 7.1/11.2 LU 降到 2.2/2.7 LU），偏小的房间（轻声说话\n- 修复：进直播间**头 1–3 秒未做音量均衡**——滤镜链改为起流前就挂好（不再等首帧播放）\n- 加固：能力探测改为校验**整条**滤镜链 + 检测 mpv 日志里的滤镜错误，避免「开关显示已开、实际没生效」",
     "prerelease": true,
     "download_url": "https://github.com/Howezzzzz/dart_simple_live/releases",
     "download_urls": {
-        "android": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.61/app-arm64-v8a-release.apk",
-        "windows": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.61/Slive-1.08.61+1008061-windows-setup.exe",
-        "macos": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.61/simple_live_app-1.08.61+1008061-macos.dmg",
-        "linux": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.61/Slive-x86_64-linux.deb",
-        "linux_flatpak": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.61/Slive-x86_64.flatpak"
+        "android": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.62/app-arm64-v8a-release.apk",
+        "windows": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.62/Slive-1.08.62+1008062-windows-setup.exe",
+        "macos": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.62/simple_live_app-1.08.62+1008062-macos.dmg",
+        "linux": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.62/Slive-x86_64-linux.deb",
+        "linux_flatpak": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.62/Slive-x86_64.flatpak"
     },
     "mirror_prefixes": [
         "https://gh-proxy.com/",
@@ -17,10 +17,10 @@
         "https://ghproxy.cc/"
     ],
     "download_sha256": {
-        "android": "86bfe3f1c41960b6531fcebcfa628d425e21fa85a663dfcd501ab5f737c58bb7",
-        "windows": "2fcc52b09c62132316a9bdc131e4c49a19c1acdebfefdcc0ef10cd2acd823ce9",
-        "macos": "1ddd64a0fb9e19be15333681eef5c58248eaa544bd3b8199841d14d051db81f3",
-        "linux": "38ccfa77291b8271762f7ed6fee34aa434464b336d7749cd2a4cd926cf20d607",
-        "linux_flatpak": "30366e9e615e5372cc833851cab07157112e5efccaadb3b68f1da2d5e86394cc"
+        "android": "c01448a9e9672fc7ba49a993c2c8619c3fc45caa35f8709445418369e27f7db6",
+        "windows": "895e02d029d51bf8fddabeaef96c4155f94479bf2b320519d7ae0005935c34ce",
+        "macos": "a5bc666bccb3c0786fd5454f4329d42ac62a59f7e4c70555e4665915b450d1d7",
+        "linux": "7a2242865466728e86070d5a18e29e288e8bbf2bf7a547527eb38b74c3269964",
+        "linux_flatpak": "e652581d81ded767e387879fde4385b2c8e24aac2f6ac22d3b5c9b00f91b881a"
     }
 }
