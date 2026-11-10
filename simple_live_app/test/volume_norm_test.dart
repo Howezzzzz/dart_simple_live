@@ -35,6 +35,8 @@ void main() {
         volumeNormSupportedFromReadback('loudnorm=I=-16:TP=-1.5:LRA=11'),
         isFalse,
       );
+      // 阶段3 变异守卫（L3）：dyn 子串≠dynaudnorm 全名
+      expect(volumeNormSupportedFromReadback('dynamic=1,loudnorm=...'), isFalse);
     });
 
     test('空串 / 其它滤镜 → 不支持', () {
@@ -75,6 +77,9 @@ void main() {
       expect(volumeNormLogIndicatesFailure('Playing: 1080p'), isFalse);
       expect(volumeNormLogIndicatesFailure('audio: 48000 Hz stereo'), isFalse);
       expect(volumeNormLogIndicatesFailure(''), isFalse);
+      // 阶段3 变异守卫（L3）：音频作用域但无关键字 / af 前缀精确匹配（af+空格）
+      expect(volumeNormLogIndicatesFailure('af some random message'), isFalse);
+      expect(volumeNormLogIndicatesFailure('afilter cannot find filter'), isFalse);
     });
   });
 

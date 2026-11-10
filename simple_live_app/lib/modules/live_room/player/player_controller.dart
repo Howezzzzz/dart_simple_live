@@ -301,14 +301,15 @@ mixin PlayerMixin {
         return;
       }
       _volumeNormLogArmed = false; // 终裁一次后解除武装
+      // 阶段1（L3）修正：失败判定只信日志标志——回读失链不判失败。原因：
+      // ①死链自动重拉时 open 会清空 af 链（RISK-71），若把回读失链当失败会把
+      // 能力永久 persist false + 置灰（一次死链误杀开关）；②运行态图构建失败时
+      // 属性层链串仍在（回读必含），日志标志才是可靠信号。回读仅作诊断记录。
       var failed = _volumeNormLogFailure;
+      String? readbackNote;
       try {
-        if (!failed) {
-          final readback = await pp.getProperty('af', waitForInitialization: false);
-          if (!volumeNormSupportedFromReadback(readback)) {
-            failed = true; // 终裁回读失链（如 open 复位了选项级链）
-          }
-        }
+        final readback = await pp.getProperty('af', waitForInitialization: false);
+        readbackNote = readback;
       } catch (e) {
         Log.logPrint(e);
       }
@@ -320,8 +321,11 @@ mixin PlayerMixin {
         PlayerMixin.afLoudnormSupported = false;
         _persistCapability(false);
         AppSettingsController.instance.setVolumeNormSupported(false);
-        Log.w('音量均衡：$source 终裁未通过（logFailure=$_volumeNormLogFailure）→ 已清链并禁用开关');
+        Log.w('音量均衡：$source 终裁未通过（logFailure=$_volumeNormLogFailure af="$readbackNote"）→ 已清链并禁用开关');
         SmartDialog.showToast("当前播放核心不支持音量均衡，开关已禁用");
+      } else if (readbackNote != null && !volumeNormSupportedFromReadback(readbackNote)) {
+        // 回读失链（如 open 复位选项级链）：仅诊断记录，不判失败（下房预挂自愈）
+        Log.d('音量均衡：$source 终裁回读失链（af="$readbackNote"）——疑似 open 复位，下房自愈');
       }
       _scheduleSuppressRelease(token);
     });
@@ -1467,17 +1471,16 @@ class PlayerController extends BaseController
         return;
       }
       _volumeNormLogArmed = false;
-      var failed = _volumeNormLogFailure;
+      // 阶段1（L3）修正：与终裁同语义——只信日志标志；回读失链（open 复位/死链
+      // 重拉）仅诊断记录，不判失败（死链误杀会 persist false 置灰、需版本才能恢复）
+      final failed = _volumeNormLogFailure;
       try {
-        if (!failed) {
-          final readback = await pp.getProperty('af', waitForInitialization: false);
-          if (!volumeNormSupportedFromReadback(readback)) {
-            failed = true;
-          }
+        final readback = await pp.getProperty('af', waitForInitialization: false);
+        if (!failed && !volumeNormSupportedFromReadback(readback)) {
+          Log.d('音量均衡：探测终裁回读失链（af="$readback"）——疑似 open 复位，下房重探');
         }
       } catch (e) {
         Log.logPrint(e);
-        failed = true;
       }
       _finishVolumeNormProbe(supported: !failed, token: token);
     });
@@ -1529,6 +1532,17 @@ class PlayerController extends BaseController
     }
     final token = ++_suppressToken;
     _suppressErrorRetry = true;
+    // 阶段1（L3）修正：日志防线记录在 set **之前**武装——set 完成到武装赋值之间
+    // 有微任务间隙，失败日志（异步到达）可能落入该缝而漏记；预挂/探测均为 set 前
+    // 武装，此处对齐。
+    if (enable) {
+      _volumeNormLogFailure = false;
+      _volumeNormLogArmed = true;
+    } else {
+      // 关闭：先解除武装，避免旧失败记录污染后续房间
+      _volumeNormLogArmed = false;
+      _volumeNormLogFailure = false;
+    }
     try {
       await pp.setProperty('af', enable ? volumeNormFilter : '');
       _volumeNormApplied = enable;
@@ -1540,6 +1554,7 @@ class PlayerController extends BaseController
           await pp.setProperty('af', '');
         } catch (_) {}
         _volumeNormApplied = false;
+        _volumeNormLogArmed = false; // set 抛异常：解除武装（无终裁可消费，防泄漏）
         PlayerMixin.afLoudnormSupported = false;
         _persistCapability(false);
         AppSettingsController.instance.setVolumeNormSupported(false);
@@ -1571,15 +1586,9 @@ class PlayerController extends BaseController
       }
     }
     if (enable && _volumeNormApplied) {
-      // 复核（真机 P0，ISS-278）：热开也武装日志防线并预约窗末终裁——
+      // 复核（真机 P0，ISS-278）：热开也预约窗末终裁——
       // 旧逻辑 set 成功即 applied=true、无任何复核，破构建上热开静默无效。
-      _volumeNormLogFailure = false;
-      _volumeNormLogArmed = true;
       _scheduleVolumeNormAdjudication(token, source: '热切换开启');
-    } else if (!enable) {
-      // 关闭：解除武装，避免旧失败记录污染后续房间
-      _volumeNormLogArmed = false;
-      _volumeNormLogFailure = false;
     }
     _scheduleSuppressRelease(token);
   }
