@@ -124,12 +124,17 @@ mixin PlayerMixin {
     // 音量均衡：**起流前**预挂滤镜链（此处早于 live_room_controller 的 player.open）。
     // 旧的「首帧播放后才挂」会让进房头 1–3s 完全没有处理（两轮复核整合结论）。
     // 幂等：已挂则不重复 set —— set 会重建整条链并重置 loudnorm 的收敛状态。
+    // 复核 P0-3：仅「能力已知支持」才预挂——能力未知时 mpv 可能静默拒绝链
+    // （media_kit 的 setProperty 忽略返回码），未知即预挂会起流期无声且把错误能力
+    // 持久化；未知时交给首帧探测（自带 set+回读），探测成功后本进程后续进房即享预挂。
+    // 复核 P1-5：预挂也走串行队列（_enqueueVolumeNorm），避免与热切换的 set af 交错
+    // （进房瞬间拨开关时，后落地的 set 会把已关的均衡又打开且状态标 false）。
     if (!_volumeNormApplied &&
         volumeNormShouldPreApply(
           userOn: AppSettingsController.instance.volumeNorm.value,
           supported: afLoudnormSupported,
         )) {
-      await _preApplyVolumeNorm();
+      await _enqueueVolumeNorm(() => _preApplyVolumeNorm());
     }
     // 同步底部补边裁切（VSR 开启才裁；关闭时显式清空，避免切线路等场景残留上次的裁切）
     await _syncRtxVsrCrop();
@@ -170,6 +175,74 @@ mixin PlayerMixin {
     });
   }
 
+  /// 音量均衡：进程级能力缓存（null=未探测；libmpv 构建固定，探测一次即可）。
+  /// 声明在 PlayerMixin：initializePlayer（预挂决策）在 mixin 内，mixin 无 on 约束，
+  /// 被引用的状态必须自持（复核 P0-1，CI analyze 报 Undefined name）。
+  static bool? afLoudnormSupported;
+
+  /// 音量均衡：本房间是否已应用 af
+  bool _volumeNormApplied = false;
+
+  /// 音量均衡：本房间首帧播放的一次性探测是否已执行
+  bool _volumeNormInitialized = false;
+
+  /// 音量均衡：抑制窗口内播放器日志是否报出滤镜链失败（静默降级防线）
+  bool _volumeNormLogFailure = false;
+
+  /// 音量均衡：操作串行队列（探测/应用/移除按发起顺序执行，避免并发交错导致 af 与状态标记不一致）
+  Future<void> _volumeNormQueue = Future<void>.value();
+
+  /// 音量均衡：入队执行一次 af 操作（异常在队列内消化，避免 fire-and-forget 产生未处理异步异常）
+  Future<void> _enqueueVolumeNorm(Future<void> Function() task) {
+    final next = _volumeNormQueue.then((_) async {
+      try {
+        await task();
+      } catch (e) {
+        Log.logPrint(e);
+      }
+    });
+    _volumeNormQueue = next;
+    return next;
+  }
+
+  /// 音量均衡：起流前预挂链（由 `initializePlayer` 在 `player.open` 之前调用，经串行队列执行）。
+  ///
+  /// 失败不阻塞起流：仅记录，交由首帧回读校验兜底（不支持会自动还原并置灰开关）。
+  /// 复核 P1-1：预挂**不**开错误抑制窗——它发生在起流建连期，2s 抑制窗会吞掉真实
+  /// 建连错误（死链/鉴权失败 → 黑屏不重拉流）。af 写入失败本不产生 stream.error
+  /// （PR #195 的抑制窗针对播放中重建链路场景），无需窗口。
+  Future<void> _preApplyVolumeNorm() async {
+    final pp = player.platform;
+    if (pp is! NativePlayer) {
+      return;
+    }
+    // 复核 P1-5：队列内二次校验——排到我们之前可能已有热切换任务改变了开关或状态。
+    if (_volumeNormApplied ||
+        !volumeNormShouldPreApply(
+          userOn: AppSettingsController.instance.volumeNorm.value,
+          supported: afLoudnormSupported,
+        )) {
+      return;
+    }
+    _volumeNormLogFailure = false;
+    try {
+      // 复核 P2-7：起流前 set 无需等待播放器/视频控制器初始化（mpv 在初始化时应用
+      // 该选项）；waitForInitialization:false 避免进房起流被 setProperty 阻塞。
+      await pp.setProperty('af', volumeNormFilter, waitForInitialization: false);
+      // 复核 P0-3：预挂后立即回读校验——media_kit 的 setProperty 忽略 mpv 返回码，
+      // 「滤镜不存在/参数非法」会静默失败；不回读会把未生效的链标记成已挂，
+      // 进而让首帧探测跳过 set 只回读、把错误能力持久化为 true（跨重启、整场无声）。
+      final readback = await pp.getProperty('af', waitForInitialization: false);
+      _volumeNormApplied = volumeNormSupportedFromReadback(readback);
+      if (!_volumeNormApplied) {
+        Log.w('音量均衡：预挂回读未确认（af="$readback"），留待首帧探测兜底');
+      }
+    } catch (e) {
+      Log.logPrint(e);
+      _volumeNormApplied = false;
+    }
+  }
+
   /// 串行队列：width/height 双监听并发调用时按序执行，避免交错产生竞态假告警（复核 P3-2）。
   Future<void> _cropWriteQueue = Future<void>.value();
 
@@ -181,7 +254,7 @@ mixin PlayerMixin {
   ///
   /// 两种状态都写：开了 → 裁切值；没开（或未挂上滤镜链）→ 空串（取消手动裁切）。
   Future<void> _syncRtxVsrCrop() async {
-    // 注：不引用 _playerDisposed（它在 PlayerController 内，mixin 不可见）；
+    // 注：_playerDisposed 在 PlayerMixin 内可直接引用，但此处不依赖它——
     // 播放器已 dispose 时 media_kit 的 setProperty/getProperty 会抛 AssertionError
     // 或 StateError（_checkNativeHandle），由 _enqueueCropWrite 的 catch 兜底。
     if (!Platform.isWindows) return;
@@ -214,8 +287,7 @@ mixin PlayerMixin {
     _enqueueCropWrite(() async {
       // 队列内再查一次：并发同值时只写第一笔，避免重复设置触发滤镜链重建。
       if (signature == _lastRtxVsrSignature) return;
-      final (vfAction, vfValue) = rtxVsrVfAction(
-          enable: enable, scale: s, currentScale: _lastRtxVsrScale);
+      final (vfAction, vfValue) = rtxVsrVfAction(enable: enable, scale: s, currentScale: _lastRtxVsrScale);
       if (vfAction != 'none') {
         // 写/摘 vf 会重建 D3D11 链路，期间可能冒 stream.error → 误触重拉流（PR #195）：
         // 所有会动 vf 的路径（开关、切分辨率、resize 防抖）统一在此加抑制窗。
@@ -236,11 +308,9 @@ mixin PlayerMixin {
         }
       }
       await pp.setProperty('video-crop', desired);
-      await pp.setProperty(
-          'video-aspect-override', aspectValue.toStringAsFixed(6));
+      await pp.setProperty('video-aspect-override', aspectValue.toStringAsFixed(6));
       if (renderSize != null) {
-        await videoController
-            .setSize(width: renderSize.$1, height: renderSize.$2);
+        await videoController.setSize(width: renderSize.$1, height: renderSize.$2);
       } else {
         await videoController.setSize();
       }
@@ -253,14 +323,18 @@ mixin PlayerMixin {
       // 在应用阶段忽略并打印日志）——成功日志措辞按此收敛为“已写入”。
       final readback = (await pp.getProperty('video-crop')).trim();
       if (readback.replaceAll(' ', '') == desired) {
-        Log.d('[VSR] 已写入底部补边裁切 video-crop=$desired'
-            ' scale=${s?.toStringAsFixed(2)}'
-            ' aspect=${aspectValue.toStringAsFixed(6)}'
-            ' renderSize=${renderSize?.$1}x${renderSize?.$2}'
-            '（源 ${player.state.width}x${player.state.height}）');
+        Log.d(
+          '[VSR] 已写入底部补边裁切 video-crop=$desired'
+          ' scale=${s?.toStringAsFixed(2)}'
+          ' aspect=${aspectValue.toStringAsFixed(6)}'
+          ' renderSize=${renderSize?.$1}x${renderSize?.$2}'
+          '（源 ${player.state.width}x${player.state.height}）',
+        );
       } else {
-        Log.w('[VSR] video-crop 未生效：期望 $desired，回读 "$readback"'
-            '（源 ${player.state.width}x${player.state.height}）—— 可能 libmpv 不支持该属性');
+        Log.w(
+          '[VSR] video-crop 未生效：期望 $desired，回读 "$readback"'
+          '（源 ${player.state.width}x${player.state.height}）—— 可能 libmpv 不支持该属性',
+        );
       }
     });
   }
@@ -314,14 +388,14 @@ mixin PlayerMixin {
             hwdec: AppSettingsController.instance.videoHardwareDecoder.value,
           )
         : AppSettingsController.instance.playerCompatMode.value
-            ? const VideoControllerConfiguration(
-                vo: 'mediacodec_embed',
-                hwdec: 'mediacodec',
-              )
-            : VideoControllerConfiguration(
-                enableHardwareAcceleration: AppSettingsController.instance.hardwareDecode.value,
-                androidAttachSurfaceAfterVideoParameters: false,
-              ),
+        ? const VideoControllerConfiguration(
+            vo: 'mediacodec_embed',
+            hwdec: 'mediacodec',
+          )
+        : VideoControllerConfiguration(
+            enableHardwareAcceleration: AppSettingsController.instance.hardwareDecode.value,
+            androidAttachSurfaceAfterVideoParameters: false,
+          ),
   );
 }
 mixin PlayerStateMixin on PlayerMixin {
@@ -513,11 +587,13 @@ mixin PlayerDanmakuMixin on PlayerStateMixin {
     if (controller == null) {
       return;
     }
-    unawaited(DanmakuEmoticonRenderer.apply(
-      controller: controller,
-      content: item,
-      emoticons: extra as List<LiveMessageEmoticon>,
-    ));
+    unawaited(
+      DanmakuEmoticonRenderer.apply(
+        controller: controller,
+        content: item,
+        emoticons: extra as List<LiveMessageEmoticon>,
+      ),
+    );
   }
 }
 mixin PlayerSystemMixin on PlayerMixin, PlayerStateMixin, PlayerDanmakuMixin {
@@ -668,7 +744,8 @@ mixin PlayerSystemMixin on PlayerMixin, PlayerStateMixin, PlayerDanmakuMixin {
     );
     final current = AppSettingsController.instance.messagePanelWidth.value;
     Log.d(
-        'fitPanelWidthToVideo[try$attempt] video=${w}x$h player=${playerSize.width}x${playerSize.height} contentW=$contentWidth -> panel $current -> $target');
+      'fitPanelWidthToVideo[try$attempt] video=${w}x$h player=${playerSize.width}x${playerSize.height} contentW=$contentWidth -> panel $current -> $target',
+    );
     // 2026-10-21 rev.5：**不再回写面板宽度**（面板宽度改为"单帧派生"，见 panel_width.dart 的
     // computePanelLayout）。这里只保留计算与日志，用于排障；否则"自适应"会与"用户意图宽"
     // 互相覆盖、导致判定阈值失真。
@@ -1066,6 +1143,12 @@ class PlayerController extends BaseController
       if (_playerDisposed) {
         return;
       }
+      // 复核 P1-6：已挂链时无条件入队同步——关闭不需要能力探测，
+      // 不能因「未播放 + 能力未知」被吞（否则开关拨关、链却仍在均衡）。
+      if (_volumeNormApplied) {
+        _syncVolumeNorm();
+        return;
+      }
       //未播放且能力未知：不在此刻探测（空闲探测不可靠，可能假成功），留到首帧钩子统一处理
       if (afLoudnormSupported == null && !player.state.playing) {
         return;
@@ -1082,26 +1165,11 @@ class PlayerController extends BaseController
     super.onInit();
   }
 
-  /// 音量均衡：进程级能力缓存（null=未探测；libmpv 构建固定，探测一次即可）
-  static bool? afLoudnormSupported;
-
-  /// 音量均衡：本房间是否已应用 af
-  bool _volumeNormApplied = false;
-
-  /// 音量均衡：本房间首帧播放的一次性探测是否已执行
-  bool _volumeNormInitialized = false;
-
-  /// 音量均衡：抑制窗口内播放器日志是否报出滤镜链失败（静默降级防线）
-  bool _volumeNormLogFailure = false;
-
   /// 音量均衡：热切换监听器句柄（onClose 必须释放；裸 ever() 退房后断言，PR #195 教训）
   Worker? _volumeNormWorker;
 
   /// VSR：开关热切换监听器句柄（onClose 必须释放，PR #195 教训）
   Worker? _rtxVsrWorker;
-
-  /// 音量均衡：操作串行队列（探测/应用/移除按发起顺序执行，避免并发交错导致 af 与状态标记不一致）
-  Future<void> _volumeNormQueue = Future<void>.value();
 
   StreamSubscription<String>? _errorSubscription;
   StreamSubscription? _completedSubscription;
@@ -1154,8 +1222,12 @@ class PlayerController extends BaseController
       Log.d("播放器日志：$event");
       // 音量均衡静默降级防线（复核建议）：抑制窗口内命中滤镜错误关键字即标记失败，
       // 由 _probeVolumeNormCapability 结合回读结果判定「不支持」。
-      if (_suppressErrorRetry && volumeNormLogIndicatesFailure(event)) {
-        Log.d("音量均衡：日志命中滤镜错误关键字 → 判定链未挂上：$event");
+      // 复核 P0-2：event 是 PlayerLog（prefix/level/text），需拼成行文本再判关键字。
+      // 复核 P0-4：关键字是通用措辞，必须限定音频作用域（volumeNormLogIndicatesFailure
+      // 内部要求出现 dynaudnorm/loudnorm/[af]），否则 VSR 重挂 vf（d3d11vpp）的报错
+      // 会落进共用抑制窗 → 音量均衡被误判不支持并持久化禁用、开关置灰。
+      if (_suppressErrorRetry && volumeNormLogIndicatesFailure('${event.prefix} ${event.text}')) {
+        Log.d("音量均衡：日志命中滤镜错误关键字 → 判定链未挂上：${event.prefix} ${event.text}");
         _volumeNormLogFailure = true;
       }
     });
@@ -1235,47 +1307,15 @@ class PlayerController extends BaseController
         return;
       }
       if (AppSettingsController.instance.volumeNorm.value) {
-        if (volumeNormShouldApply(userOn: true, supported: afLoudnormSupported)) {
+        // 复核 P3：这里等价于 afLoudnormSupported == true（volumeNormShouldApply 的
+        // userOn 恒为 true 时是冗余包装），直接判断避免误导。
+        if (afLoudnormSupported == true) {
           await _applyVolumeNorm(enable: true);
         }
       } else if (_volumeNormApplied) {
         await _applyVolumeNorm(enable: false);
       }
     });
-  }
-
-  /// 音量均衡：操作串行队列（异常在队列内消化，避免 fire-and-forget 产生未处理异步异常）
-  Future<void> _enqueueVolumeNorm(Future<void> Function() task) {
-    final next = _volumeNormQueue.then((_) async {
-      try {
-        await task();
-      } catch (e) {
-        Log.logPrint(e);
-      }
-    });
-    _volumeNormQueue = next;
-    return next;
-  }
-
-  /// 音量均衡：起流前预挂链（由 `initializePlayer` 在 `player.open` 之前调用）。
-  ///
-  /// 失败不阻塞起流：仅记录，交由首帧回读校验兜底（不支持会自动还原并置灰开关）。
-  Future<void> _preApplyVolumeNorm() async {
-    final pp = player.platform;
-    if (pp is! NativePlayer) {
-      return;
-    }
-    final token = ++_suppressToken;
-    _suppressErrorRetry = true;
-    _volumeNormLogFailure = false;
-    try {
-      await pp.setProperty('af', volumeNormFilter);
-      _volumeNormApplied = true;
-    } catch (e) {
-      Log.logPrint(e);
-      _volumeNormApplied = false;
-    }
-    _scheduleSuppressRelease(token);
   }
 
   /// 音量均衡：探测能力（设置 af → 回读校验），探测后按用户意愿还原或保持
@@ -1290,18 +1330,19 @@ class PlayerController extends BaseController
     final token = ++_suppressToken;
     _suppressErrorRetry = true;
     var supported = false;
+    // 复核 P0-4：探测入口无条件复位失败标志——旧逻辑只在「未预挂」分支复位，
+    // 标志一旦被 VSR 日志误置就粘性残留，探测永远判失败（开关持久化置灰）。
+    _volumeNormLogFailure = false;
     try {
       // 起流前已预挂（_volumeNormApplied=true）时只回读校验、不再 set：
       // set 会重建整条链并重置 loudnorm 收敛状态 → 进房第一秒响度又爬一遍。
       if (!_volumeNormApplied) {
-        _volumeNormLogFailure = false;
         await pp.setProperty('af', volumeNormFilter);
       }
       // 回读校验：mpv 对非法/不存在的滤镜会拒绝写入并保持旧值，
       // 因此回读必须同时包含 dynaudnorm 与 loudnorm 才算支持（只查 loudnorm 不严）。
       final readback = await pp.getProperty('af');
-      supported =
-          volumeNormSupportedFromReadback(readback) && !_volumeNormLogFailure;
+      supported = volumeNormSupportedFromReadback(readback) && !_volumeNormLogFailure;
     } catch (e) {
       Log.logPrint(e);
       supported = false;
@@ -1364,10 +1405,16 @@ class PlayerController extends BaseController
         // 关闭失败：回读真实状态，避免 UI 显示与实际听感不一致
         try {
           final readback = await pp.getProperty('af');
-          _volumeNormApplied = volumeNormSupportedFromReadback(readback);
+          if (readback.trim().isNotEmpty) {
+            // 复核 P2-1：残留**部分**链（如只清了 loudnorm 剩 dynaudnorm）也视为
+            // 「仍在均衡」——只按「整条链」判定会把残留链误标成已关闭（UI 关、
+            // 实际还在均衡）。再清一次；仍失败则落入 catch 保持「已应用」待重试。
+            await pp.setProperty('af', '');
+          }
+          _volumeNormApplied = false;
         } catch (e2) {
           Log.logPrint(e2);
-          // 回读也失败：保守保持「已应用」，下次关闭会重试
+          // 回读/复清也失败：保守保持「已应用」，下次关闭会重试
           _volumeNormApplied = true;
         }
         if (_volumeNormApplied) {
@@ -1436,8 +1483,13 @@ class PlayerController extends BaseController
       title: "播放信息",
       child: ListView(
         children: [
-          Obx(() => SwitchListTile(
-              title: const Text("OSD 显示"), value: showOSDStats.value, onChanged: (value) => toggleOSDStats())),
+          Obx(
+            () => SwitchListTile(
+              title: const Text("OSD 显示"),
+              value: showOSDStats.value,
+              onChanged: (value) => toggleOSDStats(),
+            ),
+          ),
           ListTile(
             title: const Text("Resolution"),
             subtitle: Text('${player.state.width}x${player.state.height}'),

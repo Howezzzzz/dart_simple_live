@@ -46,20 +46,29 @@ const List<String> volumeNormFilterErrorKeywords = <String>[
   'cannot initialize a filter',
 ];
 
-/// 日志行是否表明滤镜链失败（大小写不敏感）。
+/// 日志行是否表明**音量均衡滤镜链**失败（大小写不敏感）。
+///
+/// 复核 P0-4：mpv 的滤镜错误关键字（cannot find filter 等）是通用措辞——VSR 重挂
+/// vf（d3d11vpp）失败同样会命中；不限定作用域会把 VSR 故障误判成音量均衡不支持
+/// 并持久化禁用（开关置灰、误报 toast）。因此额外要求行内出现音量均衡音频滤镜
+/// 上下文：两个滤镜名之一，或 mpv 的 af 日志前缀（[af]）。
+/// 注：本防线只兜「链创建失败但属性被接受」的边角；主门禁是回读校验
+/// （volumeNormSupportedFromReadback）。
 bool volumeNormLogIndicatesFailure(String line) {
   final lower = line.toLowerCase();
-  return volumeNormFilterErrorKeywords.any(lower.contains);
+  final inAudioScope = lower.contains('dynaudnorm') || lower.contains('loudnorm') || lower.contains('[af]');
+  return inAudioScope && volumeNormFilterErrorKeywords.any(lower.contains);
 }
 
 /// 是否需要把链挂上：用户开启且能力「已知支持」。
-bool volumeNormShouldApply({required bool userOn, required bool? supported}) =>
-    userOn && supported == true;
+bool volumeNormShouldApply({required bool userOn, required bool? supported}) => userOn && supported == true;
 
-/// 起流前是否需要预挂链：用户开启且能力「不是已知不支持」。
+/// 起流前是否需要预挂链：用户开启且能力「已知支持」。
 ///
-/// 能力未知（null）时也先挂：mpv 会拒绝非法滤镜（不生效，无副作用），随后首帧回读
-/// 校验兜底；换来的是「进房第一帧就有均衡」——消除旧的「首帧后才挂」造成的 1–3s
-/// 未处理窗（复核整合结论）。
-bool volumeNormShouldPreApply({required bool userOn, required bool? supported}) =>
-    userOn && supported != false;
+/// 复核 P0-3 收紧：能力未知（null）时**不**预挂——media_kit 的 setProperty 忽略
+/// mpv 返回码，非法/不存在的滤镜会静默失败；未知即预挂会把「未生效的链」标记成
+/// 已应用（_volumeNormApplied=true），起流期音频初始化失败（无声）且首帧探测跳过
+/// set 只回读，把错误能力持久化为 true（跨重启、整场无声）。能力未知时交给首帧
+/// 探测（探测自带 set+回读），探测成功后本进程后续进房（能力已知支持）即享预挂，
+/// 消除旧的「首帧后才挂」造成的 1–3s 未处理窗。
+bool volumeNormShouldPreApply({required bool userOn, required bool? supported}) => userOn && supported == true;

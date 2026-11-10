@@ -9,8 +9,7 @@ void main() {
   group('滤镜链定义', () {
     test('两段链顺序：dynaudnorm 在前、loudnorm 在后（顺序不可反）', () {
       expect(volumeNormFilter, '$volumeNormPreFilter,$volumeNormPostFilter');
-      expect(volumeNormFilter.indexOf('dynaudnorm'),
-          lessThan(volumeNormFilter.indexOf('loudnorm')));
+      expect(volumeNormFilter.indexOf('dynaudnorm'), lessThan(volumeNormFilter.indexOf('loudnorm')));
     });
 
     test('参数与实测选型一致（f=250/g=15/p=0.95/m=8/r=0.5 + LRA=5）', () {
@@ -26,8 +25,7 @@ void main() {
   group('volumeNormSupportedFromReadback（回读判定）', () {
     test('两个滤镜都在 → 支持', () {
       expect(
-        volumeNormSupportedFromReadback(
-            'dynaudnorm=f=250:g=15:p=0.95:m=8:r=0.5,loudnorm=I=-16:TP=-1.5:LRA=5'),
+        volumeNormSupportedFromReadback('dynaudnorm=f=250:g=15:p=0.95:m=8:r=0.5,loudnorm=I=-16:TP=-1.5:LRA=5'),
         isTrue,
       );
     });
@@ -45,16 +43,20 @@ void main() {
     });
   });
 
-  group('volumeNormLogIndicatesFailure（静默降级防线）', () {
-    test('错误关键字命中（大小写不敏感）', () {
-      expect(volumeNormLogIndicatesFailure('Cannot find filter dynaudnorm'),
-          isTrue);
-      expect(
-          volumeNormLogIndicatesFailure('audio filter not found: no such filter'),
-          isTrue);
-      expect(volumeNormLogIndicatesFailure('Failed to create filter chain'),
-          isTrue);
-      expect(volumeNormLogIndicatesFailure('UNKNOWN FILTER foo'), isTrue);
+  group('volumeNormLogIndicatesFailure（静默降级防线，复核 P0-4 限定音频作用域）', () {
+    test('音频滤镜错误关键字命中（须含滤镜名或 [af] 前缀，大小写不敏感）', () {
+      expect(volumeNormLogIndicatesFailure('[af] Cannot find filter dynaudnorm'), isTrue);
+      expect(volumeNormLogIndicatesFailure('Cannot find filter dynaudnorm'), isTrue);
+      expect(volumeNormLogIndicatesFailure('no such filter: loudnorm'), isTrue);
+      expect(volumeNormLogIndicatesFailure('Unknown filter dynaudnorm'), isTrue);
+    });
+
+    test('VSR/视频滤镜报错不误报（回归 P0-4：有通用关键字但无音频作用域必须放行）', () {
+      expect(volumeNormLogIndicatesFailure('d3d11vpp: cannot find filter'), isFalse);
+      expect(volumeNormLogIndicatesFailure('vf: unknown filter'), isFalse);
+      expect(volumeNormLogIndicatesFailure('UNKNOWN FILTER foo'), isFalse);
+      expect(volumeNormLogIndicatesFailure('Failed to create filter chain'), isFalse);
+      expect(volumeNormLogIndicatesFailure('audio filter not found: no such filter'), isFalse);
     });
 
     test('正常日志不误报', () {
@@ -72,11 +74,11 @@ void main() {
       expect(volumeNormShouldApply(userOn: false, supported: true), isFalse);
     });
 
-    test('volumeNormShouldPreApply：能力未知也预挂（首帧回读兜底）', () {
+    test('volumeNormShouldPreApply：仅「用户开 + 已知支持」才预挂（复核 P0-3）', () {
       expect(volumeNormShouldPreApply(userOn: true, supported: true), isTrue);
-      expect(volumeNormShouldPreApply(userOn: true, supported: null), isTrue);
+      expect(volumeNormShouldPreApply(userOn: true, supported: null), isFalse);
       expect(volumeNormShouldPreApply(userOn: true, supported: false), isFalse);
-      expect(volumeNormShouldPreApply(userOn: false, supported: null), isFalse);
+      expect(volumeNormShouldPreApply(userOn: false, supported: true), isFalse);
     });
   });
 }
