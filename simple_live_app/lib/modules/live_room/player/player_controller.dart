@@ -1133,9 +1133,9 @@ class PlayerController extends BaseController
     //设置音量
     player.setVolume(AppSettingsController.instance.playerVolume.value);
     //音量均衡：回填已持久化的能力探测结果（跨启动记忆；App 版本变化则自动失效重探）
-    afLoudnormSupported ??= _readPersistedCapability();
-    if (afLoudnormSupported != null) {
-      AppSettingsController.instance.setVolumeNormSupported(afLoudnormSupported);
+    PlayerMixin.afLoudnormSupported ??= _readPersistedCapability();
+    if (PlayerMixin.afLoudnormSupported != null) {
+      AppSettingsController.instance.setVolumeNormSupported(PlayerMixin.afLoudnormSupported);
     }
     //音量均衡热切换：设置页/房内开关拨动即时生效
     //PR #195 教训：句柄化管理 + onClose 释放 + 回调内 disposed 短路
@@ -1150,7 +1150,7 @@ class PlayerController extends BaseController
         return;
       }
       //未播放且能力未知：不在此刻探测（空闲探测不可靠，可能假成功），留到首帧钩子统一处理
-      if (afLoudnormSupported == null && !player.state.playing) {
+      if (PlayerMixin.afLoudnormSupported == null && !player.state.playing) {
         return;
       }
       _syncVolumeNorm();
@@ -1300,8 +1300,8 @@ class PlayerController extends BaseController
       if (_playerDisposed) {
         return;
       }
-      afLoudnormSupported ??= _readPersistedCapability();
-      if (afLoudnormSupported == null) {
+      PlayerMixin.afLoudnormSupported ??= _readPersistedCapability();
+      if (PlayerMixin.afLoudnormSupported == null) {
         // 能力未知：执行一次探测（探测后按用户意愿自动还原/保持）
         await _probeVolumeNormCapability();
         return;
@@ -1309,7 +1309,7 @@ class PlayerController extends BaseController
       if (AppSettingsController.instance.volumeNorm.value) {
         // 复核 P3：这里等价于 afLoudnormSupported == true（volumeNormShouldApply 的
         // userOn 恒为 true 时是冗余包装），直接判断避免误导。
-        if (afLoudnormSupported == true) {
+        if (PlayerMixin.afLoudnormSupported == true) {
           await _applyVolumeNorm(enable: true);
         }
       } else if (_volumeNormApplied) {
@@ -1347,7 +1347,7 @@ class PlayerController extends BaseController
       Log.logPrint(e);
       supported = false;
     }
-    afLoudnormSupported = supported;
+    PlayerMixin.afLoudnormSupported = supported;
     _persistCapability(supported);
     AppSettingsController.instance.setVolumeNormSupported(supported);
     final keepOn = supported && AppSettingsController.instance.volumeNorm.value;
@@ -1380,7 +1380,7 @@ class PlayerController extends BaseController
     if (enable == _volumeNormApplied) {
       return;
     }
-    if (enable && afLoudnormSupported == false) {
+    if (enable && PlayerMixin.afLoudnormSupported == false) {
       // 已知不支持：不再尝试（UI 已禁用，这里是保险短路）
       return;
     }
@@ -1397,7 +1397,7 @@ class PlayerController extends BaseController
           await pp.setProperty('af', '');
         } catch (_) {}
         _volumeNormApplied = false;
-        afLoudnormSupported = false;
+        PlayerMixin.afLoudnormSupported = false;
         _persistCapability(false);
         AppSettingsController.instance.setVolumeNormSupported(false);
         SmartDialog.showToast("音量均衡应用失败，已禁用开关");
