@@ -1,15 +1,15 @@
 {
-    "version": "1.08.60",
-    "version_num": 1008060,
-    "version_desc": "- 新增：**直播间右侧「设置」里可直接开关 NVIDIA RTX VSR**——切换立即生效，不用再进设置页或重进直播间\n- 优化：VSR 开启前的须知弹窗改为设置页与直播间共用，避免文案不一致",
+    "version": "1.08.61",
+    "version_num": 1008061,
+    "version_desc": "- 修复：直播间里**关闭 NVIDIA RTX VSR 后滤镜链未摘除**的问题（会导致画面底部绿条复现）\n- 修复：缩放窗口 / 进出全屏触发的滤镜链重挂补上错误抑制，避免被误判为播放错误而重连",
     "prerelease": true,
     "download_url": "https://github.com/Howezzzzz/dart_simple_live/releases",
     "download_urls": {
-        "android": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.60/app-arm64-v8a-release.apk",
-        "windows": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.60/Slive-1.08.60+1008060-windows-setup.exe",
-        "macos": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.60/simple_live_app-1.08.60+1008060-macos.dmg",
-        "linux": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.60/Slive-x86_64-linux.deb",
-        "linux_flatpak": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.60/Slive-x86_64.flatpak"
+        "android": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.61/app-arm64-v8a-release.apk",
+        "windows": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.61/Slive-1.08.61+1008061-windows-setup.exe",
+        "macos": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.61/simple_live_app-1.08.61+1008061-macos.dmg",
+        "linux": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.61/Slive-x86_64-linux.deb",
+        "linux_flatpak": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.61/Slive-x86_64.flatpak"
     },
     "mirror_prefixes": [
         "https://gh-proxy.com/",
@@ -17,10 +17,10 @@
         "https://ghproxy.cc/"
     ],
     "download_sha256": {
-        "android": "560b1c5f91aff1f3ac6673ed0593a7dcfc44eccec6eb299019f13decd4a9adb1",
-        "windows": "1d49efb627b1bc6a0428becbd6cc6e7a964d3b9bf1af4d36e2f5effbcef5d75b",
-        "macos": "a3a3352ba47d2647fdceae48e38ac647d2f7a8531124044f9115e383f852db6a",
-        "linux": "adce327e94c59d9345754d2a3a4ddc8e8aaa3ee5c4485304eb35f0c5dd267708",
-        "linux_flatpak": "7ed750f7f524a3d540ee783ae76ba100fe5a2494c7f44ee8a7556c5f7a20549c"
+        "android": "86bfe3f1c41960b6531fcebcfa628d425e21fa85a663dfcd501ab5f737c58bb7",
+        "windows": "2fcc52b09c62132316a9bdc131e4c49a19c1acdebfefdcc0ef10cd2acd823ce9",
+        "macos": "1ddd64a0fb9e19be15333681eef5c58248eaa544bd3b8199841d14d051db81f3",
+        "linux": "38ccfa77291b8271762f7ed6fee34aa434464b336d7749cd2a4cd926cf20d607",
+        "linux_flatpak": "30366e9e615e5372cc833851cab07157112e5efccaadb3b68f1da2d5e86394cc"
     }
 }
