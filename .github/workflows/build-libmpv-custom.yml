@@ -132,18 +132,27 @@ jobs:
           import sys
           path = "packages/fontconfig.cmake"
           sha = "b25ffeabd15b76f86c0c6736f6df2f1b89858010"
-          anchor = "GIT_TAG main\n"
-          with open(path, encoding="utf-8") as f:
-              src = f.read()
-          n = src.count(anchor)
-          if n != 1:
-              sys.exit(f"ERROR: anchor not unique/missing in {path} (found {n})")
-          with open(path, "w", encoding="utf-8") as f:
-              f.write(src.replace(anchor, f"GIT_TAG {sha}\n", 1))
+          src = open(path, encoding="utf-8").read()
+          # 1) 钉死源码到已知good提交（浮动 main 漂移致 patch 上下文失配）
+          a1 = "GIT_TAG main\n"
+          if src.count(a1) != 1:
+              sys.exit(f"ERROR: GIT_TAG anchor not unique/missing in {path}")
+          src = src.replace(a1, f"GIT_TAG {sha}\n", 1)
+          # 2) 删掉 GIT_REMOTE_NAME（本构建系统约定：钉 commit hash 时不得设 GIT_REMOTE_NAME，
+          #    否则 force-update 会对 detached HEAD 执行 `git reset --hard @{u}`
+          #    → fatal: HEAD does not point to a branch（见 cmake/custom_steps.cmake force_rebuild_git））
+          a2 = "    GIT_REMOTE_NAME origin\n"
+          if src.count(a2) != 1:
+              sys.exit(f"ERROR: GIT_REMOTE_NAME anchor not unique/missing in {path}")
+          src = src.replace(a2, "", 1)
+          open(path, "w", encoding="utf-8").write(src)
           print("patched", path)
           PY
           grep -qF "GIT_TAG b25ffeabd15b76f86c0c6736f6df2f1b89858010" packages/fontconfig.cmake || { echo "::error::fontconfig pin verification failed"; exit 1; }
-          grep -n "GIT_TAG" packages/fontconfig.cmake
+          ! grep -qF "GIT_REMOTE_NAME" packages/fontconfig.cmake || { echo "::error::fontconfig GIT_REMOTE_NAME still present"; exit 1; }
+          grep -n "GIT_TAG\|GIT_REMOTE_NAME" packages/fontconfig.cmake || true
+          # 3) 清掉缓存里可能残留的 fontconfig 源码，强制按新钉的 SHA 重新 clone
+          rm -rf src_packages/fontconfig
 
       # 2026-10-22：上游 libopenmpt 0.7.12 的 tarball 链接失效（lib.openmpt.org 疑撤旧版）→
       # 按序探测可用源（0.7.12 原链 / 0.7.13 / buildroot 镜像），取第一个可用者，并同步 URL_HASH。
