@@ -1,15 +1,15 @@
 {
-    "version": "1.08.63",
-    "version_num": 1008063,
-    "version_desc": "- feat(player): 合并音量均衡运行时检测重构（fix-vnorm-detection-20261110 的 3 个 dart 文件：ISS-276~279 全修）\n- fix(build): 滤镜校验改用 Python 字节匹配（CI 容器 strings 对 PE 不可靠，曾把好产物误判为坏）+ 挪回打包之前做门禁\n- fix(build): 滤镜校验改取最新/最大 libmpv-2.dll 并加诊断+清洗缓存旧 mpv 产物（上轮误判：撞到旧 dll 或桩文件）\n- fix(build): 一并钉住 libvpl 源码 674d015b（上游 main 漂移致 patch 失配，run 42839741451 红）\n- fix(build): fontconfig 钉 SHA 时同时去掉 GIT_REMOTE_NAME（force-update 对 detached HEAD 的 git reset --hard @{u} 会 fatal）+ 清缓存源\n- fix(build): 钉住 fontconfig 源码 b25ffeabd15b（上游 main 漂移致 patch 失配，Windows libmpv 构建红 run 42832843213）",
+    "version": "1.08.64",
+    "version_num": 1008064,
+    "version_desc": "- 修复：进入直播间时「先出画面、随即又重载一次（黑屏+转圈）」——Windows 开启 RTX VSR 时改为**先按自适应倍数挂好超分滤镜再起播**，避免起播后重挂滤镜导致播放管线重启\n- 加固：停止/重开流后作废内部去重缓存，切换清晰度 / 刷新时滤镜链与裁切必定重算（避免倍数/裁切错配）\n- 加固：起播等待有 3 秒兜底，拿不到分辨率也会照常播放（不会卡住）；且放开起播后不再抑制真实拉流错误（可正常重试/提示）\n- 构建：钉住 SPIRV-Cross 源码版本，防上游漂移导致自建原生库构建失败",
     "prerelease": true,
     "download_url": "https://github.com/Howezzzzz/dart_simple_live/releases",
     "download_urls": {
-        "android": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.63/app-arm64-v8a-release.apk",
-        "windows": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.63/Slive-1.08.63+1008063-windows-setup.exe",
-        "macos": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.63/simple_live_app-1.08.63+1008063-macos.dmg",
-        "linux": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.63/Slive-x86_64-linux.deb",
-        "linux_flatpak": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.63/Slive-x86_64.flatpak"
+        "android": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.64/app-arm64-v8a-release.apk",
+        "windows": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.64/Slive-1.08.64+1008064-windows-setup.exe",
+        "macos": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.64/simple_live_app-1.08.64+1008064-macos.dmg",
+        "linux": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.64/Slive-x86_64-linux.deb",
+        "linux_flatpak": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.64/Slive-x86_64.flatpak"
     },
     "mirror_prefixes": [
         "https://gh-proxy.com/",
@@ -17,10 +17,10 @@
         "https://ghproxy.cc/"
     ],
     "download_sha256": {
-        "android": "701607bdff90bccc2645bf7c24c1c83dfa8a2d1f315306b35f24c024ef94d7ad",
-        "windows": "fdae7cbe05f66b4e9ed977bfcc8cc8cd2f2350b2699ec02200789d5a3e893c7f",
-        "macos": "7ebecf3b1e073c53580980fab20dbb1ce2e35887c4a627ae205aacf4c503abfb",
-        "linux": "35d528721757be42911339a6786176ab55b476e17e6b7487f021f1539c734259",
-        "linux_flatpak": "8b4560c6979447eec402dd4f2ac80e2a33669c36bc9e12c304e43397f5bb4a34"
+        "android": "c80d450f1e82e5bdee13157d9f8f81407c9d0fbebe66610afcb5a8785e57badd",
+        "windows": "fd422d98d71a97408ef3237fd5395769900ad0df6f28b4e689aa247ccc261435",
+        "macos": "4799812b5f0d8a514f73c3c3e7cde2735b30e8be78647dfe7c3c7259d6fecf15",
+        "linux": "39f2499c33e6dae0b0d433bfbc73230053fe2108dc21cb87a09efbdd331487b0",
+        "linux_flatpak": "a98b05bdff99cee8042d4436ee7911f4807a35eb78c3736f32cc1352e5e77a80"
     }
 }
