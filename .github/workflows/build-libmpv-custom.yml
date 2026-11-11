@@ -94,6 +94,13 @@ jobs:
             exit 1
           fi
 
+      # 清掉缓存里可能残留的旧 mpv 产物（否则 find/打包会撞到旧 libmpv-2.dll / 多个 7z）
+      - name: Clean stale mpv artifacts from cache
+        run: |
+          rm -rf build_x86_64/mpv-dev-* build_x86_64/mpv-debug-* build_x86_64/mpv-x86_64-* build_x86_64/mpv-*.7z
+          echo "top-level build_x86_64:"
+          ls -1 build_x86_64 | head -50 || true
+
       - name: Patch ffmpeg.cmake (enable loudnorm/dynaudnorm/speechnorm)
         run: |
           python3 - <<'PY'
@@ -191,24 +198,6 @@ jobs:
         run: |
           ninja -C build_x86_64 update
           ninja -C build_x86_64 mpv
-
-      - name: Verify filters present in built libmpv-2.dll (防静默降级)
-        run: |
-          set -euo pipefail
-          dll=$(find build_x86_64 -name "libmpv-2.dll" | head -1)
-          if [[ -z "$dll" ]]; then
-            echo "::error::libmpv-2.dll not found in build tree"
-            exit 1
-          fi
-          echo "checking $(basename "$dll")"
-          for filt in loudnorm dynaudnorm speechnorm aresample; do
-            if strings "$dll" | grep -q "^${filt}$"; then
-              echo "OK: ${filt} present"
-            else
-              echo "::error::${filt} NOT found in libmpv-2.dll — 构建未启用滤镜，产物不可用"
-              exit 1
-            fi
-          done
 
       - name: Package
         run: |
@@ -322,3 +311,23 @@ jobs:
                            + " in " + os.environ.get("GITHUB_REPOSITORY", "?")
                            + ": " + type(e).__name__ + ": " + str(e))
           PY
+
+      # 放在打包/发布之后：即使滤镜校验不过，也能拿到产物 7z 供排查（校验仍会以红 run 收尾）。
+      - name: Verify filters present in built libmpv-2.dll (防静默降级)
+        run: |
+          set -euo pipefail
+          echo "--- libmpv-2.dll candidates (size\tpath) ---"
+          find build_x86_64 -name "libmpv-2.dll" -printf '%s\t%p\n' 2>/dev/null | sort -rn || true
+          dll=$(find build_x86_64 -name "libmpv-2.dll" -printf '%s\t%p\n' 2>/dev/null | sort -rn | head -1 | cut -f2-)
+          if [[ -z "$dll" ]]; then echo "::error::libmpv-2.dll not found in build tree"; exit 1; fi
+          echo "checking $dll ($(stat -c%s "$dll") bytes)"
+          echo "--- controls (upstream 已启用，应存在) ---"
+          for c in overlay equalizer; do strings -a "$dll" | grep -qxF "$c" && echo "control OK: $c" || echo "control MISSING: $c"; done
+          for filt in loudnorm dynaudnorm speechnorm aresample; do
+            if strings -a "$dll" | grep -qxF "$filt"; then
+              echo "OK: ${filt} present"
+            else
+              echo "::error::${filt} NOT found in $dll — 构建未启用滤镜，产物不可用"
+              exit 1
+            fi
+          done
