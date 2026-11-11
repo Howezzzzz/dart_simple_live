@@ -35,6 +35,8 @@ void main() {
         volumeNormSupportedFromReadback('loudnorm=I=-16:TP=-1.5:LRA=11'),
         isFalse,
       );
+      // 阶段3 变异守卫（L3）：dyn 子串≠dynaudnorm 全名
+      expect(volumeNormSupportedFromReadback('dynamic=1,loudnorm=...'), isFalse);
     });
 
     test('空串 / 其它滤镜 → 不支持', () {
@@ -53,6 +55,16 @@ void main() {
       expect(volumeNormLogIndicatesFailure('af Failed to create filter chain'), isTrue);
     });
 
+    test('真机 P0 形态：运行时 af 链被禁用（ISS-276/278：缺 aresample → 两滤镜被 Disabling）', () {
+      // 真机 v1.08.62 日志原样（prefix 拼行后传入）——af 前缀行含滤镜名是可靠信号
+      expect(volumeNormLogIndicatesFailure('af Disabling filter dynaudnorm.00 because it has failed.'), isTrue);
+      expect(volumeNormLogIndicatesFailure('af Disabling filter loudnorm.00 because it has failed.'), isTrue);
+      // lavfi/ffmpeg 裸前缀刻意不收（qwen 重跑 P2-1，防未来 vf-lavfi 误报）：
+      // 它们必伴随 af 前缀 Disabling 行，覆盖无损
+      expect(volumeNormLogIndicatesFailure('lavfi failed to configure the filter graph'), isFalse);
+      expect(volumeNormLogIndicatesFailure("ffmpeg 'aresample' filter not present, cannot convert formats."), isFalse);
+    });
+
     test('VSR/视频滤镜报错不误报（回归 P0-4：有通用关键字但无音频作用域必须放行）', () {
       expect(volumeNormLogIndicatesFailure('d3d11vpp: cannot find filter'), isFalse);
       expect(volumeNormLogIndicatesFailure('vf: unknown filter'), isFalse);
@@ -65,6 +77,9 @@ void main() {
       expect(volumeNormLogIndicatesFailure('Playing: 1080p'), isFalse);
       expect(volumeNormLogIndicatesFailure('audio: 48000 Hz stereo'), isFalse);
       expect(volumeNormLogIndicatesFailure(''), isFalse);
+      // 阶段3 变异守卫（L3）：音频作用域但无关键字 / af 前缀精确匹配（af+空格）
+      expect(volumeNormLogIndicatesFailure('af some random message'), isFalse);
+      expect(volumeNormLogIndicatesFailure('afilter cannot find filter'), isFalse);
     });
   });
 

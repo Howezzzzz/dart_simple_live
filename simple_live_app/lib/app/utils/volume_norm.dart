@@ -13,7 +13,8 @@
 //      跨房间离散 7.1/11.2 → 2.2/2.7 LU，失效房间 −22.9 → −17.8。
 //
 // ⚠️ 顺序不可反：dynaudnorm 必须在前（先压动态、再定标准）；反了两级会互相打架。
-// ⚠️ 这两个滤镜都已编入自建 libmpv（Windows / Android），换用无需重新构建；
+// ⚠️ 滤镜已编入自建 libmpv（Windows / Android；2026-11-10 真机 P0：当时构建漏了
+//    aresample → lavfi 图运行时配置失败、滤镜被 Disabling、音频直通——已重建补上）。
 //    上游原版 `--disable-filters` 后只有 overlay/equalizer，任何音频滤镜都没有
 //    → 探测会失败并自动置灰开关（不崩、不静默）。
 // ⚠️ 真峰与延迟：loudnorm 内部升采样到 192k 测真峰（低端 Android 需实测 CPU）；
@@ -37,24 +38,33 @@ bool volumeNormSupportedFromReadback(String readback) =>
 
 /// mpv / libavfilter 报出的「滤镜链没挂上」关键字（静默降级防线）。
 ///
-/// 回读校验是主门禁；这里只兜「参数写错导致链创建失败但属性被接受」这类边角情况。
+/// 回读校验是主门禁；这里兜「运行时滤镜图配置失败 / 链创建失败但属性被接受」。
+/// 2026-11-10 真机 P0（ISS-276）：旧关键字只覆盖「创建期拒绝」，漏了实际形态——
+/// `failed to configure the filter graph`（lavfi 图配置失败，如缺 aresample 时
+/// 无格式转换桥）+ `Disabling filter ... because it has failed.`（mpv 禁用失败滤镜）。
+/// 实际信号取后者的 af 前缀行（含滤镜名，天然限音频）；`'aresample' filter not present`
+/// （prefix: ffmpeg）与 `failed to configure the filter graph`（prefix: lavfi）都刻意不收——
+/// 它们必伴随 af 前缀 Disabling 行（覆盖完整），且 ffmpeg/lavfi 裸前缀作用域过宽：
+/// 未来若 vf 也用 lavfi 滤镜会误报（qwen 重跑 P2-1，防 P0-4 同类回归）。
 const List<String> volumeNormFilterErrorKeywords = <String>[
   'cannot find filter',
   'no such filter',
   'unknown filter',
   'failed to create filter',
   'cannot initialize a filter',
+  'because it has failed',
 ];
 
 /// 日志行是否表明**音量均衡滤镜链**失败（大小写不敏感）。
 ///
-/// 复核 P0-4：mpv 的滤镜错误关键字（cannot find filter 等）是通用措辞——VSR 重挂
-/// vf（d3d11vpp）失败同样会命中；不限定作用域会把 VSR 故障误判成音量均衡不支持
-/// 并持久化禁用（开关置灰、误报 toast）。因此额外要求行内出现音量均衡音频滤镜
-/// 上下文：两个滤镜名之一，或 mpv 的 af 裸前缀（行首 `af `；media_kit 的
-/// PlayerLog.prefix 是无方括号裸名，如 af/vd/ad——阶段4 第3轮复核 P3 修正）。
-/// 注：本防线只兜「链创建失败但属性被接受」的边角；主门禁是回读校验
-/// （volumeNormSupportedFromReadback）。
+/// 复核 P0-4：mpv 的滤镜错误关键字是通用措辞——VSR 重挂 vf（d3d11vpp）失败同样会命中；
+/// 不限定作用域会把 VSR 故障误判成音量均衡不支持并持久化禁用。因此额外要求行内出现
+/// 音量均衡音频滤镜上下文：两个滤镜名之一，或 mpv 的 af 裸前缀（行首 `af `）。
+/// 不纳入 lavfi/ffmpeg 裸前缀：本次真机失败的 lavfi 图配置行必伴随 af 前缀的
+/// Disabling 行（信号完整），裸前缀作用域会为未来可能的 vf-lavfi 误报开门（qwen 重跑
+/// P2-1 确认，防 P0-4 同类回归）。
+/// 注：本防线只兜运行时失败/链创建失败；主门禁是回读校验
+/// （volumeNormSupportedFromReadback，只能验证属性层，验不出运行时图构建失败）。
 bool volumeNormLogIndicatesFailure(String line) {
   final lower = line.toLowerCase();
   final inAudioScope = lower.contains('dynaudnorm') || lower.contains('loudnorm') || lower.startsWith('af ');
