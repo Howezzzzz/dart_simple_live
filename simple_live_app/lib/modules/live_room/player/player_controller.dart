@@ -1521,7 +1521,7 @@ class PlayerController extends BaseController
         return;
       }
       Log.d('[DIAG] 操作: 音量均衡 → $on'
-          '（applied=$_volumeNormApplied supported=$afLoudnormSupported playing=${player.state.playing}）');
+          '（applied=$_volumeNormApplied supported=${PlayerMixin.afLoudnormSupported} playing=${player.state.playing}）');
       Future.delayed(const Duration(seconds: 2), () {
         if (!_playerDisposed) _diagSnapshot('拨均衡后+2s');
       });
@@ -1778,7 +1778,7 @@ class PlayerController extends BaseController
     // 数百 ms 内到达）。旧逻辑「回读后立即读标志」在真机上系统性漏判。
     _volumeNormLogFailure = false;
     _volumeNormLogArmed = true;
-    Log.d('[VN] 探测: applied=$_volumeNormApplied supported=$afLoudnormSupported');
+    Log.d('[VN] 探测: applied=$_volumeNormApplied supported=${PlayerMixin.afLoudnormSupported}');
     var chainSet = true;
     try {
       // 起流前已预挂（_volumeNormApplied=true）时只回读校验、不再 set：
@@ -1881,7 +1881,7 @@ class PlayerController extends BaseController
     final token = ++_suppressToken;
     _suppressErrorRetry = true;
     final opStart = DateTime.now();
-    Log.d('[VN] 执行: enable=$enable（原 applied=$_volumeNormApplied supported=$afLoudnormSupported）');
+    Log.d('[VN] 执行: enable=$enable（原 applied=$_volumeNormApplied supported=${PlayerMixin.afLoudnormSupported}）');
     // 阶段1（L3）修正：日志防线记录在 set **之前**武装——set 完成到武装赋值之间
     // 有微任务间隙，失败日志（异步到达）可能落入该缝而漏记；预挂/探测均为 set 前
     // 武装，此处对齐。
