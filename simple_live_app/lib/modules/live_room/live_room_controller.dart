@@ -781,7 +781,13 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     if (await openSourceGated(buildPlayerMediaList(), index: currentLineIndex)) {
       return;
     }
-    await player.jump(currentLineIndex);
+    try {
+      await player.jump(currentLineIndex);
+    } catch (e) {
+      // media_kit 对已 dispose 的 player 会在入口断言；setPlayer 是 void async，
+      // 未捕获会变成异步异常（复核建议包一层）。
+      Log.d('换线路失败: $e');
+    }
   }
 
   @override
