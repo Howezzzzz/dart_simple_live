@@ -786,7 +786,9 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     } catch (e) {
       // media_kit 对已 dispose 的 player 会在入口断言；setPlayer 是 void async，
       // 未捕获会变成异步异常（复核建议包一层）。
-      Log.d('换线路失败: $e');
+      Log.w('换线路失败: $e');
+      // 复验 P2：非退房场景的真实失败不能静默（否则 UI 停在「线路N」+ 无提示 + 不重试）。
+      errorMsg.value = "换线路失败";
     }
   }
 
