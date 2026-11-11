@@ -213,9 +213,21 @@ mixin PlayerMixin {
       return false;
     }
     _lastRtxVsrSignature = null;
+    // 复核（换线路）：open 内部会 stop()，等价一次「重开」——音量均衡的首帧自愈钩子
+    // 只在 initializePlayer 里重置过，换线路/重试不走那条路，这里补一次重置。
+    // 否则（RISK-71：open 可能清掉链）换线路后均衡会静默丢失，直到下次重初始化。
+    _volumeNormInitialized = false;
     Log.d('[VSR] 换线路/重试走起播门控：open(play:false) index=$index');
     _armVsrDeferPlay();
-    await player.open(Playlist(mediaList, index: index), play: false);
+    try {
+      await player.open(Playlist(mediaList, index: index), play: false);
+    } catch (e) {
+      // open 失败（dispose 竞态 / native handle 异常）：门控已武装但永远不会有人 play
+      // → 拆掉门控并返回 false，交回调用方走原来的 jump 路径（至少不会黑屏无人管）。
+      Log.d('[VSR] 门控换源失败，回退 jump: $e');
+      _disarmVsrDeferPlay();
+      return false;
+    }
     return true;
   }
 
