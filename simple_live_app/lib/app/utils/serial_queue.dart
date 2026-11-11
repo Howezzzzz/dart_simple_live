@@ -18,7 +18,9 @@ import 'dart:async';
 /// `Zone.root.run(...)`）转义，否则会被误判为重入而内联。
 class SerialTaskQueue {
   Future<void> _tail = Future<void>.value();
-  static final Object _zoneKey = Object();
+  // 每实例独立键：避免「在 q1 任务内对 q2 run 被误判重入而内联、破坏 q2 串行」
+  // （阶段4 复核建议；全仓现仅 1 个实例，但把约束写死）
+  final Object _zoneKey = Object();
 
   /// 入队执行 [task]，返回其完成 Future。
   ///

@@ -1727,8 +1727,14 @@ class PlayerController extends BaseController
         Log.logPrint(e);
       }
       // 复核 N2/C1 补充：终裁落地入队执行（体内 setProperty 不再绕过队列与热切换交错）
-      await _enqueueVolumeNorm(
-          () => _finishVolumeNormProbe(supported: !failed, token: token));
+      await _enqueueVolumeNorm(() async {
+        // 阶段4 复核：入队后再自查代际——排队等待期间可能被新热切换/新探测取代
+        // （对齐 _scheduleVolumeNormAdjudication 的入队后复查惯例）
+        if (vnToken != _volumeNormToken || _playerDisposed) {
+          return;
+        }
+        await _finishVolumeNormProbe(supported: !failed, token: token);
+      });
     }));
   }
 

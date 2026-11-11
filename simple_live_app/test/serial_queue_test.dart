@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:simple_live_app/app/utils/serial_queue.dart';
 
@@ -49,6 +51,29 @@ void main() {
       await q.run(() async => throw StateError('boom'));
       await q.run(() async => done.add('after'));
       expect(done, ['after']);
+    });
+
+    test('任务内定时器经 Zone.root 转义后再入队=走队列（不内联）【阶段4 加固】', () async {
+      final q = SerialTaskQueue();
+      final ev = <String>[];
+      // A：任务内调度短延时定时器，回调经 Zone.root 转义后再入队
+      await q.run(() async {
+        ev.add('A');
+        Future.delayed(const Duration(milliseconds: 30),
+            Zone.root.bindCallback(() async {
+          await q.run(() async => ev.add('escaped'));
+        }));
+      });
+      // C：紧接 A 入队的长任务，覆盖定时器触发时刻
+      await q.run(() async {
+        ev.add('C-start');
+        await Future<void>.delayed(const Duration(milliseconds: 300));
+        ev.add('C-end');
+      }).timeout(const Duration(seconds: 5));
+      // 让「已入队」的 escaped 有机会执行
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      // 转义正确 → escaped 排在 C 之后；若漏转义会被误判重入而内联（插在 C 中间）
+      expect(ev, ['A', 'C-start', 'C-end', 'escaped']);
     });
   });
 }
