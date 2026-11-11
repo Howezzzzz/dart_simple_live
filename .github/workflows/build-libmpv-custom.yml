@@ -133,13 +133,15 @@ jobs:
       # 修法：把这些包的源码钉到最后一次成功构建(2026-10-22)前的已知good提交，并遵守本构建系统约定——
       #       钉 commit hash 时必须删掉 GIT_REMOTE_NAME，否则 force-update 会对 detached HEAD 跑 git reset --hard @{u} → fatal。
       # 本地均已用真身源码逐一验证：补丁在这些提交上 git apply --check 干净通过，且在各自当前上游 main 上失败。
-      - name: Pin drifting patched sources (fontconfig/libvpl)
+      - name: Pin drifting patched sources (fontconfig/libvpl/spirv-cross)
         run: |
           python3 - <<'PY'
           import sys
+          # 钉浮动分支 + 自带补丁的包到已知good提交（上游前进会让补丁上下文失配 → 构建红）。
           PINS = {
-              "packages/fontconfig.cmake": "b25ffeabd15b76f86c0c6736f6df2f1b89858010",  # fontconfig main @2026-10-21
-              "packages/libvpl.cmake":     "674d015bcb294bc39fa276e99a652ea045423e82",  # intel/libvpl main @2026-07-13
+              "packages/fontconfig.cmake":  "b25ffeabd15b76f86c0c6736f6df2f1b89858010",  # fontconfig main @2026-10-21
+              "packages/libvpl.cmake":      "674d015bcb294bc39fa276e99a652ea045423e82",  # intel/libvpl main @2026-07-13
+              "packages/spirv-cross.cmake": "57e4efcc84112abcd426dc5ec248b5339bee04f2",  # SPIRV-Cross main @2026-10-28（= libmpv v4 同版）
           }
           for path, sha in PINS.items():
               src = open(path, encoding="utf-8").read()
@@ -154,12 +156,13 @@ jobs:
               open(path, "w", encoding="utf-8").write(src)
               print("pinned", path, "->", sha)
           PY
-          grep -qF "GIT_TAG b25ffeabd15b76f86c0c6736f6df2f1b89858010" packages/fontconfig.cmake || { echo "::error::fontconfig pin verify failed"; exit 1; }
-          grep -qF "GIT_TAG 674d015bcb294bc39fa276e99a652ea045423e82" packages/libvpl.cmake || { echo "::error::libvpl pin verify failed"; exit 1; }
-          if grep -qF "GIT_REMOTE_NAME" packages/fontconfig.cmake packages/libvpl.cmake; then echo "::error::GIT_REMOTE_NAME still present"; exit 1; fi
-          grep -n "GIT_TAG" packages/fontconfig.cmake packages/libvpl.cmake
+          for f in packages/fontconfig.cmake packages/libvpl.cmake packages/spirv-cross.cmake; do
+            grep -qE "GIT_TAG [0-9a-f]{40}" "$f" || { echo "::error::$f pin verify failed"; exit 1; }
+            if grep -qF "GIT_REMOTE_NAME" "$f"; then echo "::error::$f GIT_REMOTE_NAME still present"; exit 1; fi
+          done
+          grep -n "GIT_TAG" packages/fontconfig.cmake packages/libvpl.cmake packages/spirv-cross.cmake
           # 清掉缓存里可能残留的源码，强制按新钉的 SHA 重新 clone
-          rm -rf src_packages/fontconfig src_packages/libvpl
+          rm -rf src_packages/fontconfig src_packages/libvpl src_packages/spirv-cross
 
       # 2026-10-22：上游 libopenmpt 0.7.12 的 tarball 链接失效（lib.openmpt.org 疑撤旧版）→
       # 按序探测可用源（0.7.12 原链 / 0.7.13 / buildroot 镜像），取第一个可用者，并同步 URL_HASH。
@@ -204,11 +207,15 @@ jobs:
       - name: Verify filters present in built libmpv-2.dll (防静默降级)
         run: |
           python3 - <<'PY'
-          import glob, os, sys
+          import glob, os, sys, hashlib
           cands = sorted(glob.glob("build_x86_64/**/libmpv-2.dll", recursive=True), key=os.path.getsize, reverse=True)
           print("candidates (size, path):", [(os.path.getsize(p), p) for p in cands])
           if not cands:
               print("::error::libmpv-2.dll not found in build tree"); sys.exit(1)
+          digests = {hashlib.sha256(open(p, "rb").read()).hexdigest() for p in cands}
+          print("distinct candidate sha256:", len(digests))
+          if len(digests) != 1:
+              print(f"::error::libmpv-2.dll 候选内容不一致（{len(digests)} 种）——校验对象不确定，fail-loud"); sys.exit(1)
           dll = cands[0]
           data = open(dll, "rb").read()
           print(f"checking {dll} ({len(data)} bytes)")
@@ -237,7 +244,7 @@ jobs:
       - name: Compute SHA256 & write summary
         run: |
           sha=$(sha256sum "release_x86_64/${CUSTOM_LIBMPV_NAME}" | awk '{print $1}')
-          echo "CUSTOM_LIBMPV_SHA256=$sha" >> "$GITHUB_ENV"
+          echo "CUSTOM_bundles.windows_x64=$sha" >> "$GITHUB_ENV"
           {
             echo "## Custom libmpv (stage 2/2) built"
             echo
@@ -246,7 +253,7 @@ jobs:
             echo "- Base: \`${BUILD_REPO}@${BUILD_REPO_SHA}\` + loudnorm/dynaudnorm/speechnorm"
             echo "- **SHA256**: \`${sha}\`"
             echo
-            echo "Backfill into \`simple_live_app/packages/media_kit_libs_windows_video/windows/CMakeLists.txt\` -> \`LIBMPV_SHA256\` (x86_64 branch)."
+            echo "Backfill into \`simple_live_app/packages/media_kit/hook/native_bundles.json\` -> \`LIBMPV_SHA256\` (x86_64 branch)."
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload artifact
