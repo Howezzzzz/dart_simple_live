@@ -215,7 +215,7 @@ mixin PlayerMixin {
   /// 保留它是为了将来一旦在 play() 前插入 await（例如等串行队列）时能自动挡掉过期 release。
   int _vsrGateEpoch = 0;
   static const Duration vsrDeferPlaySettle = Duration(milliseconds: 500);
-  static const Duration vsrDeferPlaySettleMax = Duration(milliseconds: 1500);
+  static const Duration vsrDeferPlaySettleMax = Duration(milliseconds: 1200);
 
   /// 已写/摘 VSR 链次数（观测用：真机日志可看出进房是否只挂一次）。
   int _vsrChainWriteCount = 0;
@@ -555,12 +555,6 @@ mixin PlayerMixin {
     // 缓存，令随后无补边流（裁切值为空串）的真实尺寸事件被误判为「未变化」而漏更（复核 P0）。
     if (rawW <= 0 || rawH <= 0) return;
     _tlMark('源分辨率 ${rawW}x$rawH');
-    // 起播门控（复核 P1/P5）：任何一次「尺寸已知」的同步都安排一次「布局稳定后放开起播」，
-    // 且后续同步会顺延它。这样既覆盖「自动全屏 / 按分辨率自适应窗口宽度 / 拖窗」在 play()
-    // 之后二次改写 vf 的场景，也不再依赖入队任务是否成功（任务抛异常也能放开）。
-    if (_vsrDeferPlay) {
-      _scheduleVsrDeferPlayRelease();
-    }
     // 纯逻辑决策（自适应倍数 / 裁切 / 显示比例 / 画布），便于单测（见 rtx_vsr_crop.dart）。
     // 自适应倍数：目标 ≈ 播放区物理分辨率（源低就多放大）；拿不到播放区尺寸走固定 2x 兜底；
     // S≤1.05（源≥播放区）→ 不挂 VSR。
@@ -577,6 +571,20 @@ mixin PlayerMixin {
     final desired = plan.crop;
     final aspectValue = plan.aspect;
     final renderSize = plan.renderSize;
+    // 起播门控（复核 P1/P5 + 阶段4 复盘）：先判「是否已无需改动」——是则**立即放行**（免白等
+    // settle）；否则安排「布局稳定后放开」（后续同步会顺延）。判定用**回读**（留存签名会被
+    // open 清链弄陈旧）：vf 用 rtxVsrVfAction 判（依赖跨 open 存活的 _lastRtxVsrScale），
+    // 戴切回读比对（戴切/显示比例/画布同源，戴切一致即可认为整链已到位）。
+    if (_vsrDeferPlay) {
+      final (vfAction0, _) = rtxVsrVfAction(
+          enable: enable, scale: s, currentScale: _lastRtxVsrScale);
+      if (vfAction0 == 'none' && await _rtxCropMatches(desired)) {
+        Log.d('[VSR] 门控: 链路无需改动 → 立即放行（chain-unchanged）');
+        _releaseVsrDeferPlay('chain-unchanged');
+        return;
+      }
+      _scheduleVsrDeferPlayRelease();
+    }
     // 去重签名：倍数 + 裁切值 + 源尺寸 + 链状态（**不能只用裁切值当键**，见字段注释）。
     final signature = '${s ?? -1}|$desired|${rawW}x$rawH|$_rtxVsrChainApplied';
     if (signature == _lastRtxVsrSignature) return;
@@ -649,6 +657,21 @@ mixin PlayerMixin {
         );
       }
     });
+  }
+
+  /// 回读比对：当前已挂的 `video-crop` 是否与目标一致（供「链路 noop 立即放行」判定）。
+  /// 只读、免留存（阶段4 复盘：留存签名会被 open 清链弄陈旧）；读失败按「不一致」处理（保守）。
+  Future<bool> _rtxCropMatches(String desired) async {
+    final pp = player.platform;
+    if (pp is! NativePlayer) return false;
+    try {
+      final readback =
+          (await pp.getProperty('video-crop', waitForInitialization: false)).trim();
+      return readback.replaceAll(' ', '') == desired.replaceAll(' ', '');
+    } catch (e) {
+      Log.logPrint(e);
+      return false;
+    }
   }
 
   /// 串行执行一次 video-crop 写入（参考 _enqueueVolumeNorm 的既有惯例）。
