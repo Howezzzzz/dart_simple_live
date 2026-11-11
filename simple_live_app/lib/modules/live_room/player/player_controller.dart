@@ -24,6 +24,7 @@ import 'package:simple_live_app/app/log.dart';
 import 'package:simple_live_app/app/utils.dart';
 import 'package:simple_live_app/app/utils/panel_width.dart';
 import 'package:simple_live_app/app/utils/rtx_vsr_crop.dart';
+import 'package:simple_live_app/app/utils/serial_queue.dart';
 import 'package:simple_live_app/app/utils/volume_norm.dart';
 import 'package:simple_live_app/services/local_storage_service.dart';
 import 'package:simple_live_app/modules/live_room/danmaku/danmaku_emoticon.dart';
@@ -288,21 +289,17 @@ mixin PlayerMixin {
   /// VSR 重挂 vf 也递增 _suppressToken，共用会让 VSR 误取消音量均衡待决终裁，glm 复核 P1）
   int _volumeNormToken = 0;
 
-  /// 音量均衡：操作串行队列（探测/应用/移除按发起顺序执行，避免并发交错导致 af 与状态标记不一致）
-  Future<void> _volumeNormQueue = Future<void>.value();
+  /// 音量均衡：待办的拨动意愿（未播放 + 能力未知时 worker 不再静默吞，记此待办、复播时消费）
+  bool? _pendingVolumeNormIntent;
 
-  /// 音量均衡：入队执行一次 af 操作（异常在队列内消化，避免 fire-and-forget 产生未处理异步异常）
-  Future<void> _enqueueVolumeNorm(Future<void> Function() task) {
-    final next = _volumeNormQueue.then((_) async {
-      try {
-        await task();
-      } catch (e) {
-        Log.logPrint(e);
-      }
-    });
-    _volumeNormQueue = next;
-    return next;
-  }
+  /// 音量均衡：操作串行队列（探测/应用/移除按发起顺序执行，避免并发交错导致 af 与状态标记不一致）。
+  /// 用 [SerialTaskQueue]：**队列任务内再次入队会内联执行**，杜绝嵌套自死锁（P0，ISS-281）。
+  final SerialTaskQueue _volumeNormQueue = SerialTaskQueue();
+
+  /// 音量均衡：入队执行一次 af 操作（异常在队列内消化，避免 fire-and-forget 产生未处理异步异常）。
+  /// ⚠️ 队列任务体内**不要**再调 [_syncVolumeNorm]（它＝入队）；任务内用 [_syncVolumeNormLocked]。
+  Future<void> _enqueueVolumeNorm(Future<void> Function() task) =>
+      _volumeNormQueue.run(task, onError: (e, _) => Log.logPrint(e));
 
   /// 音量均衡：起流前预挂链（由 `initializePlayer` 在 `player.open` 之前调用，经串行队列执行）。
   ///
@@ -395,7 +392,9 @@ mixin PlayerMixin {
     if (pp is! NativePlayer) {
       return;
     }
-    Future.delayed(const Duration(milliseconds: 2000), () async {
+    // Zone.root.bindCallback：该回调与「当前队列任务」已无关，必须转义出任务 Zone，
+    // 否则体内的 [_enqueueVolumeNorm] 会被误判为重入而内联（丢失串行化）
+    Future.delayed(const Duration(milliseconds: 2000), Zone.root.bindCallback(() async {
       if (vnToken != _volumeNormToken || _playerDisposed) {
         return; // 已被更新的音量均衡操作取代或资源已释放（新操作的释放逻辑自会收尾）
       }
@@ -441,7 +440,7 @@ mixin PlayerMixin {
         Log.d('音量均衡：$source 终裁回读失链（af="$readbackNote"）——疑似 open 复位，下房自愈');
       }
       _scheduleSuppressRelease(suppressToken);
-    });
+    }));
   }
 
   /// 音量均衡：持久化能力探测结果（带 App 版本前缀，版本变化即失效重探）。
@@ -1446,8 +1445,12 @@ class PlayerController extends BaseController
         _syncVolumeNorm();
         return;
       }
-      //未播放且能力未知：不在此刻探测（空闲探测不可靠，可能假成功），留到首帧钩子统一处理
+      // 未播放且能力未知：不在此刻探测（空闲探测不可靠，可能假成功），留到首帧钩子统一处理。
+      // 复核 N2：**不能静默吞**——记待办，复播时消费，避免「暂停中拨开关」永远失效
+      // （首帧钩子是一次的，不会为复播重跑）。
       if (PlayerMixin.afLoudnormSupported == null && !player.state.playing) {
+        _pendingVolumeNormIntent = on;
+        Log.d('[VN] toggle($on) deferred: not playing');
         return;
       }
       _syncVolumeNorm();
@@ -1505,6 +1508,7 @@ class PlayerController extends BaseController
         // 音量均衡：首帧播放后一次性同步（能力未知时顺带探测，必须播放中做）
         if (!_volumeNormInitialized) {
           _volumeNormInitialized = true;
+          _pendingVolumeNormIntent = null; // 首帧已统一同步（读的是当前意愿），清待办
           // 复核（真机 P0，ISS-278）：首帧的两条路径统一入队，与热切换/探测严格串行；
           // 探测与复查的成败判定都在抑制窗末终裁（playing 事件早于 af 图构建，立即读必漏）。
           _enqueueVolumeNorm(() async {
@@ -1526,13 +1530,19 @@ class PlayerController extends BaseController
                 }
               }
             }
-            await _syncVolumeNorm();
+            // ⚠️ 此处已在队列任务内：必须调**无队版**，否则会嵌套入队 → 自死锁（ISS-281）
+            await _syncVolumeNormLocked();
             if (_volumeNormApplied &&
                 PlayerMixin.afLoudnormSupported == true &&
                 AppSettingsController.instance.volumeNorm.value) {
               await _verifyVolumeNormFirstFrame();
             }
           });
+        } else if (_pendingVolumeNormIntent != null) {
+          // N2：暂停期被推迟的拨动 → 复播时消费
+          _pendingVolumeNormIntent = null;
+          Log.d('音量均衡：消费待办拨动（复播）');
+          _syncVolumeNorm();
         }
       }
     });
@@ -1629,30 +1639,32 @@ class PlayerController extends BaseController
     // WakelockPlus.disable();
   }
 
-  /// 音量均衡：把播放器 af 状态同步到「用户意愿 + 已探测能力」（首帧钩子 / 热切换共用）
-  /// 所有 af 操作经队列串行化：探测期间用户拨开关时，后一次同步会排队到探测结束后执行，
-  /// 避免两次探测并发导致「af 已开但标记为关」而无法关闭的错乱
-  Future<void> _syncVolumeNorm() {
-    return _enqueueVolumeNorm(() async {
-      if (_playerDisposed) {
-        return;
+  /// 音量均衡：同步入口（**队列外**调用，如热切换 worker）。内部入队执行 [_syncVolumeNormLocked]。
+  Future<void> _syncVolumeNorm() => _enqueueVolumeNorm(_syncVolumeNormLocked);
+
+  /// 音量均衡同步体（**无队版**，供队列任务内直接调用）。
+  ///
+  /// ⚠️ 只能在队列任务内调用；且任务内**禁止**改调 [_syncVolumeNorm]——那会在队列任务里
+  /// 再入队，形成「内层等外层、外层 await 内层」的嵌套自死锁（P0，ISS-281）。
+  Future<void> _syncVolumeNormLocked() async {
+    if (_playerDisposed) {
+      return;
+    }
+    PlayerMixin.afLoudnormSupported ??= _readPersistedCapability();
+    if (PlayerMixin.afLoudnormSupported == null) {
+      // 能力未知：执行一次探测（探测后按用户意愿自动还原/保持）
+      await _probeVolumeNormCapability();
+      return;
+    }
+    if (AppSettingsController.instance.volumeNorm.value) {
+      // 复核 P3：这里等价于 afLoudnormSupported == true（volumeNormShouldApply 的
+      // userOn 恒为 true 时是冗余包装），直接判断避免误导。
+      if (PlayerMixin.afLoudnormSupported == true) {
+        await _applyVolumeNorm(enable: true);
       }
-      PlayerMixin.afLoudnormSupported ??= _readPersistedCapability();
-      if (PlayerMixin.afLoudnormSupported == null) {
-        // 能力未知：执行一次探测（探测后按用户意愿自动还原/保持）
-        await _probeVolumeNormCapability();
-        return;
-      }
-      if (AppSettingsController.instance.volumeNorm.value) {
-        // 复核 P3：这里等价于 afLoudnormSupported == true（volumeNormShouldApply 的
-        // userOn 恒为 true 时是冗余包装），直接判断避免误导。
-        if (PlayerMixin.afLoudnormSupported == true) {
-          await _applyVolumeNorm(enable: true);
-        }
-      } else if (_volumeNormApplied) {
-        await _applyVolumeNorm(enable: false);
-      }
-    });
+    } else if (_volumeNormApplied) {
+      await _applyVolumeNorm(enable: false);
+    }
   }
 
   /// 音量均衡：探测能力（设置 af → 回读校验），探测后按用户意愿还原或保持
@@ -1695,7 +1707,8 @@ class PlayerController extends BaseController
     }
     // 链已挂上但「运行时是否真的建链成功」→ 窗末终裁（失败日志异步到达）
     final vnToken = ++_volumeNormToken;
-    Future.delayed(const Duration(milliseconds: 2000), () async {
+    // 转义出任务 Zone（同 _scheduleVolumeNormAdjudication）：定时器回调属队列外
+    Future.delayed(const Duration(milliseconds: 2000), Zone.root.bindCallback(() async {
       if (vnToken != _volumeNormToken || _playerDisposed) {
         // glm 复核 P3：终裁被更新的音量均衡操作取代时能力停留 null（本房不再重探，
         // 下房预挂/探测重来）——低频边角，可接受。
@@ -1713,8 +1726,10 @@ class PlayerController extends BaseController
       } catch (e) {
         Log.logPrint(e);
       }
-      _finishVolumeNormProbe(supported: !failed, token: token);
-    });
+      // 复核 N2/C1 补充：终裁落地入队执行（体内 setProperty 不再绕过队列与热切换交错）
+      await _enqueueVolumeNorm(
+          () => _finishVolumeNormProbe(supported: !failed, token: token));
+    }));
   }
 
   /// 音量均衡：探测终裁落地（能力持久化 + UI 同步 + 链状态收敛）。
