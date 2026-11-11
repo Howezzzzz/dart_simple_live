@@ -120,9 +120,9 @@ mixin PlayerMixin {
       await pp.setProperty('vf', rtxVsrVfChain(rtxVsrScale));
       _lastRtxVsrScale = rtxVsrScale;
       _rtxVsrChainApplied = true;
-      // 起播门控（方案 20261111）：此处仅「兜底预挂」，真正的自适应倍数要等源分辨率；
-      // 为免起播后再改 vf 触发 playback restart，本次 open 先不自动起播（见 vsrDeferPlayPending）。
-      _armVsrDeferPlay();
+      // 预挂也计入链写入次数（复核 P2：否则真机日志判不出「到底挂了几次」）。
+      Log.d('[VSR] 预挂兜底链 #${++_vsrChainWriteCount}'
+          ' scale=${rtxVsrScale.toStringAsFixed(2)}（起播前）');
     } else if (Platform.isWindows) {
       // 关闭 VSR 时必须摘掉已挂上的滤镜链（复核 P2-1）：只改标志不摘链的话，
       // 同一会话 F5/切清晰度重初始化后，链仍在放大画面、裁切却被清空 → 绿条复现且 VSR 代价照付。
@@ -151,10 +151,12 @@ mixin PlayerMixin {
       await _enqueueVolumeNorm(() => _preApplyVolumeNorm());
     }
     // 同步底部补边裁切（VSR 开启才裁；关闭时显式清空，避免切线路等场景残留上次的裁切）。
-    // 注：起播门控武装时**跳过此处预同步**——此刻 player.state 还是上一路流的旧尺寸，
-    // 此时同步会写入错的链/裁切、并可能提前放开起播；真正的同步由 open 后「尺寸重置 → 新尺寸」
-    // 事件驱动（见 width/height 监听器里对 null 的签名作废，复核发现）。
-    if (!_vsrDeferPlay) {
+    // 起播门控：在**末尾**才武装（复核 P6：让超时从 open 前一刻起算，不被前面的音量均衡
+    // 预挂等 await 吃掉预算）；武装时跳过此处预同步——此刻 player.state 还是上一路流的旧尺寸，
+    // 同步会写入错的链/裁切；真正的同步由 open 后「尺寸重置 → 新尺寸」事件驱动（见 width/height 监听）。
+    if (vsrOn) {
+      _armVsrDeferPlay();
+    } else {
       await _syncRtxVsrCrop();
     }
   }
@@ -177,7 +179,15 @@ mixin PlayerMixin {
   Timer? _vsrDeferPlayTimer;
 
   /// 起播门控超时兜底（拿不到源分辨率时不卡死，超时直接起播）。
-  static const Duration vsrDeferPlayTimeout = Duration(seconds: 2);
+  /// 复核 P6：慢网拉流可能 >2s，给到 3s。
+  static const Duration vsrDeferPlayTimeout = Duration(seconds: 3);
+
+  /// 起播门控的「布局稳定」尾沿：每次同步都往后顺延，静默这么长时间才真的起播
+  /// （复核 P1：避免 play() 后布局（全屏/窗口自适应/拖窗）变化又改 vf → 重载）。
+  Timer? _vsrDeferPlaySettleTimer;
+  DateTime? _vsrDeferPlayArmedAt;
+  static const Duration vsrDeferPlaySettle = Duration(milliseconds: 500);
+  static const Duration vsrDeferPlaySettleMax = Duration(milliseconds: 1500);
 
   /// 已写/摘 VSR 链次数（观测用：真机日志可看出进房是否只挂一次）。
   int _vsrChainWriteCount = 0;
@@ -419,6 +429,12 @@ mixin PlayerMixin {
     // 尺寸未知（如 initializePlayer 在 open 之前那次调用）先不处理：否则会把空值写进去重
     // 缓存，令随后无补边流（裁切值为空串）的真实尺寸事件被误判为「未变化」而漏更（复核 P0）。
     if (rawW <= 0 || rawH <= 0) return;
+    // 起播门控（复核 P1/P5）：任何一次「尺寸已知」的同步都安排一次「布局稳定后放开起播」，
+    // 且后续同步会顺延它。这样既覆盖「自动全屏 / 按分辨率自适应窗口宽度 / 拖窗」在 play()
+    // 之后二次改写 vf 的场景，也不再依赖入队任务是否成功（任务抛异常也能放开）。
+    if (_vsrDeferPlay) {
+      _scheduleVsrDeferPlayRelease();
+    }
     // 纯逻辑决策（自适应倍数 / 裁切 / 显示比例 / 画布），便于单测（见 rtx_vsr_crop.dart）。
     // 自适应倍数：目标 ≈ 播放区物理分辨率（源低就多放大）；拿不到播放区尺寸走固定 2x 兜底；
     // S≤1.05（源≥播放区）→ 不挂 VSR。
@@ -472,11 +488,14 @@ mixin PlayerMixin {
         await videoController.setSize();
       }
       // 写入成功后才记缓存（复核 P3-3）：异常（dispose 竞态）时保持旧值，下次同步会重试。
-      _lastRtxVsrSignature = signature;
-      // 起播门控：链已按（自适应）倍数挂好 → 放开起播。
-      if (_vsrDeferPlay) {
-        await _releaseVsrDeferPlay('chain-ready');
+      // 复核 P4：若写期间源尺寸已变（open/切流把签名作废后又来新尺寸），别用旧签名回填
+      // ——否则新尺寸与旧签名相同会被短路 → 链不纠正、门控只能等超时。
+      if (player.state.width != rawW || player.state.height != rawH) {
+        Log.d('[VSR] 尺寸已变（${player.state.width}x${player.state.height}'
+            ' != ${rawW}x$rawH）—— 不回填签名，等下个尺寸事件重算');
+        return;
       }
+      _lastRtxVsrSignature = signature;
       if (desired.isEmpty) return;
       // 回读校验（参考音量均衡 af 的做法）：media_kit 的 setProperty 不返回错误，
       // 属性缺失/语法级拒绝时会静默失败 → 回读一次让失败可见（RISK-58）。
@@ -521,9 +540,12 @@ mixin PlayerMixin {
     });
   }
 
-  /// 武装「起播门控」（Windows + VSR 开启时，由 initializePlayer 调用）。
+  /// 武装「起播门控」（Windows + VSR 开启时，由 initializePlayer 末尾调用）。
   void _armVsrDeferPlay() {
     _vsrDeferPlayTimer?.cancel();
+    _vsrDeferPlaySettleTimer?.cancel();
+    _vsrDeferPlaySettleTimer = null;
+    _vsrDeferPlayArmedAt = DateTime.now();
     _vsrDeferPlay = true;
     _vsrDeferPlayTimer = Timer(vsrDeferPlayTimeout, () {
       // 兜底：拿不到源分辨率（异常流）时不卡住，直接起播（此时可能仍有一次重启，属降级）。
@@ -531,10 +553,31 @@ mixin PlayerMixin {
     });
   }
 
+  /// 安排「布局稳定后放开起播」：每次已知尺寸的同步都往后顺延，直到静默
+  /// [vsrDeferPlaySettle]；但从武装起超过 [vsrDeferPlaySettleMax] 就硬放开（复核 P1/P5）。
+  void _scheduleVsrDeferPlayRelease() {
+    if (!_vsrDeferPlay) {
+      return;
+    }
+    final armedAt = _vsrDeferPlayArmedAt;
+    if (armedAt != null &&
+        DateTime.now().difference(armedAt) >= vsrDeferPlaySettleMax) {
+      _releaseVsrDeferPlay('settle-max');
+      return;
+    }
+    _vsrDeferPlaySettleTimer?.cancel();
+    _vsrDeferPlaySettleTimer = Timer(vsrDeferPlaySettle, () {
+      _releaseVsrDeferPlay('settled');
+    });
+  }
+
   /// 取消起播门控（未武装时为空操作）。
   void _disarmVsrDeferPlay() {
     _vsrDeferPlayTimer?.cancel();
     _vsrDeferPlayTimer = null;
+    _vsrDeferPlaySettleTimer?.cancel();
+    _vsrDeferPlaySettleTimer = null;
+    _vsrDeferPlayArmedAt = null;
     _vsrDeferPlay = false;
   }
 
@@ -547,6 +590,10 @@ mixin PlayerMixin {
     if (_playerDisposed) {
       return;
     }
+    // 复核 P3：门控武装期间错误抑制窗必然与「首次起播」重合，窗口内到达的真错误
+    // （403/超时/流下线）会被直接 return 掉、不重试也不提示。起播这一刻链重建写操作
+    // 早已完成，故解除抑制，让真错误走正常 mediaError 路径。
+    _suppressErrorRetry = false;
     Log.d('[VSR] 起播门控放开（$reason）→ play()');
     try {
       await player.play();
@@ -1515,6 +1562,8 @@ class PlayerController extends BaseController
     _escSubscription?.cancel();
     _vsrDeferPlayTimer?.cancel();
     _vsrDeferPlayTimer = null;
+    _vsrDeferPlaySettleTimer?.cancel();
+    _vsrDeferPlaySettleTimer = null;
     _vsrDeferPlay = false;
   }
 
