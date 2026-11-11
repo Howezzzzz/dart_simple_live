@@ -174,9 +174,10 @@ mixin PlayerMixin {
       _disarmVsrDeferPlay();
       await _syncRtxVsrCrop(trigger: 'init');
     }
-    // 诊断：进房后 5s 快照（看得见现场状态）
+    // 诊断：进房后 5s 快照（看得见现场状态）；绑定代际，避免跨初始化时旧定时器错标
+    final snapshotEpoch = _tlEpoch;
     Future.delayed(const Duration(seconds: 5), () {
-      if (!_playerDisposed) {
+      if (!_playerDisposed && snapshotEpoch == _tlEpoch) {
         _diagSnapshot('进房+5s');
       }
     });
@@ -579,14 +580,14 @@ mixin PlayerMixin {
     // 去重签名：倍数 + 裁切值 + 源尺寸 + 链状态（**不能只用裁切值当键**，见字段注释）。
     final signature = '${s ?? -1}|$desired|${rawW}x$rawH|$_rtxVsrChainApplied';
     if (signature == _lastRtxVsrSignature) return;
-    // 只在「确实要改」时打点（阶段4 复核：打在去重前会被 width/height 双监听与拖拽防抖重复
-    // 打出、数值不变也打 → 噪声）
-    Log.d('[VSR] 布局同步(触发=$trigger): 源=${rawW}x$rawH'
-        ' 播放区=${area?.$1 ?? "-"}x${area?.$2 ?? "-"}'
-        ' → scale=${s?.toStringAsFixed(2) ?? "-"} crop="$desired" 链=$enable');
     _enqueueCropWrite(() async {
       // 队列内再查一次：并发同值时只写第一笔，避免重复设置触发滤镜链重建。
       if (signature == _lastRtxVsrSignature) return;
+      // 打点放内层去重之后（定向复验）：width/height 是同一事件成对下发，height 侧那次
+      // 调用时外层签名尚未回填（回填在队列任务末尾）→ 打在外层仍会双打且归因失真。
+      Log.d('[VSR] 布局同步(触发=$trigger): 源=${rawW}x$rawH'
+          ' 播放区=${area?.$1 ?? "-"}x${area?.$2 ?? "-"}'
+          ' → scale=${s?.toStringAsFixed(2) ?? "-"} crop="$desired" 链=$enable');
       final (vfAction, vfValue) = rtxVsrVfAction(enable: enable, scale: s, currentScale: _lastRtxVsrScale);
       if (vfAction != 'none') {
         // 写/摘 vf 会重建 D3D11 链路，期间可能冒 stream.error → 误触重拉流（PR #195）：
@@ -1710,7 +1711,7 @@ class PlayerController extends BaseController
       if (event == null) {
         _lastRtxVsrSignature = null;
       }
-      _syncRtxVsrCrop();
+      _syncRtxVsrCrop(trigger: 'size');
       if ((player.state.width ?? 0) > 0 && (player.state.height ?? 0) > 0) {
         videoWidthRx.value = player.state.width!;
         videoHeightRx.value = player.state.height!;
