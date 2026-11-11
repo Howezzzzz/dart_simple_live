@@ -744,17 +744,22 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     setPlayer();
   }
 
-  void initPlaylist() async {
-    currentLineInfo.value = "线路${currentLineIndex + 1}";
-    errorMsg.value = "";
-
-    final mediaList = playUrls.map((url) {
+  /// 构造当前线路的播放列表（进房 / 换线路共用，保证两处口径一致）。
+  List<Media> buildPlayerMediaList() {
+    return playUrls.map((url) {
       var finalUrl = url;
       if (AppSettingsController.instance.playerForceHttps.value) {
         finalUrl = finalUrl.replaceAll("http://", "https://");
       }
       return Media(finalUrl, httpHeaders: playHeaders);
     }).toList();
+  }
+
+  void initPlaylist() async {
+    currentLineInfo.value = "线路${currentLineIndex + 1}";
+    errorMsg.value = "";
+
+    final mediaList = buildPlayerMediaList();
 
     // 初始化播放器并设置 ao 参数
     await initializePlayer();
@@ -768,6 +773,14 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     currentLineInfo.value = "线路${currentLineIndex + 1}";
     errorMsg.value = "";
 
+    // 换线路 / 出错重试同样走「挂好链再起播」（阶段4 复核发现的既有缺口）：
+    // 新线路分辨率与当前不同时，jump 会在**播放中**改 vf → 一次可见重载。
+    // 门控适用时由 player_controller 的 openSourceGated 接管：改用 open(play:false)
+    // （不能只靠 jump——media_kit 的 stream.width/height 带 distinct，同分辨率不发尺寸
+    // 事件 → 门控只能等超时，切线路会白卡几秒），链挂好后再自动起播。
+    if (await openSourceGated(buildPlayerMediaList(), index: currentLineIndex)) {
+      return;
+    }
     await player.jump(currentLineIndex);
   }
 
