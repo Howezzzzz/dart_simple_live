@@ -195,6 +195,30 @@ mixin PlayerMixin {
   /// 供宿主（LiveRoomController）在 `player.open` 时读取：本次是否应延迟起播。
   bool get vsrDeferPlayPending => _vsrDeferPlay;
 
+  /// 起播门控是否适用（Windows + VSR 开启）。进房 / 换线路 / 出错重试共用同一判据，
+  /// 与 initializePlayer 里的 vsrOn 同源（纯函数 vsrShouldDeferPlay）。
+  bool get _vsrGateApplicable => vsrShouldDeferPlay(
+        isWindows: Platform.isWindows,
+        vsrEnabled: AppSettingsController.instance.enableRtxVsr.value,
+      );
+
+  /// 换线路 / 出错重试专用：带 VSR 起播门控地换源（阶段4 复核发现的既有缺口）。
+  /// 返回 true = 已由门控路径接管（已按 play:false 打开，链挂好后自动起播），调用方不必再 jump。
+  ///
+  /// 为什么用 open 而不是「jump 后再 pause」：media_kit 的 stream.width/height 带 distinct
+  /// 去重，新旧分辨率相同时不会发尺寸事件 → 门控只能等超时 → 切线路白卡几秒；
+  /// 而 open() 内部会 stop() 发 null 尺寸，保证即便分辨率相同也能拿到尺寸事件。
+  Future<bool> openSourceGated(List<Media> mediaList, {int index = 0}) async {
+    if (!_vsrGateApplicable) {
+      return false;
+    }
+    _lastRtxVsrSignature = null;
+    Log.d('[VSR] 换线路/重试走起播门控：open(play:false) index=$index');
+    _armVsrDeferPlay();
+    await player.open(Playlist(mediaList, index: index), play: false);
+    return true;
+  }
+
   /// 播放区尺寸变化的防抖计时器（合并密集 resize 事件，避免滤镜链反复重挂）。
   Timer? _vsrSyncDebounce;
 
