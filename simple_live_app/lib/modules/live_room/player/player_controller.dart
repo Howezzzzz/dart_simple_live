@@ -711,8 +711,10 @@ mixin PlayerMixin {
     }
     await pp.setProperty('video-crop', t.crop);
     await pp.setProperty('video-aspect-override', t.aspect.toStringAsFixed(6));
-    if (t.renderSize != null) {
-      await videoController.setSize(width: t.renderSize.$1, height: t.renderSize.$2);
+    // record 字段不参与 field promotion，先落局部变量再判空（analyze 门禁）。
+    final renderSize = t.renderSize;
+    if (renderSize != null) {
+      await videoController.setSize(width: renderSize.$1, height: renderSize.$2);
     } else {
       await videoController.setSize();
     }
