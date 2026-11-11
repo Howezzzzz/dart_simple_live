@@ -129,6 +129,8 @@ mixin PlayerMixin {
       await pp.setProperty('vf', '');
       _lastRtxVsrScale = null;
       _rtxVsrChainApplied = false;
+      // 注（复核澄清）：这里 disarm 是安全的——initializePlayer 全仓只有一个调用点
+      // （initPlaylist），它紧接着就 `open(play: !vsrDeferPlayPending)`，VSR 关时即 play:true，必起播。
       _disarmVsrDeferPlay();
     }
     // 音量均衡：**起流前**预挂滤镜链（此处早于 live_room_controller 的 player.open）。
@@ -186,6 +188,10 @@ mixin PlayerMixin {
   /// （复核 P1：避免 play() 后布局（全屏/窗口自适应/拖窗）变化又改 vf → 重载）。
   Timer? _vsrDeferPlaySettleTimer;
   DateTime? _vsrDeferPlayArmedAt;
+
+  /// 门控代际：每次武装 +1。用于作废「已经 disarm、但 play() 还排在队列里」的旧 release
+  /// （复核：并发换源时旧 release 的 play() 会排在对方 open 之后 → 新源先播后挂链 = 一次可见重载）。
+  int _vsrGateEpoch = 0;
   static const Duration vsrDeferPlaySettle = Duration(milliseconds: 500);
   static const Duration vsrDeferPlaySettleMax = Duration(milliseconds: 1500);
 
@@ -222,11 +228,11 @@ mixin PlayerMixin {
     try {
       await player.open(Playlist(mediaList, index: index), play: false);
     } catch (e) {
-      // open 失败（dispose 竞态 / native handle 异常）：门控已武装但永远不会有人 play
-      // → 拆掉门控并返回 false，交回调用方走原来的 jump 路径（至少不会黑屏无人管）。
-      Log.d('[VSR] 门控换源失败，回退 jump: $e');
+      // open 失败：门控已武装但没人会 play。dispose 竞态下 jump 同样会抛（入口 disposed → AssertionError），
+      // 回退也救不回 → 直接认领（返回 true）避免二次未捕获异常；否则撤门控、交回调用方 jump 兜底。
+      Log.d('[VSR] 门控换源失败（disposed=$_playerDisposed）: $e');
       _disarmVsrDeferPlay();
-      return false;
+      return _playerDisposed;
     }
     return true;
   }
@@ -581,6 +587,7 @@ mixin PlayerMixin {
     _vsrDeferPlayTimer?.cancel();
     _vsrDeferPlaySettleTimer?.cancel();
     _vsrDeferPlaySettleTimer = null;
+    _vsrGateEpoch++;
     _vsrDeferPlayArmedAt = DateTime.now();
     _vsrDeferPlay = true;
     _vsrDeferPlayTimer = Timer(vsrDeferPlayTimeout, () {
@@ -622,6 +629,7 @@ mixin PlayerMixin {
     if (!_vsrDeferPlay) {
       return;
     }
+    final epoch = _vsrGateEpoch;
     _disarmVsrDeferPlay();
     if (_playerDisposed) {
       return;
@@ -630,6 +638,13 @@ mixin PlayerMixin {
     // （403/超时/流下线）会被直接 return 掉、不重试也不提示。起播这一刻链重建写操作
     // 早已完成，故解除抑制，让真错误走正常 mediaError 路径。
     _suppressErrorRetry = false;
+    // 复核（并发换源边角）：disarm 之后可能已有新的换源武装了门控（epoch 变了）；
+    // 此时这次 release 的 play() 会排在对方 open 之后执行 → 新源先播、链后挂 = 一次可见重载。
+    // 代际已变就放弃这次 play，交给新门控放行。
+    if (epoch != _vsrGateEpoch) {
+      Log.d('[VSR] 起播门控 release 作废（已有新换源）: $reason');
+      return;
+    }
     Log.d('[VSR] 起播门控放开（$reason）→ play()');
     try {
       await player.play();
@@ -1855,6 +1870,12 @@ class PlayerController extends BaseController
     _rtxVsrChainApplied = enabled;
     // 强制重算（开关变化必须重挂/摘链）。
     _lastRtxVsrSignature = null;
+    // 复核（换线路门控）：若起播门控正武装着（等尺寸事件挂链），此时把 VSR 关掉就没有链可等了
+    // —— 主动放行，别让用户白等超时兜底（最长 3s 黑屏）。释放会解除错误抑制并 play()。
+    if (!enabled && _vsrDeferPlay) {
+      Log.d('[VSR] 门控期间热关 VSR → 立即放行起播');
+      unawaited(_releaseVsrDeferPlay('vsr-off'));
+    }
     // 注：**不清 `_lastRtxVsrScale`**——它是「mpv 实际已挂链」的唯一记录，摘链判断依赖它非空；
     // 在决定动作前清空会导致关闭时永不摘链→绿条复现（阶段4 复核 P0）。
     // hwdec 与错误抑制由 `_syncRtxVsrCrop` 内部统一处理。
