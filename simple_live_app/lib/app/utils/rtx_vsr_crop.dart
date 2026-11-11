@@ -96,6 +96,16 @@ const double rtxVsrMaxScale = 4.0;
 String rtxVsrVfChain(double scale) =>
     'd3d11vpp=scale=${scale.toStringAsFixed(2)}:scaling-mode=nvidia';
 
+/// 是否需要为 VSR 延迟起播（方案 20261111）。
+///
+/// Windows + VSR 开启时，起播前先用兜底倍数挂链、拿到源分辨率后再改成自适应倍数，
+/// 这次「改 vf」会让 mpv 重启播放管线 → 进房「出画面又重载」。
+/// 故此时改为「先不自动起播、挂好自适应链再 play()」。
+/// **其它平台 / 开关关闭时必须保持自动起播**，否则会全局推迟起播 ——
+/// 本函数就是这条边界的纯逻辑防线（有回归测试）。
+bool vsrShouldDeferPlay({required bool isWindows, required bool vsrEnabled}) =>
+    isWindows && vsrEnabled;
+
 /// 依据「是否启用 / 本次倍数 / 当前已挂倍数」决定对 `vf` 的动作（纯逻辑，便于回归测试）。
 /// 返回 (`'none'|'set'|'clear'`, 链字符串或空串)。
 ///

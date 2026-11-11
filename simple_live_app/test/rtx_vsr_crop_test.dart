@@ -186,4 +186,15 @@ void main() {
           isNull);
     });
   });
+
+  // 方案 20261111（进房「出画面又重载」）的回归防线：只有 Windows + VSR 开启才允许
+  // 延迟起播；其余必须保持自动起播，否则全平台都会推迟起播。
+  group('vsrShouldDeferPlay（起播门控边界）', () {
+    test('仅 Windows 且 VSR 开启才延迟起播', () {
+      expect(vsrShouldDeferPlay(isWindows: true, vsrEnabled: true), isTrue);
+      expect(vsrShouldDeferPlay(isWindows: true, vsrEnabled: false), isFalse);
+      expect(vsrShouldDeferPlay(isWindows: false, vsrEnabled: true), isFalse);
+      expect(vsrShouldDeferPlay(isWindows: false, vsrEnabled: false), isFalse);
+    });
+  });
 }

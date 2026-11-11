@@ -759,7 +759,9 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     // 初始化播放器并设置 ao 参数
     await initializePlayer();
 
-    await player.open(Playlist(mediaList));
+    // VSR 起播门控（方案 20261111）：Windows + VSR 开启时先不自动起播，
+    // 待 player_controller 按自适应倍数把 vf 挂好后再 play()——避免起播后重挂 vf 触发 playback restart。
+    await player.open(Playlist(mediaList), play: !vsrDeferPlayPending);
   }
 
   void setPlayer() async {

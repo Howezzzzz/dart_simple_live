@@ -107,19 +107,29 @@ mixin PlayerMixin {
     //  gpu-shader-cache-dir = "~~/cache/shader"
     //  watch-later-dir = "~~/cache/watch_later"
     // NVIDIA RTX VSR 支持 (Windows 平台)
-    if (Platform.isWindows && AppSettingsController.instance.enableRtxVsr.value) {
+    // 注：抽成纯函数用于回归防线——「是否因 VSR 而延迟起播」只允许 Windows+VSR 开启，
+    // 其它情况必须保持自动起播（见 rtx_vsr_crop.dart 的 vsrShouldDeferPlay）。
+    final vsrOn = vsrShouldDeferPlay(
+      isWindows: Platform.isWindows,
+      vsrEnabled: AppSettingsController.instance.enableRtxVsr.value,
+    );
+    if (vsrOn) {
       await pp.setProperty('hwdec', 'd3d11va');
       // 放大倍数与 rtx_vsr_crop.dart 的 rtxVsrScale 单一事实来源（复核 P3-4）：
       // 手动写两处 scale 会脱钩——倍数调大时裁切矩形落在放大帧内 → 裁错且无 safe-fail。
       await pp.setProperty('vf', rtxVsrVfChain(rtxVsrScale));
       _lastRtxVsrScale = rtxVsrScale;
       _rtxVsrChainApplied = true;
+      // 起播门控（方案 20261111）：此处仅「兜底预挂」，真正的自适应倍数要等源分辨率；
+      // 为免起播后再改 vf 触发 playback restart，本次 open 先不自动起播（见 vsrDeferPlayPending）。
+      _armVsrDeferPlay();
     } else if (Platform.isWindows) {
       // 关闭 VSR 时必须摘掉已挂上的滤镜链（复核 P2-1）：只改标志不摘链的话，
       // 同一会话 F5/切清晰度重初始化后，链仍在放大画面、裁切却被清空 → 绿条复现且 VSR 代价照付。
       await pp.setProperty('vf', '');
       _lastRtxVsrScale = null;
       _rtxVsrChainApplied = false;
+      _disarmVsrDeferPlay();
     }
     // 音量均衡：**起流前**预挂滤镜链（此处早于 live_room_controller 的 player.open）。
     // 旧的「首帧播放后才挂」会让进房头 1–3s 完全没有处理（两轮复核整合结论）。
@@ -154,6 +164,21 @@ mixin PlayerMixin {
 
   /// 当前已挂上的 VSR 倍数（null = 未挂链），用于判断是否需要重挂滤镜链。
   double? _lastRtxVsrScale;
+
+  /// VSR 起播门控（方案 20261111）：Windows + VSR 开启时**先不自动起播**，
+  /// 等源分辨率就绪、按自适应倍数把 vf 挂好之后再 `play()`。
+  /// 否则起播后才挂/改 vf 会触发 mpv playback restart → 进房「出画面又重载」。
+  bool _vsrDeferPlay = false;
+  Timer? _vsrDeferPlayTimer;
+
+  /// 起播门控超时兜底（拿不到源分辨率时不卡死，超时直接起播）。
+  static const Duration vsrDeferPlayTimeout = Duration(seconds: 2);
+
+  /// 已写/摘 VSR 链次数（观测用：真机日志可看出进房是否只挂一次）。
+  int _vsrChainWriteCount = 0;
+
+  /// 供宿主（LiveRoomController）在 `player.open` 时读取：本次是否应延迟起播。
+  bool get vsrDeferPlayPending => _vsrDeferPlay;
 
   /// 播放区尺寸变化的防抖计时器（合并密集 resize 事件，避免滤镜链反复重挂）。
   Timer? _vsrSyncDebounce;
@@ -423,9 +448,12 @@ mixin PlayerMixin {
             await pp.setProperty('hwdec', 'd3d11va');
             await pp.setProperty('vf', vfValue);
             _lastRtxVsrScale = s;
+            Log.d('[VSR] 写入滤镜链 #${++_vsrChainWriteCount}'
+                ' scale=${s?.toStringAsFixed(2)}');
           } else {
             await pp.setProperty('vf', '');
             _lastRtxVsrScale = null;
+            Log.d('[VSR] 摘除滤镜链 #${++_vsrChainWriteCount}');
           }
         } finally {
           _scheduleSuppressRelease(token);
@@ -440,6 +468,10 @@ mixin PlayerMixin {
       }
       // 写入成功后才记缓存（复核 P3-3）：异常（dispose 竞态）时保持旧值，下次同步会重试。
       _lastRtxVsrSignature = signature;
+      // 起播门控：链已按（自适应）倍数挂好 → 放开起播。
+      if (_vsrDeferPlay) {
+        await _releaseVsrDeferPlay('chain-ready');
+      }
       if (desired.isEmpty) return;
       // 回读校验（参考音量均衡 af 的做法）：media_kit 的 setProperty 不返回错误，
       // 属性缺失/语法级拒绝时会静默失败 → 回读一次让失败可见（RISK-58）。
@@ -482,6 +514,40 @@ mixin PlayerMixin {
     _vsrSyncDebounce = Timer(const Duration(milliseconds: 250), () {
       _syncRtxVsrCrop();
     });
+  }
+
+  /// 武装「起播门控」（Windows + VSR 开启时，由 initializePlayer 调用）。
+  void _armVsrDeferPlay() {
+    _vsrDeferPlayTimer?.cancel();
+    _vsrDeferPlay = true;
+    _vsrDeferPlayTimer = Timer(vsrDeferPlayTimeout, () {
+      // 兜底：拿不到源分辨率（异常流）时不卡住，直接起播（此时可能仍有一次重启，属降级）。
+      _releaseVsrDeferPlay('timeout');
+    });
+  }
+
+  /// 取消起播门控（未武装时为空操作）。
+  void _disarmVsrDeferPlay() {
+    _vsrDeferPlayTimer?.cancel();
+    _vsrDeferPlayTimer = null;
+    _vsrDeferPlay = false;
+  }
+
+  /// 放开起播门控：恢复播放（幂等；未武装则不做）。
+  Future<void> _releaseVsrDeferPlay(String reason) async {
+    if (!_vsrDeferPlay) {
+      return;
+    }
+    _disarmVsrDeferPlay();
+    if (_playerDisposed) {
+      return;
+    }
+    Log.d('[VSR] 起播门控放开（$reason）→ play()');
+    try {
+      await player.play();
+    } catch (e) {
+      Log.d('[VSR] 起播门控 play() 失败: $e');
+    }
   }
 
   /// 播放区（Video widget）的物理像素尺寸；不可得时返回 null（调用方走固定 2x 兜底）。
@@ -1433,6 +1499,9 @@ class PlayerController extends BaseController
     _pipSubscription?.cancel();
     _playingSubscription?.cancel();
     _escSubscription?.cancel();
+    _vsrDeferPlayTimer?.cancel();
+    _vsrDeferPlayTimer = null;
+    _vsrDeferPlay = false;
   }
 
   void mediaEnd() {
