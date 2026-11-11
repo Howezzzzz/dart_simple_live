@@ -40,6 +40,51 @@ import 'package:window_manager/window_manager.dart';
 /// 需在 set 之后留出窗口，避免误触发 mediaError 重拉流（PR #195 教训）
 const Duration volumeNormSuppressDuration = Duration(seconds: 2);
 
+/// 一次 VSR 链写入的完整目标（P1-1 起播前单次写链：门控期吞中间写，
+/// settle 尾沿 / 超时放行时一次性写入终值）。
+class _VsrTarget {
+  const _VsrTarget({
+    required this.signature,
+    required this.trigger,
+    required this.enable,
+    required this.scale,
+    required this.crop,
+    required this.aspect,
+    required this.renderSize,
+    required this.rawW,
+    required this.rawH,
+    required this.area,
+  });
+
+  /// 去重签名（与 _lastRtxVsrSignature 同格式）。
+  final String signature;
+
+  /// 触发来源（size / layout / toggle / init / release），用于日志归因。
+  final String trigger;
+
+  /// 是否挂链（VSR 开且倍数有效）。
+  final bool enable;
+
+  /// 自适应倍数（null = 不挂）。
+  final double? scale;
+
+  /// mpv video-crop 目标值（空串 = 不裁）。
+  final String crop;
+
+  /// video-aspect-override 目标值。
+  final double aspect;
+
+  /// 渲染画布尺寸（null = 恢复默认）。
+  final (int, int)? renderSize;
+
+  /// 决策时的源尺寸（写后用于校验尺寸是否已变）。
+  final int rawW;
+  final int rawH;
+
+  /// 决策时的播放区物理尺寸（日志用）。
+  final (int, int)? area;
+}
+
 mixin PlayerMixin {
   GlobalKey<VideoState> globalPlayerKey = GlobalKey<VideoState>();
   GlobalKey globalDanmuKey = GlobalKey();
@@ -125,14 +170,10 @@ mixin PlayerMixin {
     );
     if (vsrOn) {
       await pp.setProperty('hwdec', 'd3d11va');
-      // 放大倍数与 rtx_vsr_crop.dart 的 rtxVsrScale 单一事实来源（复核 P3-4）：
-      // 手动写两处 scale 会脱钩——倍数调大时裁切矩形落在放大帧内 → 裁错且无 safe-fail。
-      await pp.setProperty('vf', rtxVsrVfChain(rtxVsrScale));
-      _lastRtxVsrScale = rtxVsrScale;
+      // 起播门控（P1-1 起播前单次写链）：不再预挂 2.0 兜底链——链在门控放行时按自适应
+      // 终值**一次**写入；预挂 2.0 只在门控**超时**路径兜底（见 _preHangFallbackChain）。
+      // _rtxVsrChainApplied 置 true 表示本次播放启用 VSR（门控期 plan 按「开」算自适应倍数）。
       _rtxVsrChainApplied = true;
-      // 预挂也计入链写入次数（复核 P2：否则真机日志判不出「到底挂了几次」）。
-      Log.d('[VSR] 预挂兜底链 #${++_vsrChainWriteCount}'
-          ' scale=${rtxVsrScale.toStringAsFixed(2)}（起播前）');
     } else if (Platform.isWindows) {
       // 关闭 VSR 时必须摘掉已挂上的滤镜链（复核 P2-1）：只改标志不摘链的话，
       // 同一会话 F5/切清晰度重初始化后，链仍在放大画面、裁切却被清空 → 绿条复现且 VSR 代价照付。
@@ -183,7 +224,8 @@ mixin PlayerMixin {
     });
   }
 
-  /// 本次播放是否已挂上 VSR 滤镜链（决定能否动 video-crop）。
+  /// 本次播放是否**应启用** VSR 滤镜链（P1-1 起：门控放行前链尚未挂，此标志=用户意愿+链状态
+  /// 合一，决定 plan 按「开」算自适应倍数、能否动 video-crop；放行写链后即真实已挂）。
   bool _rtxVsrChainApplied = false;
 
   /// 记录最近一次**已应用**的 VSR 同步签名（裁切值 + 源尺寸 + 链状态），用于去重。
@@ -220,8 +262,15 @@ mixin PlayerMixin {
   /// 已写/摘 VSR 链次数（观测用：真机日志可看出进房是否只挂一次）。
   int _vsrChainWriteCount = 0;
 
+  /// P1-1 起播前单次写链：门控期内吞中间写，暂存的最新写链目标
+  /// （settle 尾沿 / 超时放行时一次消费）。null = 暂无目标（超时路径走预挂兜底 2.0）。
+  _VsrTarget? _vsrDeferPlayTarget;
+
   /// 供宿主（LiveRoomController）在 `player.open` 时读取：本次是否应延迟起播。
   bool get vsrDeferPlayPending => _vsrDeferPlay;
+
+  /// [TL] 时间线：记录 `player.open` 发起节点（宿主在 open 前调用；E 批遗留，P1-1 补）。
+  void tlMarkOpen() => _tlMark('open 发起');
 
   /// 起播门控是否适用（Windows + VSR 开启）。进房 / 换线路 / 出错重试共用同一判据，
   /// 与 initializePlayer 里的 vsrOn 同源（纯函数 vsrShouldDeferPlay）。
@@ -246,6 +295,7 @@ mixin PlayerMixin {
     // 否则（RISK-71：open 可能清掉链）换线路后均衡会静默丢失，直到下次重初始化。
     _volumeNormInitialized = false;
     Log.d('[VSR] 换线路/重试走起播门控：open(play:false) index=$index');
+    _tlMark('open 发起');
     _armVsrDeferPlay();
     try {
       await player.open(Playlist(mediaList, index: index), play: false);
@@ -571,10 +621,14 @@ mixin PlayerMixin {
     final desired = plan.crop;
     final aspectValue = plan.aspect;
     final renderSize = plan.renderSize;
-    // 起播门控（复核 P1/P5 + 阶段4 复盘）：先判「是否已无需改动」——是则**立即放行**（免白等
-    // settle）；否则安排「布局稳定后放开」（后续同步会顺延）。判定用**回读**（留存签名会被
-    // open 清链弄陈旧）：vf 用 rtxVsrVfAction 判（依赖跨 open 存活的 _lastRtxVsrScale），
-    // 戴切回读比对（戴切/显示比例/画布同源，戴切一致即可认为整链已到位）。
+    // 去重签名：倍数 + 裁切值 + 源尺寸 + 链状态（**不能只用裁切值当键**，见字段注释）。
+    final signature = '${s ?? -1}|$desired|${rawW}x$rawH|$_rtxVsrChainApplied';
+    // 起播门控（P1-1 起播前单次写链）：门控期内**吞中间写**——不立即写链，只把最新目标
+    // 记入 _vsrDeferPlayTarget（后续尺寸/布局同步会覆盖成更新目标），settle 尾沿 / 超时
+    // 放行时**一次写入终值**（vf 3 写→1 写，N4/N5）。
+    // 例外：链路已与目标一致（vfAction 'none' + 裁切回读一致）→ 立即放行，0 等待（e8e3dac）。
+    // 判定用**回读**（留存签名会被 open 清链弄陈旧）：vf 用 rtxVsrVfAction 判
+    // （依赖跨 open 存活的 _lastRtxVsrScale），戴切回读比对（戴切/显示比例/画布同源）。
     if (_vsrDeferPlay) {
       final (vfAction0, _) = rtxVsrVfAction(
           enable: enable, scale: s, currentScale: _lastRtxVsrScale);
@@ -583,80 +637,115 @@ mixin PlayerMixin {
         _releaseVsrDeferPlay('chain-unchanged');
         return;
       }
+      _vsrDeferPlayTarget = _VsrTarget(
+        signature: signature,
+        trigger: trigger,
+        enable: enable,
+        scale: s,
+        crop: desired,
+        aspect: aspectValue,
+        renderSize: renderSize,
+        rawW: rawW,
+        rawH: rawH,
+        area: area,
+      );
+      Log.d('[VSR] 门控: 暂存写链目标(触发=$trigger) scale=${s?.toStringAsFixed(2) ?? '-'}'
+          ' crop="$desired" → settle 尾沿单次写入');
       _scheduleVsrDeferPlayRelease();
+      return;
     }
-    // 去重签名：倍数 + 裁切值 + 源尺寸 + 链状态（**不能只用裁切值当键**，见字段注释）。
-    final signature = '${s ?? -1}|$desired|${rawW}x$rawH|$_rtxVsrChainApplied';
     if (signature == _lastRtxVsrSignature) return;
     _enqueueCropWrite(() async {
       // 队列内再查一次：并发同值时只写第一笔，避免重复设置触发滤镜链重建。
       if (signature == _lastRtxVsrSignature) return;
-      // 打点放内层去重之后（定向复验）：width/height 是同一事件成对下发，height 侧那次
-      // 调用时外层签名尚未回填（回填在队列任务末尾）→ 打在外层仍会双打且归因失真。
-      Log.d('[VSR] 布局同步(触发=$trigger): 源=${rawW}x$rawH'
-          ' 播放区=${area?.$1 ?? "-"}x${area?.$2 ?? "-"}'
-          ' → scale=${s?.toStringAsFixed(2) ?? "-"} crop="$desired" 链=$enable');
-      final (vfAction, vfValue) = rtxVsrVfAction(enable: enable, scale: s, currentScale: _lastRtxVsrScale);
-      if (vfAction != 'none') {
-        // 写/摘 vf 会重建 D3D11 链路，期间可能冒 stream.error → 误触重拉流（PR #195）：
-        // 所有会动 vf 的路径（开关、切分辨率、resize 防抖）统一在此加抑制窗。
-        final token = ++_suppressToken;
-        _suppressErrorRetry = true;
-        try {
-          if (vfAction == 'set') {
-            // d3d11vpp 需 D3D11 硬件帧上下文
-            await pp.setProperty('hwdec', 'd3d11va');
-            await pp.setProperty('vf', vfValue);
-            _lastRtxVsrScale = s;
-            Log.d('[VSR] 写入滤镜链 #${++_vsrChainWriteCount}'
-                ' scale=${s?.toStringAsFixed(2)}');
-          } else {
-            await pp.setProperty('vf', '');
-            _lastRtxVsrScale = null;
-            Log.d('[VSR] 摘除滤镜链 #${++_vsrChainWriteCount}');
-          }
-        } finally {
-          _scheduleSuppressRelease(token);
-        }
-      }
-      await pp.setProperty('video-crop', desired);
-      await pp.setProperty('video-aspect-override', aspectValue.toStringAsFixed(6));
-      if (renderSize != null) {
-        await videoController.setSize(width: renderSize.$1, height: renderSize.$2);
-      } else {
-        await videoController.setSize();
-      }
-      // 写入成功后才记缓存（复核 P3-3）：异常（dispose 竞态）时保持旧值，下次同步会重试。
-      // 复核 P4：若写期间源尺寸已变（open/切流把签名作废后又来新尺寸），别用旧签名回填
-      // ——否则新尺寸与旧签名相同会被短路 → 链不纠正、门控只能等超时。
-      if (player.state.width != rawW || player.state.height != rawH) {
-        Log.d('[VSR] 尺寸已变（${player.state.width}x${player.state.height}'
-            ' != ${rawW}x$rawH）—— 不回填签名，等下个尺寸事件重算');
-        return;
-      }
-      _lastRtxVsrSignature = signature;
-      _tlMark('链就绪');
-      if (desired.isEmpty) return;
-      // 回读校验（参考音量均衡 af 的做法）：media_kit 的 setProperty 不返回错误，
-      // 属性缺失/语法级拒绝时会静默失败 → 回读一次让失败可见（RISK-58）。
-      // 注意：回读只能证明“属性被接受”，不能证明 VO 逐帧应用成功（越界值由 mpv
-      // 在应用阶段忽略并打印日志）——成功日志措辞按此收敛为“已写入”。
-      final readback = (await pp.getProperty('video-crop')).trim();
-      if (readback.replaceAll(' ', '') == desired) {
-        Log.d(
-          '[VSR] 已写入底部补边裁切 video-crop=$desired'
-          ' scale=${s?.toStringAsFixed(2)}'
-          ' aspect=${aspectValue.toStringAsFixed(6)}'
-          ' renderSize=${renderSize?.$1}x${renderSize?.$2}'
-          '（源 ${player.state.width}x${player.state.height}）',
-        );
-      } else {
-        Log.w(
-          '[VSR] video-crop 未生效：期望 $desired，回读 "$readback"'
-          '（源 ${player.state.width}x${player.state.height}）—— 可能 libmpv 不支持该属性',
-        );
-      }
+      await _applyVsrTarget(_VsrTarget(
+        signature: signature,
+        trigger: trigger,
+        enable: enable,
+        scale: s,
+        crop: desired,
+        aspect: aspectValue,
+        renderSize: renderSize,
+        rawW: rawW,
+        rawH: rawH,
+        area: area,
+      ));
     });
+  }
+
+  /// 应用一次 VSR 链写入（vf / video-crop / video-aspect-override / setSize + 回读校验）。
+  /// 常规同步与起播门控放行点共用（P1-1 单次写链）。
+  Future<void> _applyVsrTarget(_VsrTarget t) async {
+    final pp = player.platform;
+    if (pp is! NativePlayer) return;
+    // 队列内再查一次（并发同值 / 放行点防重）：只写第一笔，避免重复设置触发滤镜链重建。
+    if (t.signature == _lastRtxVsrSignature) return;
+    // 打点放内层去重之后（定向复验）：width/height 是同一事件成对下发，height 侧那次
+    // 调用时外层签名尚未回填（回填在任务末尾）→ 打在外层仍会双打且归因失真。
+    Log.d('[VSR] 布局同步(触发=${t.trigger}): 源=${t.rawW}x${t.rawH}'
+        ' 播放区=${t.area?.$1 ?? "-"}x${t.area?.$2 ?? "-"}'
+        ' → scale=${t.scale?.toStringAsFixed(2) ?? "-"} crop="${t.crop}" 链=${t.enable}');
+    final (vfAction, vfValue) = rtxVsrVfAction(
+        enable: t.enable, scale: t.scale, currentScale: _lastRtxVsrScale);
+    if (vfAction != 'none') {
+      // 写/摘 vf 会重建 D3D11 链路，期间可能冒 stream.error → 误触重拉流（PR #195）：
+      // 所有会动 vf 的路径（开关、切分辨率、resize 防抖）统一在此加抑制窗。
+      final token = ++_suppressToken;
+      _suppressErrorRetry = true;
+      try {
+        if (vfAction == 'set') {
+          // d3d11vpp 需 D3D11 硬件帧上下文
+          await pp.setProperty('hwdec', 'd3d11va');
+          await pp.setProperty('vf', vfValue);
+          _lastRtxVsrScale = t.scale;
+          Log.d('[VSR] 写入滤镜链 #${++_vsrChainWriteCount}'
+              ' scale=${t.scale?.toStringAsFixed(2)}');
+        } else {
+          await pp.setProperty('vf', '');
+          _lastRtxVsrScale = null;
+          Log.d('[VSR] 摘除滤镜链 #${++_vsrChainWriteCount}');
+        }
+      } finally {
+        _scheduleSuppressRelease(token);
+      }
+    }
+    await pp.setProperty('video-crop', t.crop);
+    await pp.setProperty('video-aspect-override', t.aspect.toStringAsFixed(6));
+    if (t.renderSize != null) {
+      await videoController.setSize(width: t.renderSize.$1, height: t.renderSize.$2);
+    } else {
+      await videoController.setSize();
+    }
+    // 写入成功后才记缓存（复核 P3-3）：异常（dispose 竞态）时保持旧值，下次同步会重试。
+    // 复核 P4：若写期间源尺寸已变（open/切流把签名作废后又来新尺寸），别用旧签名回填
+    // ——否则新尺寸与旧签名相同会被短路 → 链不纠正、门控只能等超时。
+    if (player.state.width != t.rawW || player.state.height != t.rawH) {
+      Log.d('[VSR] 尺寸已变（${player.state.width}x${player.state.height}'
+          ' != ${t.rawW}x${t.rawH}）—— 不回填签名，等下个尺寸事件重算');
+      return;
+    }
+    _lastRtxVsrSignature = t.signature;
+    _tlMark('链就绪');
+    if (t.crop.isEmpty) return;
+    // 回读校验（参考音量均衡 af 的做法）：media_kit 的 setProperty 不返回错误，
+    // 属性缺失/语法级拒绝时会静默失败 → 回读一次让失败可见（RISK-58）。
+    // 注意：回读只能证明“属性被接受”，不能证明 VO 逐帧应用成功（越界值由 mpv
+    // 在应用阶段忽略并打印日志）——成功日志措辞按此收敛为“已写入”。
+    final readback = (await pp.getProperty('video-crop')).trim();
+    if (readback.replaceAll(' ', '') == t.crop) {
+      Log.d(
+        '[VSR] 已写入底部补边裁切 video-crop=${t.crop}'
+        ' scale=${t.scale?.toStringAsFixed(2)}'
+        ' aspect=${t.aspect.toStringAsFixed(6)}'
+        ' renderSize=${t.renderSize?.$1}x${t.renderSize?.$2}'
+        '（源 ${player.state.width}x${player.state.height}）',
+      );
+    } else {
+      Log.w(
+        '[VSR] video-crop 未生效：期望 ${t.crop}，回读 "$readback"'
+        '（源 ${player.state.width}x${player.state.height}）—— 可能 libmpv 不支持该属性',
+      );
+    }
   }
 
   /// 回读比对：当前已挂的 `video-crop` 是否与目标一致（供「链路 noop 立即放行」判定）。
@@ -701,6 +790,7 @@ mixin PlayerMixin {
     _vsrDeferPlaySettleTimer?.cancel();
     _vsrDeferPlaySettleTimer = null;
     _vsrGateEpoch++;
+    _vsrDeferPlayTarget = null;
     _vsrDeferPlayArmedAt = DateTime.now();
     _vsrDeferPlay = true;
     Log.d('[VSR] 门控: 武装 timeout=${vsrDeferPlayTimeout.inMilliseconds}ms');
@@ -735,16 +825,20 @@ mixin PlayerMixin {
     _vsrDeferPlaySettleTimer?.cancel();
     _vsrDeferPlaySettleTimer = null;
     _vsrDeferPlayArmedAt = null;
+    _vsrDeferPlayTarget = null;
     _vsrDeferPlay = false;
   }
 
-  /// 放开起播门控：恢复播放（幂等；未武装则不做）。
+  /// 放开起播门控：先把门控期暂存的写链目标**一次写入**（起播前单次写链；预挂只在超时路径
+  /// 兜底），再恢复播放（幂等；未武装则不做）。
   Future<void> _releaseVsrDeferPlay(String reason) async {
     if (!_vsrDeferPlay) {
       return;
     }
     final epoch = _vsrGateEpoch;
     final armedAt = _vsrDeferPlayArmedAt;
+    // 先取出暂存目标（_disarmVsrDeferPlay 会清空它），放行点单次写链。
+    final target = _vsrDeferPlayTarget;
     _disarmVsrDeferPlay();
     if (_playerDisposed) {
       return;
@@ -759,12 +853,66 @@ mixin PlayerMixin {
       Log.d('[VSR] 起播门控 release 作废（已有新换源）: $reason');
       return;
     }
+    if (target != null) {
+      // 起播前单次写链（P1-1）：门控期吞掉的中间写在放行点一次性写入终值。
+      Log.d('[VSR] 门控: 放行点单次写链(原因=$reason) scale=${target.scale?.toStringAsFixed(2) ?? '-'}'
+          ' crop="${target.crop}" 链=${target.enable}');
+      try {
+        await _applyVsrTarget(target);
+      } catch (e) {
+        // 放行点是 fire-and-forget（定时器/宿主 unawaited），不 catch 会成未处理异步异常；
+        // 写链失败不阻塞起播（降级为不带 VSR 直接播）。
+        Log.d('[VSR] 门控放行点写链失败: $e');
+      }
+    } else if (reason == 'timeout') {
+      // 预挂只在超时路径（P1-1）：拿不到源分辨率 → 预挂 2.0 兜底链再起播（降级）。
+      try {
+        await _preHangFallbackChain();
+      } catch (e) {
+        Log.d('[VSR] 门控超时预挂失败: $e');
+      }
+    } else if (reason == 'vsr-off' &&
+        _lastRtxVsrScale != null &&
+        !_rtxVsrChainApplied) {
+      // 门控期热关 VSR 且从未收到尺寸事件（sync 早退、未写摘链目标）——上一路流遗留的链
+      // 仍挂在 mpv 里，这里兜底摘掉，避免「关 VSR 后画面仍被放大/绿条复现」（P0 级残留）。
+      try {
+        final pp = player.platform;
+        if (pp is NativePlayer) {
+          await pp.setProperty('vf', '');
+          _lastRtxVsrScale = null;
+          Log.d('[VSR] 门控 vsr-off 兜底摘链 #${++_vsrChainWriteCount}（无尺寸事件，sync 未写）');
+        }
+      } catch (e) {
+        Log.d('[VSR] 门控 vsr-off 兜底摘链失败: $e');
+      }
+    }
     _tlMark('play()');
     Log.d('[VSR] 门控放开（$reason）等待=${armedAt == null ? "?" : "${DateTime.now().difference(armedAt).inMilliseconds}ms"} → play()');
     try {
       await player.play();
     } catch (e) {
       Log.d('[VSR] 起播门控 play() 失败: $e');
+    }
+  }
+
+  /// 门控超时兜底（P1-1「预挂只在超时路径」）：拿不到源分辨率时预挂 2.0 兜底链，
+  /// 保证开了 VSR 就有放大效果（此时尺寸未知、无法自适应，可能仍有一次重载，属降级）。
+  /// 若上一路流遗留的链仍在（_lastRtxVsrScale 非空）则不动它，避免无谓改倍数。
+  Future<void> _preHangFallbackChain() async {
+    if (!_rtxVsrChainApplied || _lastRtxVsrScale != null) return;
+    final pp = player.platform;
+    if (pp is! NativePlayer) return;
+    final token = ++_suppressToken;
+    _suppressErrorRetry = true;
+    try {
+      await pp.setProperty('hwdec', 'd3d11va');
+      await pp.setProperty('vf', rtxVsrVfChain(rtxVsrScale));
+      _lastRtxVsrScale = rtxVsrScale;
+      Log.d('[VSR] 预挂兜底链 #${++_vsrChainWriteCount}'
+          ' scale=${rtxVsrScale.toStringAsFixed(2)}（门控超时降级）');
+    } finally {
+      _scheduleSuppressRelease(token);
     }
   }
 
