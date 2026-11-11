@@ -150,8 +150,13 @@ mixin PlayerMixin {
         )) {
       await _enqueueVolumeNorm(() => _preApplyVolumeNorm());
     }
-    // 同步底部补边裁切（VSR 开启才裁；关闭时显式清空，避免切线路等场景残留上次的裁切）
-    await _syncRtxVsrCrop();
+    // 同步底部补边裁切（VSR 开启才裁；关闭时显式清空，避免切线路等场景残留上次的裁切）。
+    // 注：起播门控武装时**跳过此处预同步**——此刻 player.state 还是上一路流的旧尺寸，
+    // 此时同步会写入错的链/裁切、并可能提前放开起播；真正的同步由 open 后「尺寸重置 → 新尺寸」
+    // 事件驱动（见 width/height 监听器里对 null 的签名作废，复核发现）。
+    if (!_vsrDeferPlay) {
+      await _syncRtxVsrCrop();
+    }
   }
 
   /// 本次播放是否已挂上 VSR 滤镜链（决定能否动 video-crop）。
@@ -1452,6 +1457,11 @@ class PlayerController extends BaseController
     });
     _widthSubscription = player.stream.width.listen((event) {
       Log.d('width:$event  W:${(player.state.width)}  H:${(player.state.height)}');
+      // 源尺寸被重置（open/stop 后 media_kit 会发 null）→ 作废去重签名：
+      // 否则新流尺寸与上次完全相同时签名相同→短路→链不纠正、起播门控只靠超时放开（复核发现）。
+      if (event == null) {
+        _lastRtxVsrSignature = null;
+      }
       _syncRtxVsrCrop();
       // RISK-17：分辨率一到就记下来（与「自适应/自动全屏」等设置解耦），
       // 供页面判定覆盖式面板；否则在未开自适应或处于全屏时该值恒为 0 → 永不折叠。
@@ -1474,6 +1484,10 @@ class PlayerController extends BaseController
     });
     _heightSubscription = player.stream.height.listen((event) {
       Log.d('height:$event  W:${(player.state.width)}  H:${(player.state.height)}');
+      // 同 width 监听：尺寸重置即作废签名（复核发现）。
+      if (event == null) {
+        _lastRtxVsrSignature = null;
+      }
       _syncRtxVsrCrop();
       if ((player.state.width ?? 0) > 0 && (player.state.height ?? 0) > 0) {
         videoWidthRx.value = player.state.width!;
