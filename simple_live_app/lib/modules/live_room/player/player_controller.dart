@@ -156,9 +156,12 @@ mixin PlayerMixin {
     // 起播门控：在**末尾**才武装（复核 P6：让超时从 open 前一刻起算，不被前面的音量均衡
     // 预挂等 await 吃掉预算）；武装时跳过此处预同步——此刻 player.state 还是上一路流的旧尺寸，
     // 同步会写入错的链/裁切；真正的同步由 open 后「尺寸重置 → 新尺寸」事件驱动（见 width/height 监听）。
-    if (vsrOn) {
+    if (vsrOn && _vsrGateApplicable) {
       _armVsrDeferPlay();
     } else {
+      // 复验 P3：vsrOn 是本函数**开头**的快照，中途热关 VSR 会让它过期——若仍按它武装，
+      // 后面 open(play:false) 就会白等到超时（最长 3s）。这里用实时判据再确认一次。
+      _disarmVsrDeferPlay();
       await _syncRtxVsrCrop();
     }
   }
@@ -189,8 +192,10 @@ mixin PlayerMixin {
   Timer? _vsrDeferPlaySettleTimer;
   DateTime? _vsrDeferPlayArmedAt;
 
-  /// 门控代际：每次武装 +1。用于作废「已经 disarm、但 play() 还排在队列里」的旧 release
-  /// （复核：并发换源时旧 release 的 play() 会排在对方 open 之后 → 新源先播后挂链 = 一次可见重载）。
+  /// 门控代际：每次武装 +1。
+  /// **防御性守卫**（复验 P2）：「当前 `_releaseVsrDeferPlay` 在比对前无任何 await（Dart 单线程）」
+  /// ⇒ 恒不触发；且实测 release 的 play() 一定先于后续 open() 入锁队列，不存在「新源先播后挂链」。
+  /// 保留它是为了将来一旦在 play() 前插入 await（例如等串行队列）时能自动挡掉过期 release。
   int _vsrGateEpoch = 0;
   static const Duration vsrDeferPlaySettle = Duration(milliseconds: 500);
   static const Duration vsrDeferPlaySettleMax = Duration(milliseconds: 1500);
@@ -638,9 +643,8 @@ mixin PlayerMixin {
     // （403/超时/流下线）会被直接 return 掉、不重试也不提示。起播这一刻链重建写操作
     // 早已完成，故解除抑制，让真错误走正常 mediaError 路径。
     _suppressErrorRetry = false;
-    // 复核（并发换源边角）：disarm 之后可能已有新的换源武装了门控（epoch 变了）；
-    // 此时这次 release 的 play() 会排在对方 open 之后执行 → 新源先播、链后挂 = 一次可见重载。
-    // 代际已变就放弃这次 play，交给新门控放行。
+    // 防御性守卫（当前不可达，见 _vsrGateEpoch 注释）：若将来 play() 前插入了 await，
+    // 这里能挡掉「已被 disarm、又被新换源取代」的过期 release。
     if (epoch != _vsrGateEpoch) {
       Log.d('[VSR] 起播门控 release 作废（已有新换源）: $reason');
       return;
@@ -1611,11 +1615,8 @@ class PlayerController extends BaseController
     _pipSubscription?.cancel();
     _playingSubscription?.cancel();
     _escSubscription?.cancel();
-    _vsrDeferPlayTimer?.cancel();
-    _vsrDeferPlayTimer = null;
-    _vsrDeferPlaySettleTimer?.cancel();
-    _vsrDeferPlaySettleTimer = null;
-    _vsrDeferPlay = false;
+    // 复验 P4：统一走 _disarmVsrDeferPlay，别手写清字段（会漏清 _vsrDeferPlayArmedAt）。
+    _disarmVsrDeferPlay();
   }
 
   void mediaEnd() {
@@ -1870,12 +1871,11 @@ class PlayerController extends BaseController
     _rtxVsrChainApplied = enabled;
     // 强制重算（开关变化必须重挂/摘链）。
     _lastRtxVsrSignature = null;
-    // 复核（换线路门控）：若起播门控正武装着（等尺寸事件挂链），此时把 VSR 关掉就没有链可等了
-    // —— 主动放行，别让用户白等超时兜底（最长 3s 黑屏）。释放会解除错误抑制并 play()。
-    if (!enabled && _vsrDeferPlay) {
-      Log.d('[VSR] 门控期间热关 VSR → 立即放行起播');
-      unawaited(_releaseVsrDeferPlay('vsr-off'));
-    }
+    // 复核（复验 P3）：门控正武装着（等尺寸事件挂链）时热关 VSR → 没有链可等，别白等超时兜底
+    // （最长 3s 黑屏）；但必须**先摘链、后放行**——media_kit 的 play/setProperty 同走一把锁 FIFO，
+    // 若先 play()，摘链就落在播放态 → mpv 又一次 playback restart（正是门控要避免的「出画面又重载」）。
+    // 此刻还在暂停态，先摘链不可见；摘完再放行，顺带消掉「放行到摘链之间」的错误抑制空窗。
+    final releaseGateAfterSync = !enabled && _vsrDeferPlay;
     // 注：**不清 `_lastRtxVsrScale`**——它是「mpv 实际已挂链」的唯一记录，摘链判断依赖它非空；
     // 在决定动作前清空会导致关闭时永不摘链→绿条复现（阶段4 复核 P0）。
     // hwdec 与错误抑制由 `_syncRtxVsrCrop` 内部统一处理。
@@ -1883,6 +1883,10 @@ class PlayerController extends BaseController
       await _syncRtxVsrCrop();
     } catch (e) {
       Log.d('[VSR] 热切换失败: $e');
+    }
+    if (releaseGateAfterSync) {
+      Log.d('[VSR] 门控期间热关 VSR → 摘链后放行起播');
+      unawaited(_releaseVsrDeferPlay('vsr-off'));
     }
   }
 
