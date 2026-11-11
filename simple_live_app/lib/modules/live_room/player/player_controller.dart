@@ -172,7 +172,7 @@ mixin PlayerMixin {
       // 复验 P3：vsrOn 是本函数**开头**的快照，中途热关 VSR 会让它过期——若仍按它武装，
       // 后面 open(play:false) 就会白等到超时（最长 3s）。这里用实时判据再确认一次。
       _disarmVsrDeferPlay();
-      await _syncRtxVsrCrop();
+      await _syncRtxVsrCrop(trigger: 'init');
     }
     // 诊断：进房后 5s 快照（看得见现场状态）
     Future.delayed(const Duration(seconds: 5), () {
@@ -310,10 +310,14 @@ mixin PlayerMixin {
   /// 起播时间线（[TL]）：每次进房/重开一条，定位「进房等很久」到底卡在哪一段。
   DateTime? _tlT0;
   final Map<String, int> _tlMarks = <String, int>{};
+  /// 时间线代际：`initializePlayer` 每次重置自增；延时汇总绑定代际，避免「旧房间的
+  /// 延时 dump 提前把新房间的汇总打空」（阶段4 复核发现：切清晰度/重开后必现）。
+  int _tlEpoch = 0;
 
   void _tlReset() {
     _tlT0 = DateTime.now();
     _tlMarks.clear();
+    _tlEpoch++;
   }
 
   void _tlMark(String key) {
@@ -359,6 +363,7 @@ mixin PlayerMixin {
           ' scale=${_lastRtxVsrScale?.toStringAsFixed(2) ?? "-"} crop="$crop"'
           ' 源=${player.state.width}x${player.state.height}'
           ' 播放区=${area?.$1 ?? "-"}x${area?.$2 ?? "-"}'
+          ' 缓存=${AppSettingsController.instance.videoDoubleBuffering.value ? "on" : "off"}'
           ' playing=${player.state.playing} af="$af"');
     } catch (e) {
       Log.logPrint(e);
@@ -536,7 +541,7 @@ mixin PlayerMixin {
   /// 用 mpv `--video-crop` 裁掉补边；**坐标空间是滤镜之后的帧**（见 rtx_vsr_crop.dart 注释）。
   ///
   /// 两种状态都写：开了 → 裁切值；没开（或未挂上滤镜链）→ 空串（取消手动裁切）。
-  Future<void> _syncRtxVsrCrop() async {
+  Future<void> _syncRtxVsrCrop({String trigger = 'sync'}) async {
     // 注：_playerDisposed 在 PlayerMixin 内可直接引用，但此处不依赖它——
     // 播放器已 dispose 时 media_kit 的 setProperty/getProperty 会抛 AssertionError
     // 或 StateError（_checkNativeHandle），由 _enqueueCropWrite 的 catch 兜底。
@@ -573,10 +578,12 @@ mixin PlayerMixin {
     final renderSize = plan.renderSize;
     // 去重签名：倍数 + 裁切值 + 源尺寸 + 链状态（**不能只用裁切值当键**，见字段注释）。
     final signature = '${s ?? -1}|$desired|${rawW}x$rawH|$_rtxVsrChainApplied';
-    Log.d('[VSR] 布局同步: 源=${rawW}x$rawH'
+    if (signature == _lastRtxVsrSignature) return;
+    // 只在「确实要改」时打点（阶段4 复核：打在去重前会被 width/height 双监听与拖拽防抖重复
+    // 打出、数值不变也打 → 噪声）
+    Log.d('[VSR] 布局同步(触发=$trigger): 源=${rawW}x$rawH'
         ' 播放区=${area?.$1 ?? "-"}x${area?.$2 ?? "-"}'
         ' → scale=${s?.toStringAsFixed(2) ?? "-"} crop="$desired" 链=$enable');
-    if (signature == _lastRtxVsrSignature) return;
     _enqueueCropWrite(() async {
       // 队列内再查一次：并发同值时只写第一笔，避免重复设置触发滤镜链重建。
       if (signature == _lastRtxVsrSignature) return;
@@ -660,7 +667,7 @@ mixin PlayerMixin {
   void scheduleRtxVsrSync() {
     _vsrSyncDebounce?.cancel();
     _vsrSyncDebounce = Timer(const Duration(milliseconds: 250), () {
-      _syncRtxVsrCrop();
+      _syncRtxVsrCrop(trigger: 'layout');
     });
   }
 
@@ -1517,11 +1524,11 @@ class PlayerController extends BaseController
     //音量均衡热切换：设置页/房内开关拨动即时生效
     //PR #195 教训：句柄化管理 + onClose 释放 + 回调内 disposed 短路
     _volumeNormWorker = ever(AppSettingsController.instance.volumeNorm, (bool on) {
+      Log.d('[DIAG] 操作: 音量均衡 → $on'
+          '（disposed=$_playerDisposed applied=$_volumeNormApplied supported=${PlayerMixin.afLoudnormSupported} playing=${player.state.playing}）');
       if (_playerDisposed) {
         return;
       }
-      Log.d('[DIAG] 操作: 音量均衡 → $on'
-          '（applied=$_volumeNormApplied supported=${PlayerMixin.afLoudnormSupported} playing=${player.state.playing}）');
       Future.delayed(const Duration(seconds: 2), () {
         if (!_playerDisposed) _diagSnapshot('拨均衡后+2s');
       });
@@ -1591,8 +1598,12 @@ class PlayerController extends BaseController
         WakelockPlus.enable();
         Log.d("Playing");
         _tlMark('首帧/playing');
+        final tlEpoch = _tlEpoch;
         Future.delayed(const Duration(milliseconds: 2500), () {
-          if (!_playerDisposed) _tlDump();
+          if (!_playerDisposed && tlEpoch == _tlEpoch) {
+            _tlDump();
+            _diagSnapshot('起播后');
+          }
         });
         // 进入直播间按分辨率自适应窗口宽度（播放开始时布局已就绪，重试至生效）
         if (AppSettingsController.instance.autoFitWindowWidth.value &&
@@ -1636,7 +1647,7 @@ class PlayerController extends BaseController
         } else if (_pendingVolumeNormIntent != null) {
           // N2：暂停期被推迟的拨动 → 复播时消费
           _pendingVolumeNormIntent = null;
-          Log.d('音量均衡：消费待办拨动（复播）');
+          Log.d('[VN] 待办消费: 复播 → 同步');
           _syncVolumeNorm();
         }
       }
@@ -1649,6 +1660,9 @@ class PlayerController extends BaseController
     });
     _logSubscription = player.stream.log.listen((event) {
       Log.d("播放器日志：$event");
+      // 起播时间线补充节点（需日志级别到 debug——真机复测时会开着日志开关）
+      if (event.text.contains('Using hardware decoding')) _tlMark('硬解生效');
+      if (event.text.contains('playback restart complete')) _tlMark('restart完成');
       // 音量均衡静默降级防线（复核建议）：武装期内命中滤镜错误关键字即标记失败，
       // 由首帧/探测/热开的窗末终裁消费（真机 P0 ISS-278：记录与抑制窗解耦——失败日志
       // 可能早于/晚于抑制窗，只有「预挂起持续记录、窗末终裁」才不漏）。
@@ -1669,7 +1683,8 @@ class PlayerController extends BaseController
       if (event == null) {
         _lastRtxVsrSignature = null;
       }
-      _syncRtxVsrCrop();
+      _tlMark('源分辨率 ${player.state.width}x${player.state.height}');
+      _syncRtxVsrCrop(trigger: 'size');
       // RISK-17：分辨率一到就记下来（与「自适应/自动全屏」等设置解耦），
       // 供页面判定覆盖式面板；否则在未开自适应或处于全屏时该值恒为 0 → 永不折叠。
       if ((player.state.width ?? 0) > 0 && (player.state.height ?? 0) > 0) {
@@ -2000,7 +2015,7 @@ class PlayerController extends BaseController
     // 在决定动作前清空会导致关闭时永不摘链→绿条复现（阶段4 复核 P0）。
     // hwdec 与错误抑制由 `_syncRtxVsrCrop` 内部统一处理。
     try {
-      await _syncRtxVsrCrop();
+      await _syncRtxVsrCrop(trigger: 'toggle');
     } catch (e) {
       Log.d('[VSR] 热切换失败: $e');
     }
