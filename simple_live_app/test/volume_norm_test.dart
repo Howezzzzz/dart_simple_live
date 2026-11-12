@@ -12,8 +12,8 @@ void main() {
       expect(volumeNormFilter.indexOf('dynaudnorm'), lessThan(volumeNormFilter.indexOf('loudnorm')));
     });
 
-    test('参数与实测选型一致（f=250/g=15/p=0.95/m=8/r=0.5 + LRA=5）', () {
-      expect(volumeNormPreFilter, 'dynaudnorm=f=250:g=15:p=0.95:m=8:r=0.5');
+    test('参数与实测选型一致（f=100/g=10/p=0.95/m=8/r=0.5 + LRA=5）', () {
+      expect(volumeNormPreFilter, 'dynaudnorm=f=100:g=10:p=0.95:m=8:r=0.5');
       expect(volumeNormPostFilter, 'loudnorm=I=-16:TP=-1.5:LRA=5');
     });
 
@@ -25,7 +25,7 @@ void main() {
   group('volumeNormSupportedFromReadback（回读判定）', () {
     test('两个滤镜都在 → 支持', () {
       expect(
-        volumeNormSupportedFromReadback('dynaudnorm=f=250:g=15:p=0.95:m=8:r=0.5,loudnorm=I=-16:TP=-1.5:LRA=5'),
+        volumeNormSupportedFromReadback('dynaudnorm=f=100:g=10:p=0.95:m=8:r=0.5,loudnorm=I=-16:TP=-1.5:LRA=5'),
         isTrue,
       );
     });
