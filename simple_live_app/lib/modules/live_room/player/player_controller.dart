@@ -95,6 +95,10 @@ mixin PlayerMixin {
   var videoWidthRx = 0.obs;
   var videoHeightRx = 0.obs;
 
+  /// 起播就绪遮罩（RISK-69 优雅版 / 方案 §三 B2）：进房后「管线就绪」前为 true，
+  /// 页面据此在播放区盖加载态，遮掉「闪一下 → 黑 → 再闪」；就绪/超时后置 false（150ms 淡出）。
+  var showReadyMaskRx = false.obs;
+
   /// 播放器实例
   late final player = Player(
     configuration: PlayerConfiguration(
@@ -155,6 +159,7 @@ mixin PlayerMixin {
     // 诊断：起播时间线起点 + 相关设置快照（下版真机复测直读）
     _tlReset();
     _tlMark('t0 进房');
+    _armReadyGate();
     Log.d('[DIAG] 设置: VSR=${AppSettingsController.instance.enableRtxVsr.value}'
         ' 均衡=${AppSettingsController.instance.volumeNorm.value}'
         ' 双缓冲=${AppSettingsController.instance.videoDoubleBuffering.value}'
@@ -423,14 +428,63 @@ mixin PlayerMixin {
     }
   }
 
+  /// 就绪门（方案 §三 B1/B2）：进房后在「首帧真正就绪」前盖遮罩。
+  /// ready ＝ 收到 `playback restart complete`（media_kit 补丁转发的等价日志行）∧ 无在途管线写入。
+  /// 兜底 6s 超时（脏流 GOP 上限）→ 强制解除 + 提示，不静默。
+  bool _readyPending = false;
+  Timer? _readyTimeoutTimer;
+  static const Duration readyGateTimeout = Duration(seconds: 6);
+
+  /// 在途管线写入计数（音量均衡队列 + VSR 裁切队列）；就绪门要求其为 0。
+  int _pipelineBusy = 0;
+
+  void _armReadyGate() {
+    _readyPending = true;
+    showReadyMaskRx.value = true;
+    _readyTimeoutTimer?.cancel();
+    _readyTimeoutTimer = Timer(readyGateTimeout, () {
+      if (_playerDisposed) {
+        return;
+      }
+      // 只在「确实开过流」时提示，避免未开播房间误弹
+      final hadSource = (player.state.width ?? 0) > 0 ||
+          player.state.buffering ||
+          player.state.playing;
+      _finishReadyGate('timeout');
+      if (hadSource) {
+        SmartDialog.showToast('网络较慢，已直接播放');
+      }
+    });
+  }
+
+  void _finishReadyGate(String reason) {
+    if (!_readyPending) {
+      return;
+    }
+    _readyPending = false;
+    _readyTimeoutTimer?.cancel();
+    _readyTimeoutTimer = null;
+    showReadyMaskRx.value = false;
+    _tlMark('就绪($reason)');
+    Log.d('[ready] 就绪门解除（$reason）');
+  }
+
   /// 音量均衡：操作串行队列（探测/应用/移除按发起顺序执行，避免并发交错导致 af 与状态标记不一致）。
   /// 用 [SerialTaskQueue]：**队列任务内再次入队会内联执行**，杜绝嵌套自死锁（P0，ISS-281）。
   final SerialTaskQueue _volumeNormQueue = SerialTaskQueue();
 
   /// 音量均衡：入队执行一次 af 操作（异常在队列内消化，避免 fire-and-forget 产生未处理异步异常）。
   /// ⚠️ 队列任务体内**不要**再调 [_syncVolumeNorm]（它＝入队）；任务内用 [_syncVolumeNormLocked]。
-  Future<void> _enqueueVolumeNorm(Future<void> Function() task) =>
-      _volumeNormQueue.run(task, onError: (e, _) => Log.logPrint(e));
+  Future<void> _enqueueVolumeNorm(Future<void> Function() task) {
+    _pipelineBusy++;
+    return _volumeNormQueue.run(() async {
+      try {
+        await task();
+      } finally {
+        _pipelineBusy--;
+      }
+    }, onError: (e, _) => Log.logPrint(e));
+  }
 
   /// 音量均衡：起流前预挂链（由 `initializePlayer` 在 `player.open` 之前调用，经串行队列执行）。
   ///
@@ -769,11 +823,14 @@ mixin PlayerMixin {
 
   /// 串行执行一次 video-crop 写入（参考 _enqueueVolumeNorm 的既有惯例）。
   Future<void> _enqueueCropWrite(Future<void> Function() task) {
+    _pipelineBusy++;
     final next = _cropWriteQueue.then((_) async {
       try {
         await task();
       } catch (e) {
         Log.d('[VSR] 设置 video-crop 失败: $e');
+      } finally {
+        _pipelineBusy--;
       }
     });
     _cropWriteQueue = next;
@@ -1842,7 +1899,13 @@ class PlayerController extends BaseController
       Log.d("播放器日志：$event");
       // 起播时间线补充节点（需日志级别到 debug——真机复测时会开着日志开关）
       if (event.text.contains('Using hardware decoding')) _tlMark('硬解生效');
-      if (event.text.contains('playback restart complete')) _tlMark('restart完成');
+      if (event.text.contains('playback restart complete')) {
+        _tlMark('restart完成');
+        // 就绪门：管线重启完成 ∧ 无在途管线写入 → 解除遮罩
+        if (_readyPending && _pipelineBusy == 0) {
+          _finishReadyGate('restart');
+        }
+      }
       // 音量均衡静默降级防线（复核建议）：武装期内命中滤镜错误关键字即标记失败，
       // 由首帧/探测/热开的窗末终裁消费（真机 P0 ISS-278：记录与抑制窗解耦——失败日志
       // 可能早于/晚于抑制窗，只有「预挂起持续记录、窗末终裁」才不漏）。
@@ -1917,6 +1980,11 @@ class PlayerController extends BaseController
     _escSubscription?.cancel();
     // 复验 P4：统一走 _disarmVsrDeferPlay，别手写清字段（会漏清 _vsrDeferPlayArmedAt）。
     _disarmVsrDeferPlay();
+    // 就绪门：退房/换房即解除（取消超时并收起遮罩）
+    _readyTimeoutTimer?.cancel();
+    _readyTimeoutTimer = null;
+    _readyPending = false;
+    showReadyMaskRx.value = false;
   }
 
   void mediaEnd() {

@@ -715,6 +715,27 @@ class LiveRoomPage extends GetView<LiveRoomController> {
       child: Stack(
         children: [
           _buildAlignedVideo(boxFit: boxFit, aspectRatio: aspectRatio),
+          // 起播就绪遮罩（RISK-69 优雅版 / 方案 §三 B2）：就绪前盖住「闪/黑」，就绪/超时后 150ms 淡出
+          Obx(
+            () => IgnorePointer(
+              child: AnimatedOpacity(
+                opacity: controller.showReadyMaskRx.value ? 1.0 : 0.0,
+                duration: const Duration(milliseconds: 150),
+                child: Container(
+                  color: Colors.black,
+                  alignment: Alignment.center,
+                  child: const SizedBox(
+                    width: 28,
+                    height: 28,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2.5,
+                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white70),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
           Obx(
             () => Visibility(
               visible: !controller.liveStatus.value,
