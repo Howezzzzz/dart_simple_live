@@ -449,6 +449,17 @@ mixin PlayerMixin {
   /// 注：**放行点写链不经队列**（在 play() 之前 await 完成，restart 必在其后），故不计入也不影响判定。
   int _pipelineBusy = 0;
 
+  /// af/vf 写序互斥（P1-3）：两条队列保持**分离**（C3 硬约束：不合并——避免长 af 建链堆住
+  /// VSR 的 vf 写入、破坏「VSR 点即生效」），但**真正写 mpv 的瞬间**互斥，避免「vf 重建中写 af」
+  /// 交错。只在**叶子写函数**取锁（三个叶子互不调用 → 无嵌套、无死锁；锁内无长耗时环节）。
+  Future<void> _writeMutex = Future<void>.value();
+  Future<T> _withWriteMutex<T>(Future<T> Function() body) {
+    final prev = _writeMutex;
+    final gate = Completer<void>();
+    _writeMutex = gate.future;
+    return prev.then((_) => body()).whenComplete(gate.complete);
+  }
+
   void _armReadyGate() {
     _readyPending = true;
     _playIssued = false;
@@ -774,7 +785,11 @@ mixin PlayerMixin {
 
   /// 应用一次 VSR 链写入（vf / video-crop / video-aspect-override / setSize + 回读校验）。
   /// 常规同步与起播门控放行点共用（P1-1 单次写链）。
-  Future<void> _applyVsrTarget(_VsrTarget t) async {
+  /// 共用写链逻辑（P1-3 写序互斥）：入写锁后执行 `_applyVsrTargetUnlocked`。
+  Future<void> _applyVsrTarget(_VsrTarget t) =>
+      _withWriteMutex(() => _applyVsrTargetUnlocked(t));
+
+  Future<void> _applyVsrTargetUnlocked(_VsrTarget t) async {
     final pp = player.platform;
     if (pp is! NativePlayer) return;
     // 队列内再查一次（并发同值 / 放行点防重）：只写第一笔，避免重复设置触发滤镜链重建。
@@ -981,12 +996,14 @@ mixin PlayerMixin {
       // 门控期热关 VSR 且从未收到尺寸事件（sync 早退、未写摘链目标）——上一路流遗留的链
       // 仍挂在 mpv 里，这里兜底摘掉，避免「关 VSR 后画面仍被放大/绿条复现」（P0 级残留）。
       try {
-        final pp = player.platform;
-        if (pp is NativePlayer) {
-          await pp.setProperty('vf', '');
-          _lastRtxVsrScale = null;
-          Log.d('[VSR] 门控 vsr-off 兜底摘链 #${++_vsrChainWriteCount}（无尺寸事件，sync 未写）');
-        }
+        await _withWriteMutex(() async {
+          final pp = player.platform;
+          if (pp is NativePlayer) {
+            await pp.setProperty('vf', '');
+            _lastRtxVsrScale = null;
+            Log.d('[VSR] 门控 vsr-off 兜底摘链 #${++_vsrChainWriteCount}（无尺寸事件，sync 未写）');
+          }
+        });
       } catch (e) {
         Log.d('[VSR] 门控 vsr-off 兜底摘链失败: $e');
       }
@@ -1008,7 +1025,10 @@ mixin PlayerMixin {
   /// 门控超时兜底（P1-1「预挂只在超时路径」）：拿不到源分辨率时预挂 2.0 兜底链，
   /// 保证开了 VSR 就有放大效果（此时尺寸未知、无法自适应，可能仍有一次重载，属降级）。
   /// 若上一路流遗留的链仍在（_lastRtxVsrScale 非空）则不动它，避免无谓改倍数。
-  Future<void> _preHangFallbackChain() async {
+  Future<void> _preHangFallbackChain() =>
+      _withWriteMutex(_preHangFallbackChainUnlocked);
+
+  Future<void> _preHangFallbackChainUnlocked() async {
     if (!_rtxVsrChainApplied || _lastRtxVsrScale != null) return;
     final pp = player.platform;
     if (pp is! NativePlayer) return;
@@ -2182,8 +2202,12 @@ class PlayerController extends BaseController
     _scheduleSuppressRelease(token);
   }
 
-  /// 音量均衡：对播放器应用/移除 loudnorm 滤镜（能力已知时使用；仅由 _syncVolumeNorm 在队列内调用）
-  Future<void> _applyVolumeNorm({required bool enable}) async {
+  /// 音量均衡：对播放器应用/移除 loudnorm 滤镜（能力已知时使用；仅由 _syncVolumeNorm 在队列内调用）。
+  /// 入写锁（P1-3 写序互斥）后执行。
+  Future<void> _applyVolumeNorm({required bool enable}) =>
+      _withWriteMutex(() => _applyVolumeNormUnlocked(enable: enable));
+
+  Future<void> _applyVolumeNormUnlocked({required bool enable}) async {
     if (_playerDisposed) {
       return;
     }
