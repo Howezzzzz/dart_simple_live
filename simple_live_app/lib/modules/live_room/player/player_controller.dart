@@ -252,9 +252,11 @@ mixin PlayerMixin {
   DateTime? _vsrDeferPlayArmedAt;
 
   /// 门控代际：每次武装 +1。
-  /// **防御性守卫**（复验 P2）：「当前 `_releaseVsrDeferPlay` 在比对前无任何 await（Dart 单线程）」
-  /// ⇒ 恒不触发；且实测 release 的 play() 一定先于后续 open() 入锁队列，不存在「新源先播后挂链」。
-  /// 保留它是为了将来一旦在 play() 前插入 await（例如等串行队列）时能自动挡掉过期 release。
+  /// 用于挡掉「已过期 release」：P1-1 起播前单次写链在 play() 前插入了 await（写链
+  /// `_applyVsrTarget` / `_preHangFallbackChain`），写链期间若恰逢重武装（换线路/出错重试
+  /// 触发 openSourceGated → initializePlayer → _armVsrDeferPlay），过期 release 的 play()
+  /// 会落到新源、绕过新门控一次（ISS-283）。故 **play() 前必须复查本代际**（两处比对：
+  /// disarm 后、以及所有 await 之后）。
   int _vsrGateEpoch = 0;
   static const Duration vsrDeferPlaySettle = Duration(milliseconds: 500);
   static const Duration vsrDeferPlaySettleMax = Duration(milliseconds: 1200);
@@ -849,8 +851,7 @@ mixin PlayerMixin {
     // （403/超时/流下线）会被直接 return 掉、不重试也不提示。起播这一刻链重建写操作
     // 早已完成，故解除抑制，让真错误走正常 mediaError 路径。
     _suppressErrorRetry = false;
-    // 防御性守卫（当前不可达，见 _vsrGateEpoch 注释）：若将来 play() 前插入了 await，
-    // 这里能挡掉「已被 disarm、又被新换源取代」的过期 release。
+    // 守卫①（await 之前）：挡掉「已被 disarm、又被新换源取代」的过期 release。
     if (epoch != _vsrGateEpoch) {
       Log.d('[VSR] 起播门控 release 作废（已有新换源）: $reason');
       return;
@@ -888,6 +889,11 @@ mixin PlayerMixin {
       } catch (e) {
         Log.d('[VSR] 门控 vsr-off 兜底摘链失败: $e');
       }
+    }
+    // 守卫②（所有 await 之后，ISS-283 收口）：上面写链/摘链均为 await，期间可能被重武装取代。
+    if (_playerDisposed || epoch != _vsrGateEpoch) {
+      Log.d('[VSR] 门控 release 作废（写链期间已被新换源取代）: $reason');
+      return;
     }
     _tlMark('play()');
     Log.d('[VSR] 门控放开（$reason）等待=${armedAt == null ? "?" : "${DateTime.now().difference(armedAt).inMilliseconds}ms"} → play()');
