@@ -1,15 +1,15 @@
 {
-    "version": "1.08.68",
-    "version_num": 1008068,
-    "version_desc": "- 优化：**进房起播再提速**——Windows 开 RTX VSR 时，把 VSR 滤镜链的写入时机从「起播前（暂停态）」挪到「起播后」。在暂停态写 vf/裁切会让播放器每次都触发一次内部重定位，进而**重建整条音频滤镜链、并让解码器重\n- 加固：进房就绪门把「起播后的这次写链」也纳入等待——避免遮罩先揭、写链随后才让画面切换（跳变）在无遮罩下可见\n- 说明：本版为进房冷启动优化的第一步，欢迎复测进房出声耗时与起播瞬间的画面观感",
+    "version": "1.08.69",
+    "version_num": 1008069,
+    "version_desc": "- fix(vsr): 就绪门认门控期内 restart + busy++ 提前——修 VSR 开时遮罩干等 6s\n- docs(changelog): 1.08.68 小节\n- fix(vsr): 进房起播改「先 play 后写链」+ 就绪门计入写链 busy（② B1 重设计 v3 / E-②-0）\n- docs(changelog): 1.08.67 小节（dyn 参数优化 + loudnorm 残余说明）\n- fix(vsr): P2-2 阶段4 整改——[TL] 超阈改按就绪时刻(免 +2.5s 误报)；[APPLY] 去误报(预挂成功才打)、覆盖 jump 路径、复播消费走统一入口、补结果字段\n- fix(live_room): 换线路失败不再静默（Log.w + errorMsg 提示，复验 P2）",
     "prerelease": true,
     "download_url": "https://github.com/Howezzzzz/dart_simple_live/releases",
     "download_urls": {
-        "android": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.68/app-arm64-v8a-release.apk",
-        "windows": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.68/Slive-1.08.68+1008068-windows-setup.exe",
-        "macos": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.68/simple_live_app-1.08.68+1008068-macos.dmg",
-        "linux": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.68/Slive-x86_64-linux.deb",
-        "linux_flatpak": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.68/Slive-x86_64.flatpak"
+        "android": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.69/app-arm64-v8a-release.apk",
+        "windows": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.69/Slive-1.08.69+1008069-windows-setup.exe",
+        "macos": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.69/simple_live_app-1.08.69+1008069-macos.dmg",
+        "linux": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.69/Slive-x86_64-linux.deb",
+        "linux_flatpak": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.69/Slive-x86_64.flatpak"
     },
     "mirror_prefixes": [
         "https://gh-proxy.com/",
@@ -17,10 +17,10 @@
         "https://ghproxy.cc/"
     ],
     "download_sha256": {
-        "android": "96812e801d8b9517a917031bce7ae5a7cadc7fd3d2f3bf7223d2e89736a0ae84",
-        "windows": "f1c0af33e70b075580be0f0c70a51bc3ca426a6c1bc73b6083fc18ec92872d2f",
-        "macos": "30fe9fae866b25a4e47378fc518b4f117f72124d6d88bd8b0624663d16b192b7",
-        "linux": "c2326ba957bbe020cb8d167a0ea6f3af10ede7e1e242d348535bc815f044afbf",
-        "linux_flatpak": "ebe0e72de215ecdb8c9fbde64cff4593acbbfc72afcb7a06ce02f66e4749ded1"
+        "android": "5a6f63a4ba326a0394688209e7eaa0a6ac9aeeab5a71b33e05769dc9d07a005d",
+        "windows": "bd9be50ab96dd92aa8d15bd7159322803133b118bfecde197efef01828e5eab6",
+        "macos": "958fbdc96349c1e64eddf0e7c5f52886bb39725dea1daacf29e49f34f682a282",
+        "linux": "53d50a517257add01cdd50935e73b7df47c0715f14a385eaadd44ef4c6f8fe7b",
+        "linux_flatpak": "f77ef4a43a1d261f899450b42aee3bfdcfb647214286ecba22f65e8ca5915f47"
     }
 }
