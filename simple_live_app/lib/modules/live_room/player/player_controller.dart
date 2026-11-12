@@ -277,9 +277,9 @@ mixin PlayerMixin {
   bool get vsrDeferPlayPending => _vsrDeferPlay;
 
   /// [TL] 时间线：记录 `player.open` 发起节点（宿主在 open 前调用；E 批遗留，P1-1 补）。
-  /// 宿主（LiveRoomController）在 `player.open` **前一刻**调用：记时间线 + 武装就绪门。
+  /// 宿主（LiveRoomController）在 `player.open` / `jump` **前一刻**调用：记时间线 + 武装就绪门。
   /// 就绪门武装点放这里（而非 initializePlayer 开头）——既避开前面若干 await 吃掉 6s 预算
-  /// （复核 E），又让「换线路/出错重试」（走 openSourceGated）同享遮罩（复核 G）。
+  /// （复核 E），又让「换线路/出错重试」（`setPlayer`）同享遮罩/声音门（复核 G）。
   void tlMarkOpen() {
     _tlMark('open 发起');
     _armReadyGate();
@@ -308,10 +308,7 @@ mixin PlayerMixin {
     // 否则（RISK-71：open 可能清掉链）换线路后均衡会静默丢失，直到下次重初始化。
     _volumeNormInitialized = false;
     Log.d('[VSR] 换线路/重试走起播门控：open(play:false) index=$index');
-    // P1-2 整改 D 项修复（阶段4 定向复验 P1）：换线路/重试也武装就绪门（遮罩 + 声音门）——
-    // 之前只打点不武装，导致这条路径“restart 前已出声/露画面”违反 §8.2 硬约束。
-    // tlMarkOpen = _tlMark('open 发起') + _armReadyGate()，与进房同享 6s 遮罩与 mute。
-    tlMarkOpen();
+    _tlMark('open 发起');
     _armVsrDeferPlay();
     try {
       await player.open(Playlist(mediaList, index: index), play: false);
@@ -444,11 +441,9 @@ mixin PlayerMixin {
   Timer? _readyTimeoutTimer;
   static const Duration readyGateTimeout = Duration(seconds: 6);
 
-  /// 就绪门前置条件（阶段4 复核 B/C：缺「play 已发」→ 热拨 VSR/seek 的 restart 会被误判成
-  /// 进房就绪；需等 play() 已发才认）。代际安全不依赖额外 epoch——武装发生在 open() 之前，
-  /// Dart 流 FIFO 保证旧源的 playing/restart 事件在 open→stop 的复位事件之前送达，不会污染新代。
+  /// 就绪门前置条件（阶段4 复核 B/C：缺「play 已发」→ 热拨 VSR/seek 会被误判成进房就绪）。
   bool _playIssued = false; // 本次门控内 play() 是否已发出
-  bool _readyRestartSeen = false; // 本次门控内是否已见「restart 完成」
+  bool _readyRestartSeen = false; // 本次门控内「play 已发之后」是否已见 restart 完成
 
   /// 在途管线写入计数（音量均衡队列 + VSR 裁切队列）。
   /// 注：**放行点写链不经队列**（在 play() 之前 await 完成，restart 必在其后），故不计入也不影响判定。
@@ -1953,9 +1948,12 @@ class PlayerController extends BaseController
       if (event.text.contains('Using hardware decoding')) _tlMark('硬解生效');
       if (event.text.contains('playback restart complete')) {
         _tlMark('restart完成');
-        // 就绪门：记「已见 restart」，再按完整条件判定（play 已发 + 无在途写入）
-        _readyRestartSeen = true;
-        _maybeFinishReadyGate();
+        // 就绪门：只认 **play 已发出之后** 的 restart（起播前链写入/seek 触发的 restart 不算数），
+        // 再按完整条件判定（定向复验：原 _readyEpoch 是死字段，改用 _playIssued 作门槛）。
+        if (_playIssued) {
+          _readyRestartSeen = true;
+          _maybeFinishReadyGate();
+        }
       }
       // 音量均衡静默降级防线（复核建议）：武装期内命中滤镜错误关键字即标记失败，
       // 由首帧/探测/热开的窗末终裁消费（真机 P0 ISS-278：记录与抑制窗解耦——失败日志

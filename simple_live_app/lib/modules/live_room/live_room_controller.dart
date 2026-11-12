@@ -779,6 +779,10 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     // 门控适用时由 player_controller 的 openSourceGated 接管：改用 open(play:false)
     // （不能只靠 jump——media_kit 的 stream.width/height 带 distinct，同分辨率不发尺寸
     // 事件 → 门控只能等超时，切线路会白卡几秒），链挂好后再自动起播。
+    // 就绪门（阶段4 定向复验 G）：换线路/出错重试也武装遮罩/声音门——
+    // 下面 openSourceGated（VSR 路径）与 jump（非 VSR 路径）都会触发一次重载；
+    // _tlMark 按 key 去重，重复调用无害。
+    tlMarkOpen();
     if (await openSourceGated(buildPlayerMediaList(), index: currentLineIndex)) {
       return;
     }

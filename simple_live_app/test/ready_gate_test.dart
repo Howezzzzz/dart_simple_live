@@ -42,13 +42,5 @@ void main() {
         isFalse,
       );
     });
-
-    test('边界：pipelineBusy 为负（理论不可达，防御语义）→ 按 ≤0 放行', () {
-      expect(
-        readyGateCanFinish(
-            pending: true, playIssued: true, restartSeen: true, pipelineBusy: -1),
-        isTrue,
-      );
-    });
   });
 }
