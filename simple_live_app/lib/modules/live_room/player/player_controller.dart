@@ -1059,6 +1059,14 @@ mixin PlayerMixin {
           )
         : VideoControllerConfiguration(
             enableHardwareAcceleration: AppSettingsController.instance.hardwareDecode.value,
+            // P1-3（启动编排）：Windows + 硬解开启 + VSR 开启 → create 期就把硬解定为 `d3d11va`。
+            // 否则起流后 initializePlayer 再写一次 hwdec → 软解→硬解 Reinit → 首帧要等下一个 IDR
+            // （N6 的主要代价）；create 期给定后首帧直接走硬解。其余情况传 null，走 media_kit 默认 'auto'。
+            hwdec: (AppSettingsController.instance.hardwareDecode.value &&
+                    Platform.isWindows &&
+                    AppSettingsController.instance.enableRtxVsr.value)
+                ? 'd3d11va'
+                : null,
             androidAttachSurfaceAfterVideoParameters: false,
           ),
   );
