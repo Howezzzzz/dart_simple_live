@@ -976,52 +976,37 @@ mixin PlayerMixin {
     _vsrDeferPlay = false;
   }
 
-  /// 放开起播门控：先把门控期暂存的写链目标**一次写入**（起播前单次写链；预挂只在超时路径
-  /// 兜底），再恢复播放（幂等；未武装则不做）。
+  /// 放开起播门控（② B1 重设计 v3，2026-11-12）：**先 play()（非暂停态）再写链**。
+  ///
+  /// 原因：写链（vf / video-crop / video-aspect-override）若在**暂停态**下发，mpv 的
+  /// `mp_force_video_refresh`（其 seek 条件含 `pause`）会对每笔写各触发一次 refresh seek →
+  /// `mp_filter_reset` 把音频链（dynaudnorm+loudnorm）**整个释放重建**，且硬解下强制等 96 帧
+  /// 关键帧 —— 这是进房慢的主因。移到 play() 之后（pause=false、time_frame<0.5）即不再 seek。
+  /// vsr-off 兜底摘链仍保持「先摘链后放行」（先 play 会使摘链落播放态 → 可见 restart）。
   Future<void> _releaseVsrDeferPlay(String reason) async {
     if (!_vsrDeferPlay) {
       return;
     }
     final epoch = _vsrGateEpoch;
     final armedAt = _vsrDeferPlayArmedAt;
-    // 先取出暂存目标（_disarmVsrDeferPlay 会清空它），放行点单次写链。
+    // 先取出暂存目标（_disarmVsrDeferPlay 会清空它），play 之后单次写链。
     final target = _vsrDeferPlayTarget;
     _disarmVsrDeferPlay();
     if (_playerDisposed) {
       return;
     }
-    // 复核 P3：门控武装期间错误抑制窗必然与「首次起播」重合，窗口内到达的真错误
-    // （403/超时/流下线）会被直接 return 掉、不重试也不提示。起播这一刻链重建写操作
-    // 早已完成，故解除抑制，让真错误走正常 mediaError 路径。
+    // 门控武装期间的错误抑制窗必与「首次起播」重合，窗口内真错误（403/超时/流下线）会被直接
+    // 吞掉。起播这一刻解除抑制，让真错误走正常 mediaError 路径（写链自身会给短窗抑制）。
     _suppressErrorRetry = false;
     // 守卫①（await 之前）：挡掉「已被 disarm、又被新换源取代」的过期 release。
     if (epoch != _vsrGateEpoch) {
       Log.d('[VSR] 起播门控 release 作废（已有新换源）: $reason');
       return;
     }
-    if (target != null) {
-      // 起播前单次写链（P1-1）：门控期吞掉的中间写在放行点一次性写入终值。
-      Log.d('[VSR] 门控: 放行点单次写链(原因=$reason) scale=${target.scale?.toStringAsFixed(2) ?? '-'}'
-          ' crop="${target.crop}" 链=${target.enable}');
-      try {
-        await _applyVsrTarget(target);
-      } catch (e) {
-        // 放行点是 fire-and-forget（定时器/宿主 unawaited），不 catch 会成未处理异步异常；
-        // 写链失败不阻塞起播（降级为不带 VSR 直接播）。
-        Log.d('[VSR] 门控放行点写链失败: $e');
-      }
-    } else if (reason == 'timeout') {
-      // 预挂只在超时路径（P1-1）：拿不到源分辨率 → 预挂 2.0 兜底链再起播（降级）。
-      try {
-        await _preHangFallbackChain();
-      } catch (e) {
-        Log.d('[VSR] 门控超时预挂失败: $e');
-      }
-    } else if (reason == 'vsr-off' &&
+    // vsr-off 兜底摘链：保持「先摘链后放行」——先 play 会让摘链落在播放态、画面可见 restart。
+    if (reason == 'vsr-off' &&
         _lastRtxVsrScale != null &&
         !_rtxVsrChainApplied) {
-      // 门控期热关 VSR 且从未收到尺寸事件（sync 早退、未写摘链目标）——上一路流遗留的链
-      // 仍挂在 mpv 里，这里兜底摘掉，避免「关 VSR 后画面仍被放大/绿条复现」（P0 级残留）。
       try {
         await _withWriteMutex(() async {
           final pp = player.platform;
@@ -1035,17 +1020,39 @@ mixin PlayerMixin {
         Log.d('[VSR] 门控 vsr-off 兜底摘链失败: $e');
       }
     }
-    // 守卫②（所有 await 之后，ISS-283 收口）：上面写链/摘链均为 await，期间可能被重武装取代。
+    // 守卫②（摘链 await 之后）：期间可能被重武装取代。
     if (_playerDisposed || epoch != _vsrGateEpoch) {
-      Log.d('[VSR] 门控 release 作废（写链期间已被新换源取代）: $reason');
+      Log.d('[VSR] 门控 release 作废（摘链期间已被新换源取代）: $reason');
       return;
     }
+    // **先 play（非暂停态）**——写链必须在暂停态之外，否则触发 refresh seek。
     _tlMark('play()');
-    Log.d('[VSR] 门控放开（$reason）等待=${armedAt == null ? "?" : "${DateTime.now().difference(armedAt).inMilliseconds}ms"} → play()');
+    Log.d('[VSR] 门控放开（$reason）等待=${armedAt == null ? "?" : "${DateTime.now().difference(armedAt).inMilliseconds}ms"} → play()（先播后写链）');
     try {
       await player.play();
     } catch (e) {
       Log.d('[VSR] 起播门控 play() 失败: $e');
+    }
+    if (_playerDisposed || epoch != _vsrGateEpoch) {
+      return;
+    }
+    if (target != null) {
+      // play 后单次写链（P1-1）：门控期吞掉的中间写在放行点一次性写入终值；此时非暂停态，
+      // mp_force_video_refresh 不 seek。
+      Log.d('[VSR] 门控: play 后单次写链(原因=$reason) scale=${target.scale?.toStringAsFixed(2) ?? '-'}'
+          ' crop="${target.crop}" 链=${target.enable}');
+      try {
+        await _applyVsrTarget(target);
+      } catch (e) {
+        Log.d('[VSR] 门控写链失败: $e');
+      }
+    } else if (reason == 'timeout') {
+      // 预挂只在超时路径（P1-1）：拿不到源分辨率 → play 后预挂 2.0 兜底链（降级）。
+      try {
+        await _preHangFallbackChain();
+      } catch (e) {
+        Log.d('[VSR] 门控超时预挂失败: $e');
+      }
     }
   }
 
