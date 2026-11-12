@@ -202,6 +202,7 @@ mixin PlayerMixin {
     // 让 open 后的 playing 重发时再跑一次自愈+复查（否则一次性钩子跳过，open 清链
     // 后本房静默失去均衡且无人重挂）。
     _volumeNormInitialized = false;
+    Log.d('[APPLY] source=room-enter');
     if (!_volumeNormApplied &&
         volumeNormShouldPreApply(
           userOn: AppSettingsController.instance.volumeNorm.value,
@@ -309,6 +310,7 @@ mixin PlayerMixin {
     // 否则（RISK-71：open 可能清掉链）换线路后均衡会静默丢失，直到下次重初始化。
     _volumeNormInitialized = false;
     Log.d('[VSR] 换线路/重试走起播门控：open(play:false) index=$index');
+    Log.d('[APPLY] source=switch-line/retry（openSourceGated）');
     _tlMark('open 发起');
     _armVsrDeferPlay();
     try {
@@ -377,6 +379,8 @@ mixin PlayerMixin {
   bool? _pendingVolumeNormIntent;
 
   /// 起播时间线（[TL]）：每次进房/重开一条，定位「进房等很久」到底卡在哪一段。
+  /// `_tlDump` 汇总时超过阈值会打 WARN（便于真机一眼看出慢）。
+  static const int tlSlowThresholdMs = 4000;
   DateTime? _tlT0;
   final Map<String, int> _tlMarks = <String, int>{};
   /// 时间线代际：`initializePlayer` 每次重置自增；延时汇总绑定代际，避免「旧房间的
@@ -408,6 +412,9 @@ mixin PlayerMixin {
     final sb = StringBuffer('[TL] 汇总: 总=${total}ms');
     _tlMarks.forEach((k, v) => sb.write('; $k=${v}ms'));
     Log.d(sb.toString());
+    if (total > tlSlowThresholdMs) {
+      Log.w('[TL] 起播耗时超阈（${total}ms > ${tlSlowThresholdMs}ms）——见上方分节点耗时');
+    }
     _tlT0 = null;
   }
 
@@ -1860,7 +1867,7 @@ class PlayerController extends BaseController
       // 复核 P1-6：已挂链时无条件入队同步——关闭不需要能力探测，
       // 不能因「未播放 + 能力未知」被吞（否则开关拨关、链却仍在均衡）。
       if (_volumeNormApplied) {
-        _syncVolumeNorm();
+        applyPipelineChange('toggle-norm', vsr: false);
         return;
       }
       // 未播放且能力未知：不在此刻探测（空闲探测不可靠，可能假成功），留到首帧钩子统一处理。
@@ -1871,7 +1878,7 @@ class PlayerController extends BaseController
         Log.d('[VN] toggle($on) deferred: not playing');
         return;
       }
-      _syncVolumeNorm();
+      applyPipelineChange('toggle-norm', vsr: false);
     });
     // VSR：直播间接开关即生效（复用音量均衡的热切换范式：worker + 串行队列 + 错误抑制）
     _rtxVsrWorker = ever(AppSettingsController.instance.enableRtxVsr, (bool on) {
@@ -1879,6 +1886,9 @@ class PlayerController extends BaseController
         return;
       }
       Log.d('[DIAG] 操作: VSR → $on');
+      // 注：VSR 热切换不直接走 `applyPipelineChange`——`_applyRtxVsrSetting` 除同步外
+      // 还负责「门控期热关 VSR → 摘链后放行」等，不能换成纯委派入口。
+      Log.d('[APPLY] source=toggle-vsr on=$on');
       _applyRtxVsrSetting();
       Future.delayed(const Duration(seconds: 2), () {
         if (!_playerDisposed) _diagSnapshot('拨VSR后+2s');
@@ -2088,6 +2098,30 @@ class PlayerController extends BaseController
   void mediaError(String error) {
     // 弱网调整：用户自责
     // WakelockPlus.disable();
+  }
+
+  /// 统一「管线应用」入口（P2-2 / 方案 §三 C3）：把**外部**变化（拨开关等）收敛到一个入口，
+  /// 统一留痕 `[APPLY] source=`（期望态 vs 已应用态）。
+  ///
+  /// 设计取舍（守既有语义，不重写已验证逻辑）：
+  /// - 两条队列**保持分离**（C3 硬约束），本入口只做「留痕 + 委派」到 _syncVolumeNorm / _syncRtxVsrCrop；
+  /// - **队列内**调用点（首帧钩子 / 探测终裁）仍直接调无队版（ISS-281 修复要求，见各自注释），
+  ///   不入本入口——这是**有意的例外**，不是漏。
+  Future<void> applyPipelineChange(String source,
+      {bool norm = true, bool vsr = true}) async {
+    if (_playerDisposed) {
+      return;
+    }
+    Log.d('[APPLY] source=$source 期望: 均衡=${AppSettingsController.instance.volumeNorm.value}'
+        '（已挂=$_volumeNormApplied 能力=${PlayerMixin.afLoudnormSupported}）'
+        ' VSR=${Platform.isWindows && AppSettingsController.instance.enableRtxVsr.value}'
+        '（链=$_rtxVsrChainApplied scale=${_lastRtxVsrScale?.toStringAsFixed(2) ?? "-"}）');
+    if (norm) {
+      await _syncVolumeNorm();
+    }
+    if (vsr && Platform.isWindows) {
+      await _syncRtxVsrCrop(trigger: source);
+    }
   }
 
   /// 音量均衡：同步入口（**队列外**调用，如热切换 worker）。内部入队执行 [_syncVolumeNormLocked]。
