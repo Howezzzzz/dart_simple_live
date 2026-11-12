@@ -23,6 +23,7 @@ import 'package:simple_live_app/app/custom_throttle.dart';
 import 'package:simple_live_app/app/log.dart';
 import 'package:simple_live_app/app/utils.dart';
 import 'package:simple_live_app/app/utils/panel_width.dart';
+import 'package:simple_live_app/app/utils/ready_gate.dart';
 import 'package:simple_live_app/app/utils/rtx_vsr_crop.dart';
 import 'package:simple_live_app/app/utils/serial_queue.dart';
 import 'package:simple_live_app/app/utils/volume_norm.dart';
@@ -159,7 +160,6 @@ mixin PlayerMixin {
     // 诊断：起播时间线起点 + 相关设置快照（下版真机复测直读）
     _tlReset();
     _tlMark('t0 进房');
-    _armReadyGate();
     Log.d('[DIAG] 设置: VSR=${AppSettingsController.instance.enableRtxVsr.value}'
         ' 均衡=${AppSettingsController.instance.volumeNorm.value}'
         ' 双缓冲=${AppSettingsController.instance.videoDoubleBuffering.value}'
@@ -277,7 +277,13 @@ mixin PlayerMixin {
   bool get vsrDeferPlayPending => _vsrDeferPlay;
 
   /// [TL] 时间线：记录 `player.open` 发起节点（宿主在 open 前调用；E 批遗留，P1-1 补）。
-  void tlMarkOpen() => _tlMark('open 发起');
+  /// 宿主（LiveRoomController）在 `player.open` **前一刻**调用：记时间线 + 武装就绪门。
+  /// 就绪门武装点放这里（而非 initializePlayer 开头）——既避开前面若干 await 吃掉 6s 预算
+  /// （复核 E），又让「换线路/出错重试」（走 openSourceGated）同享遮罩（复核 G）。
+  void tlMarkOpen() {
+    _tlMark('open 发起');
+    _armReadyGate();
+  }
 
   /// 起播门控是否适用（Windows + VSR 开启）。进房 / 换线路 / 出错重试共用同一判据，
   /// 与 initializePlayer 里的 vsrOn 同源（纯函数 vsrShouldDeferPlay）。
@@ -435,12 +441,24 @@ mixin PlayerMixin {
   Timer? _readyTimeoutTimer;
   static const Duration readyGateTimeout = Duration(seconds: 6);
 
-  /// 在途管线写入计数（音量均衡队列 + VSR 裁切队列）；就绪门要求其为 0。
+  /// 就绪门前置条件（阶段4 复核 B/C：缺「play 已发」与代际过滤 → 热拨 VSR/seek 会被误判成进房就绪）。
+  int _readyEpoch = 0;
+  bool _playIssued = false; // 本次门控内 play() 是否已发出
+  bool _readyRestartSeen = false; // 本次门控内是否已见「restart 完成」
+
+  /// 在途管线写入计数（音量均衡队列 + VSR 裁切队列）。
+  /// 注：**放行点写链不经队列**（在 play() 之前 await 完成，restart 必在其后），故不计入也不影响判定。
   int _pipelineBusy = 0;
 
   void _armReadyGate() {
+    _readyEpoch++;
     _readyPending = true;
+    _playIssued = false;
+    _readyRestartSeen = false;
     showReadyMaskRx.value = true;
+    // 声音门（§8.2【硬】/§三 B1）：就绪前静音（用 mpv `mute` 属性，不动用户音量值），
+    // 与遮罩淡出同一刻解除。VSR 关时 `open` 即 play:true，此门是唯一保证「就绪前不出声」的机制。
+    _setGateMute(true);
     _readyTimeoutTimer?.cancel();
     _readyTimeoutTimer = Timer(readyGateTimeout, () {
       if (_playerDisposed) {
@@ -465,8 +483,34 @@ mixin PlayerMixin {
     _readyTimeoutTimer?.cancel();
     _readyTimeoutTimer = null;
     showReadyMaskRx.value = false;
+    _setGateMute(false); // 与遮罩淡出同一刻解除声音门
     _tlMark('就绪($reason)');
     Log.d('[ready] 就绪门解除（$reason）');
+  }
+
+  /// 任一前置条件变化后调用（restart 到达 / play 发出 / 写链完成）——
+  /// 避开「restart 到时 busy>0 就永不复检」（复核 C：只能等 6s 超时且误报网络慢）。
+  void _maybeFinishReadyGate() {
+    if (readyGateCanFinish(
+      pending: _readyPending,
+      playIssued: _playIssued,
+      restartSeen: _readyRestartSeen,
+      pipelineBusy: _pipelineBusy,
+    )) {
+      _finishReadyGate('restart');
+    }
+  }
+
+  /// 门控静音开关（用 mpv `mute` 属性，不动音量值；非原生平台空操作）。
+  Future<void> _setGateMute(bool muted) async {
+    try {
+      final pp = player.platform;
+      if (pp is NativePlayer) {
+        await pp.setProperty('mute', muted ? 'yes' : 'no');
+      }
+    } catch (e) {
+      Log.logPrint(e);
+    }
   }
 
   /// 音量均衡：操作串行队列（探测/应用/移除按发起顺序执行，避免并发交错导致 af 与状态标记不一致）。
@@ -482,6 +526,7 @@ mixin PlayerMixin {
         await task();
       } finally {
         _pipelineBusy--;
+        _maybeFinishReadyGate();
       }
     }, onError: (e, _) => Log.logPrint(e));
   }
@@ -831,6 +876,7 @@ mixin PlayerMixin {
         Log.d('[VSR] 设置 video-crop 失败: $e');
       } finally {
         _pipelineBusy--;
+        _maybeFinishReadyGate();
       }
     });
     _cropWriteQueue = next;
@@ -1834,6 +1880,9 @@ class PlayerController extends BaseController
       if (event) {
         WakelockPlus.enable();
         Log.d("Playing");
+        // 就绪门前置：play 已发出（media_kit 在 play() 返回时即发 playing）
+        _playIssued = true;
+        _maybeFinishReadyGate();
         _tlMark('首帧/playing');
         final tlEpoch = _tlEpoch;
         Future.delayed(const Duration(milliseconds: 2500), () {
@@ -1901,10 +1950,9 @@ class PlayerController extends BaseController
       if (event.text.contains('Using hardware decoding')) _tlMark('硬解生效');
       if (event.text.contains('playback restart complete')) {
         _tlMark('restart完成');
-        // 就绪门：管线重启完成 ∧ 无在途管线写入 → 解除遮罩
-        if (_readyPending && _pipelineBusy == 0) {
-          _finishReadyGate('restart');
-        }
+        // 就绪门：记「已见 restart」，再按完整条件判定（play 已发 + 无在途写入）
+        _readyRestartSeen = true;
+        _maybeFinishReadyGate();
       }
       // 音量均衡静默降级防线（复核建议）：武装期内命中滤镜错误关键字即标记失败，
       // 由首帧/探测/热开的窗末终裁消费（真机 P0 ISS-278：记录与抑制窗解耦——失败日志

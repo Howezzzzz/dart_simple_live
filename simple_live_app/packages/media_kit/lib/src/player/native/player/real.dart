@@ -1891,7 +1891,7 @@ class NativePlayer extends PlatformPlayer {
         logController.add(PlayerLog(
             prefix: 'cplayer',
             level: 'v',
-            text: 'playback restart complete'));
+            text: 'playback restart complete (slive-gate)'));
       }
     }
     if (event.ref.event_id == generated.mpv_event_id.MPV_EVENT_LOG_MESSAGE) {

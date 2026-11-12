@@ -715,27 +715,6 @@ class LiveRoomPage extends GetView<LiveRoomController> {
       child: Stack(
         children: [
           _buildAlignedVideo(boxFit: boxFit, aspectRatio: aspectRatio),
-          // 起播就绪遮罩（RISK-69 优雅版 / 方案 §三 B2）：就绪前盖住「闪/黑」，就绪/超时后 150ms 淡出
-          Obx(
-            () => IgnorePointer(
-              child: AnimatedOpacity(
-                opacity: controller.showReadyMaskRx.value ? 1.0 : 0.0,
-                duration: const Duration(milliseconds: 150),
-                child: Container(
-                  color: Colors.black,
-                  alignment: Alignment.center,
-                  child: const SizedBox(
-                    width: 28,
-                    height: 28,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2.5,
-                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white70),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
           Obx(
             () => Visibility(
               visible: !controller.liveStatus.value,
@@ -777,7 +756,34 @@ class LiveRoomPage extends GetView<LiveRoomController> {
       pauseUponEnteringBackgroundMode: AppSettingsController.instance.playerAutoPause.value,
       resumeUponEnteringForegroundMode: AppSettingsController.instance.playerAutoPause.value,
       controls: (state) {
-        return playerControls(state, controller);
+        // 就绪门遮罩放在「视频之上、控件之下」——既不遮住控制栏（用户仍可暂停/调音量），
+        // 又能盖住「pause 首帧闪 / vf 重建黑」（阶段4 复核 F；方案 §三 B2）。
+        return Stack(
+          fit: StackFit.expand,
+          children: [
+            Obx(
+              () => IgnorePointer(
+                child: AnimatedOpacity(
+                  opacity: controller.showReadyMaskRx.value ? 1.0 : 0.0,
+                  duration: const Duration(milliseconds: 150),
+                  child: Container(
+                    color: Colors.black,
+                    alignment: Alignment.center,
+                    child: const SizedBox(
+                      width: 28,
+                      height: 28,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2.5,
+                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white70),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            playerControls(state, controller),
+          ],
+        );
       },
       // 夹框时由 AspectRatio 外层强制比例，Video 内部不再设（避免双重处理）
       aspectRatio: bottomAlignAspect != null ? null : aspectRatio,
