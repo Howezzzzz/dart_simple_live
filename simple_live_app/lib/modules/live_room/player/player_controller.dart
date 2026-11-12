@@ -336,15 +336,19 @@ mixin PlayerMixin {
   bool _playerDisposed = false;
 
   /// 延迟解除错误抑制（mpv 错误事件可能略晚于 setProperty 返回）。
+  /// 注：用 `Zone.root.bindCallback` 转义——该回调在 `_withWriteMutex` 锁体内被调度（:835/:1056 的 finally），
+  /// 不转义会把写锁的 Zone 标记泄漏进来；将来若在本回调内新增写点，会静默绕锁（定向复验建议）。
   void _scheduleSuppressRelease(int token) {
-    Future.delayed(volumeNormSuppressDuration, () {
-      if (_playerDisposed) {
-        return;
-      }
-      if (token == _suppressToken) {
-        _suppressErrorRetry = false;
-      }
-    });
+    Future.delayed(
+        volumeNormSuppressDuration,
+        Zone.root.bindCallback(() {
+          if (_playerDisposed) {
+            return;
+          }
+          if (token == _suppressToken) {
+            _suppressErrorRetry = false;
+          }
+        }));
   }
 
   /// 音量均衡：进程级能力缓存（null=未探测；libmpv 构建固定，探测一次即可）。
