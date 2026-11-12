@@ -764,6 +764,7 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     // 初始化播放器并设置 ao 参数
     await initializePlayer();
 
+    tlMarkOpen();
     // VSR 起播门控（方案 20261111）：Windows + VSR 开启时先不自动起播，
     // 待 player_controller 按自适应倍数把 vf 挂好后再 play()——避免起播后重挂 vf 触发 playback restart。
     await player.open(Playlist(mediaList), play: !vsrDeferPlayPending);
@@ -778,6 +779,13 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     // 门控适用时由 player_controller 的 openSourceGated 接管：改用 open(play:false)
     // （不能只靠 jump——media_kit 的 stream.width/height 带 distinct，同分辨率不发尺寸
     // 事件 → 门控只能等超时，切线路会白卡几秒），链挂好后再自动起播。
+    // 就绪门（阶段4 定向复验 G）：换线路/出错重试也武装遮罩/声音门——
+    // 下面 openSourceGated（VSR 路径）与 jump（非 VSR 路径）都会触发一次重载；
+    // _tlMark 按 key 去重，重复调用无害。
+    tlMarkOpen();
+    // [APPLY] 覆盖「换线路 + 出错重试」两路（openSourceGated 与非 VSR 的 jump 都走这里，
+    // 阶段4 复核：原来打在 openSourceGated 内、非 VSR 路径会漏）。
+    Log.d('[APPLY] source=switch-line/retry');
     if (await openSourceGated(buildPlayerMediaList(), index: currentLineIndex)) {
       return;
     }

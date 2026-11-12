@@ -1881,6 +1881,19 @@ class NativePlayer extends PlatformPlayer {
         }
       }
     }
+    if (event.ref.event_id ==
+        generated.mpv_event_id.MPV_EVENT_PLAYBACK_RESTART) {
+      // [Slive 定制] 转发「播放管线重启完成」事件：其 mpv 原生日志为 **verbose 级**，
+      // app 默认日志级别（error）下收不到；这里以 cplayer/v 的等价 PlayerLog 形式播发，
+      // 供起播「就绪门」判断首帧就绪（消费方：player_controller 的日志监听）。
+      // 上游同步时保留本块（media_kit 也为内嵌副本，见 pubspec.yaml 注释）。
+      if (!logController.isClosed) {
+        logController.add(PlayerLog(
+            prefix: 'cplayer',
+            level: 'v',
+            text: 'playback restart complete (slive-gate)'));
+      }
+    }
     if (event.ref.event_id == generated.mpv_event_id.MPV_EVENT_LOG_MESSAGE) {
       final eventLogMessage = event.ref.data
           .cast<generated.mpv_event_log_message>()

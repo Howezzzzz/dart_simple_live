@@ -23,7 +23,9 @@ import 'package:simple_live_app/app/custom_throttle.dart';
 import 'package:simple_live_app/app/log.dart';
 import 'package:simple_live_app/app/utils.dart';
 import 'package:simple_live_app/app/utils/panel_width.dart';
+import 'package:simple_live_app/app/utils/ready_gate.dart';
 import 'package:simple_live_app/app/utils/rtx_vsr_crop.dart';
+import 'package:simple_live_app/app/utils/serial_queue.dart';
 import 'package:simple_live_app/app/utils/volume_norm.dart';
 import 'package:simple_live_app/services/local_storage_service.dart';
 import 'package:simple_live_app/modules/live_room/danmaku/danmaku_emoticon.dart';
@@ -39,6 +41,51 @@ import 'package:window_manager/window_manager.dart';
 /// 需在 set 之后留出窗口，避免误触发 mediaError 重拉流（PR #195 教训）
 const Duration volumeNormSuppressDuration = Duration(seconds: 2);
 
+/// 一次 VSR 链写入的完整目标（P1-1 起播前单次写链：门控期吞中间写，
+/// settle 尾沿 / 超时放行时一次性写入终值）。
+class _VsrTarget {
+  const _VsrTarget({
+    required this.signature,
+    required this.trigger,
+    required this.enable,
+    required this.scale,
+    required this.crop,
+    required this.aspect,
+    required this.renderSize,
+    required this.rawW,
+    required this.rawH,
+    required this.area,
+  });
+
+  /// 去重签名（与 _lastRtxVsrSignature 同格式）。
+  final String signature;
+
+  /// 触发来源（size / layout / toggle / init / release），用于日志归因。
+  final String trigger;
+
+  /// 是否挂链（VSR 开且倍数有效）。
+  final bool enable;
+
+  /// 自适应倍数（null = 不挂）。
+  final double? scale;
+
+  /// mpv video-crop 目标值（空串 = 不裁）。
+  final String crop;
+
+  /// video-aspect-override 目标值。
+  final double aspect;
+
+  /// 渲染画布尺寸（null = 恢复默认）。
+  final (int, int)? renderSize;
+
+  /// 决策时的源尺寸（写后用于校验尺寸是否已变）。
+  final int rawW;
+  final int rawH;
+
+  /// 决策时的播放区物理尺寸（日志用）。
+  final (int, int)? area;
+}
+
 mixin PlayerMixin {
   GlobalKey<VideoState> globalPlayerKey = GlobalKey<VideoState>();
   GlobalKey globalDanmuKey = GlobalKey();
@@ -48,6 +95,10 @@ mixin PlayerMixin {
   /// 页面 Obx 读取它触发重建；fitPanelWidthToVideo 亦会更新（冗余但无害）。
   var videoWidthRx = 0.obs;
   var videoHeightRx = 0.obs;
+
+  /// 起播就绪遮罩（RISK-69 优雅版 / 方案 §三 B2）：进房后「管线就绪」前为 true，
+  /// 页面据此在播放区盖加载态，遮掉「闪一下 → 黑 → 再闪」；就绪/超时后置 false（150ms 淡出）。
+  var showReadyMaskRx = false.obs;
 
   /// 播放器实例
   late final player = Player(
@@ -106,6 +157,15 @@ mixin PlayerMixin {
     //  icc-cache-dir = "~~/cache/icc";
     //  gpu-shader-cache-dir = "~~/cache/shader"
     //  watch-later-dir = "~~/cache/watch_later"
+    // 诊断：起播时间线起点 + 相关设置快照（下版真机复测直读）
+    _tlReset();
+    _tlMark('t0 进房');
+    Log.d('[DIAG] 设置: VSR=${AppSettingsController.instance.enableRtxVsr.value}'
+        ' 均衡=${AppSettingsController.instance.volumeNorm.value}'
+        ' 双缓冲=${AppSettingsController.instance.videoDoubleBuffering.value}'
+        ' 自适应窗口宽度=${AppSettingsController.instance.autoFitWindowWidth.value}'
+        ' 自动全屏=${AppSettingsController.instance.autoFullScreen.value}');
+
     // NVIDIA RTX VSR 支持 (Windows 平台)
     // 注：抽成纯函数用于回归防线——「是否因 VSR 而延迟起播」只允许 Windows+VSR 开启，
     // 其它情况必须保持自动起播（见 rtx_vsr_crop.dart 的 vsrShouldDeferPlay）。
@@ -114,19 +174,16 @@ mixin PlayerMixin {
       vsrEnabled: AppSettingsController.instance.enableRtxVsr.value,
     );
     if (vsrOn) {
-      await pp.setProperty('hwdec', 'd3d11va');
-      // 放大倍数与 rtx_vsr_crop.dart 的 rtxVsrScale 单一事实来源（复核 P3-4）：
-      // 手动写两处 scale 会脱钩——倍数调大时裁切矩形落在放大帧内 → 裁错且无 safe-fail。
-      await pp.setProperty('vf', rtxVsrVfChain(rtxVsrScale));
-      _lastRtxVsrScale = rtxVsrScale;
+      // P1-3：硬解已在 `videoController` 创建期随 `hwdec: 'd3d11va'` 一次给定（见 videoController），
+      // 此处不再重复写（此前三笔同值写之一，阶段4 复核抓）。
+      // 起播门控（P1-1 起播前单次写链）：不再预挂 2.0 兜底链——链在门控放行时按自适应
+      // 终值**一次**写入；预挂 2.0 只在门控**超时**路径兜底（见 _preHangFallbackChain）。
+      // _rtxVsrChainApplied 置 true 表示本次播放启用 VSR（门控期 plan 按「开」算自适应倍数）。
       _rtxVsrChainApplied = true;
-      // 预挂也计入链写入次数（复核 P2：否则真机日志判不出「到底挂了几次」）。
-      Log.d('[VSR] 预挂兜底链 #${++_vsrChainWriteCount}'
-          ' scale=${rtxVsrScale.toStringAsFixed(2)}（起播前）');
     } else if (Platform.isWindows) {
       // 关闭 VSR 时必须摘掉已挂上的滤镜链（复核 P2-1）：只改标志不摘链的话，
       // 同一会话 F5/切清晰度重初始化后，链仍在放大画面、裁切却被清空 → 绿条复现且 VSR 代价照付。
-      await pp.setProperty('vf', '');
+      await _withWriteMutex(() => pp.setProperty('vf', ''));
       _lastRtxVsrScale = null;
       _rtxVsrChainApplied = false;
       // 注（复核澄清）：这里 disarm 是安全的——initializePlayer 全仓只有一个调用点
@@ -150,6 +207,9 @@ mixin PlayerMixin {
           userOn: AppSettingsController.instance.volumeNorm.value,
           supported: afLoudnormSupported,
         )) {
+      // 实际会预挂才留痕（避免「什么都没做」也打 [APPLY]，阶段4 复核）
+      Log.d('[APPLY] source=room-enter/reinit 均衡预挂（已挂=$_volumeNormApplied'
+          ' 能力=${PlayerMixin.afLoudnormSupported}）');
       await _enqueueVolumeNorm(() => _preApplyVolumeNorm());
     }
     // 同步底部补边裁切（VSR 开启才裁；关闭时显式清空，避免切线路等场景残留上次的裁切）。
@@ -162,11 +222,19 @@ mixin PlayerMixin {
       // 复验 P3：vsrOn 是本函数**开头**的快照，中途热关 VSR 会让它过期——若仍按它武装，
       // 后面 open(play:false) 就会白等到超时（最长 3s）。这里用实时判据再确认一次。
       _disarmVsrDeferPlay();
-      await _syncRtxVsrCrop();
+      await _syncRtxVsrCrop(trigger: 'init');
     }
+    // 诊断：进房后 5s 快照（看得见现场状态）；绑定代际，避免跨初始化时旧定时器错标
+    final snapshotEpoch = _tlEpoch;
+    Future.delayed(const Duration(seconds: 5), () {
+      if (!_playerDisposed && snapshotEpoch == _tlEpoch) {
+        _diagSnapshot('进房+5s');
+      }
+    });
   }
 
-  /// 本次播放是否已挂上 VSR 滤镜链（决定能否动 video-crop）。
+  /// 本次播放是否**应启用** VSR 滤镜链（P1-1 起：门控放行前链尚未挂，此标志=用户意愿+链状态
+  /// 合一，决定 plan 按「开」算自适应倍数、能否动 video-crop；放行写链后即真实已挂）。
   bool _rtxVsrChainApplied = false;
 
   /// 记录最近一次**已应用**的 VSR 同步签名（裁切值 + 源尺寸 + 链状态），用于去重。
@@ -193,18 +261,33 @@ mixin PlayerMixin {
   DateTime? _vsrDeferPlayArmedAt;
 
   /// 门控代际：每次武装 +1。
-  /// **防御性守卫**（复验 P2）：「当前 `_releaseVsrDeferPlay` 在比对前无任何 await（Dart 单线程）」
-  /// ⇒ 恒不触发；且实测 release 的 play() 一定先于后续 open() 入锁队列，不存在「新源先播后挂链」。
-  /// 保留它是为了将来一旦在 play() 前插入 await（例如等串行队列）时能自动挡掉过期 release。
+  /// 用于挡掉「已过期 release」：P1-1 起播前单次写链在 play() 前插入了 await（写链
+  /// `_applyVsrTarget` / `_preHangFallbackChain`），写链期间若恰逢重武装（换线路/出错重试
+  /// 触发 openSourceGated → initializePlayer → _armVsrDeferPlay），过期 release 的 play()
+  /// 会落到新源、绕过新门控一次（ISS-283）。故 **play() 前必须复查本代际**（两处比对：
+  /// disarm 后、以及所有 await 之后）。
   int _vsrGateEpoch = 0;
   static const Duration vsrDeferPlaySettle = Duration(milliseconds: 500);
-  static const Duration vsrDeferPlaySettleMax = Duration(milliseconds: 1500);
+  static const Duration vsrDeferPlaySettleMax = Duration(milliseconds: 1200);
 
   /// 已写/摘 VSR 链次数（观测用：真机日志可看出进房是否只挂一次）。
   int _vsrChainWriteCount = 0;
 
+  /// P1-1 起播前单次写链：门控期内吞中间写，暂存的最新写链目标
+  /// （settle 尾沿 / 超时放行时一次消费）。null = 暂无目标（超时路径走预挂兜底 2.0）。
+  _VsrTarget? _vsrDeferPlayTarget;
+
   /// 供宿主（LiveRoomController）在 `player.open` 时读取：本次是否应延迟起播。
   bool get vsrDeferPlayPending => _vsrDeferPlay;
+
+  /// [TL] 时间线：记录 `player.open` 发起节点（宿主在 open 前调用；E 批遗留，P1-1 补）。
+  /// 宿主（LiveRoomController）在 `player.open` / `jump` **前一刻**调用：记时间线 + 武装就绪门。
+  /// 就绪门武装点放这里（而非 initializePlayer 开头）——既避开前面若干 await 吃掉 6s 预算
+  /// （复核 E），又让「换线路/出错重试」（`setPlayer`）同享遮罩/声音门（复核 G）。
+  void tlMarkOpen() {
+    _tlMark('open 发起');
+    _armReadyGate();
+  }
 
   /// 起播门控是否适用（Windows + VSR 开启）。进房 / 换线路 / 出错重试共用同一判据，
   /// 与 initializePlayer 里的 vsrOn 同源（纯函数 vsrShouldDeferPlay）。
@@ -229,6 +312,7 @@ mixin PlayerMixin {
     // 否则（RISK-71：open 可能清掉链）换线路后均衡会静默丢失，直到下次重初始化。
     _volumeNormInitialized = false;
     Log.d('[VSR] 换线路/重试走起播门控：open(play:false) index=$index');
+    _tlMark('open 发起');
     _armVsrDeferPlay();
     try {
       await player.open(Playlist(mediaList, index: index), play: false);
@@ -255,15 +339,19 @@ mixin PlayerMixin {
   bool _playerDisposed = false;
 
   /// 延迟解除错误抑制（mpv 错误事件可能略晚于 setProperty 返回）。
+  /// 注：用 `Zone.root.bindCallback` 转义——该回调在 `_withWriteMutex` 锁体内被调度（:835/:1056 的 finally），
+  /// 不转义会把写锁的 Zone 标记泄漏进来；将来若在本回调内新增写点，会静默绕锁（定向复验建议）。
   void _scheduleSuppressRelease(int token) {
-    Future.delayed(volumeNormSuppressDuration, () {
-      if (_playerDisposed) {
-        return;
-      }
-      if (token == _suppressToken) {
-        _suppressErrorRetry = false;
-      }
-    });
+    Future.delayed(
+        volumeNormSuppressDuration,
+        Zone.root.bindCallback(() {
+          if (_playerDisposed) {
+            return;
+          }
+          if (token == _suppressToken) {
+            _suppressErrorRetry = false;
+          }
+        }));
   }
 
   /// 音量均衡：进程级能力缓存（null=未探测；libmpv 构建固定，探测一次即可）。
@@ -288,20 +376,192 @@ mixin PlayerMixin {
   /// VSR 重挂 vf 也递增 _suppressToken，共用会让 VSR 误取消音量均衡待决终裁，glm 复核 P1）
   int _volumeNormToken = 0;
 
-  /// 音量均衡：操作串行队列（探测/应用/移除按发起顺序执行，避免并发交错导致 af 与状态标记不一致）
-  Future<void> _volumeNormQueue = Future<void>.value();
+  /// 音量均衡：待办的拨动意愿（未播放 + 能力未知时 worker 不再静默吞，记此待办、复播时消费）
+  bool? _pendingVolumeNormIntent;
 
-  /// 音量均衡：入队执行一次 af 操作（异常在队列内消化，避免 fire-and-forget 产生未处理异步异常）
-  Future<void> _enqueueVolumeNorm(Future<void> Function() task) {
-    final next = _volumeNormQueue.then((_) async {
-      try {
-        await task();
-      } catch (e) {
-        Log.logPrint(e);
+  /// 起播时间线（[TL]）：每次进房/重开一条，定位「进房等很久」到底卡在哪一段。
+  /// `_tlDump` 汇总时超过阈值会打 WARN（便于真机一眼看出慢）。
+  static const int tlSlowThresholdMs = 4000;
+  DateTime? _tlT0;
+  final Map<String, int> _tlMarks = <String, int>{};
+  /// 时间线代际：`initializePlayer` 每次重置自增；延时汇总绑定代际，避免「旧房间的
+  /// 延时 dump 提前把新房间的汇总打空」（阶段4 复核发现：切清晰度/重开后必现）。
+  int _tlEpoch = 0;
+
+  void _tlReset() {
+    _tlT0 = DateTime.now();
+    _tlMarks.clear();
+    _tlEpoch++;
+  }
+
+  void _tlMark(String key) {
+    final t0 = _tlT0;
+    if (t0 == null || _tlMarks.containsKey(key)) {
+      return;
+    }
+    final ms = DateTime.now().difference(t0).inMilliseconds;
+    _tlMarks[key] = ms;
+    Log.d('[TL] $key +${ms}ms');
+  }
+
+  void _tlDump() {
+    final t0 = _tlT0;
+    if (t0 == null) {
+      return;
+    }
+    final total = DateTime.now().difference(t0).inMilliseconds;
+    final sb = StringBuffer('[TL] 汇总: 总=${total}ms');
+    _tlMarks.forEach((k, v) => sb.write('; $k=${v}ms'));
+    Log.d(sb.toString());
+    // 超阈判据用「就绪时刻」而非汇总时刻——汇总由 playing 后固定 2.5s 触发，
+    // 直接用 total 会系统性多算 2.5s（阶段4 复核：达标的 4s 脏流也会误报 WARN）。
+    final readyMs = _tlMarks['restart完成'] ?? _tlMarks['首帧/playing'];
+    if (readyMs != null && readyMs > tlSlowThresholdMs) {
+      Log.w('[TL] 起播耗时超阈（就绪=${readyMs}ms > ${tlSlowThresholdMs}ms）——见上方分节点耗时');
+    }
+    _tlT0 = null;
+  }
+
+  /// 诊断快照（[DIAG] 快照）：进房后 5s / 拨开关后 2s 各一条，便于直读现场状态。
+  Future<void> _diagSnapshot(String when) async {
+    try {
+      final pp = player.platform;
+      var af = '-';
+      var crop = '-';
+      if (pp is NativePlayer) {
+        try {
+          af = (await pp.getProperty('af', waitForInitialization: false)).trim();
+        } catch (_) {}
+        try {
+          crop =
+              (await pp.getProperty('video-crop', waitForInitialization: false))
+                  .trim();
+        } catch (_) {}
+      }
+      final area = _playerAreaPhysicalSize();
+      Log.d('[DIAG] 快照($when): vsr=${AppSettingsController.instance.enableRtxVsr.value}'
+          ' scale=${_lastRtxVsrScale?.toStringAsFixed(2) ?? "-"} crop="$crop"'
+          ' 源=${player.state.width}x${player.state.height}'
+          ' 播放区=${area?.$1 ?? "-"}x${area?.$2 ?? "-"}'
+          ' 缓存=${AppSettingsController.instance.videoDoubleBuffering.value ? "on" : "off"}'
+          ' playing=${player.state.playing} af="$af"');
+    } catch (e) {
+      Log.logPrint(e);
+    }
+  }
+
+  /// 就绪门（方案 §三 B1/B2）：进房后在「首帧真正就绪」前盖遮罩。
+  /// ready ＝ 收到 `playback restart complete`（media_kit 补丁转发的等价日志行）∧ 无在途管线写入。
+  /// 兜底 6s 超时（脏流 GOP 上限）→ 强制解除 + 提示，不静默。
+  bool _readyPending = false;
+  Timer? _readyTimeoutTimer;
+  static const Duration readyGateTimeout = Duration(seconds: 6);
+
+  /// 就绪门前置条件（阶段4 复核 B/C：缺「play 已发」→ 热拨 VSR/seek 会被误判成进房就绪）。
+  bool _playIssued = false; // 本次门控内 play() 是否已发出
+  bool _readyRestartSeen = false; // 本次门控内「play 已发之后」是否已见 restart 完成
+
+  /// 在途管线写入计数（音量均衡队列 + VSR 裁切队列）。
+  /// 注：**放行点写链不经队列**（在 play() 之前 await 完成，restart 必在其后），故不计入也不影响判定。
+  int _pipelineBusy = 0;
+
+  /// af/vf 写序互斥（P1-3）：两条队列保持**分离**（C3 硬约束：不合并——避免长 af 建链堆住
+  /// VSR 的 vf 写入、破坏「VSR 点即生效」），但**真正写 mpv 的瞬间**互斥，避免「vf 重建中写 af」
+  /// 交错。只在**叶子写函数**取锁（三个叶子互不调用 → 无嵌套、无死锁；锁内无长耗时环节）。
+  Future<void> _writeMutex = Future<void>.value();
+  static final Object _writeMutexZoneKey = Object();
+  Future<T> _withWriteMutex<T>(Future<T> Function() body) {
+    // 重入（已在锁体内再取锁）：直接执行，避开自死锁（今日无此调用，属未来防护）。
+    if (Zone.current[_writeMutexZoneKey] == true) {
+      return body();
+    }
+    final prev = _writeMutex;
+    final gate = Completer<void>();
+    _writeMutex = gate.future;
+    return prev
+        .then((_) =>
+            runZoned(() => body(), zoneValues: {_writeMutexZoneKey: true}))
+        .whenComplete(gate.complete);
+  }
+
+  void _armReadyGate() {
+    _readyPending = true;
+    _playIssued = false;
+    _readyRestartSeen = false;
+    showReadyMaskRx.value = true;
+    // 声音门（§8.2【硬】/§三 B1）：就绪前静音（用 mpv `mute` 属性，不动用户音量值），
+    // 与遮罩淡出同一刻解除。VSR 关时 `open` 即 play:true，此门是唯一保证「就绪前不出声」的机制。
+    _setGateMute(true);
+    _readyTimeoutTimer?.cancel();
+    _readyTimeoutTimer = Timer(readyGateTimeout, () {
+      if (_playerDisposed) {
+        return;
+      }
+      // 只在「确实开过流」时提示，避免未开播房间误弹
+      final hadSource = (player.state.width ?? 0) > 0 ||
+          player.state.buffering ||
+          player.state.playing;
+      _finishReadyGate('timeout');
+      if (hadSource) {
+        SmartDialog.showToast('网络较慢，已直接播放');
       }
     });
-    _volumeNormQueue = next;
-    return next;
+  }
+
+  void _finishReadyGate(String reason) {
+    if (!_readyPending) {
+      return;
+    }
+    _readyPending = false;
+    _readyTimeoutTimer?.cancel();
+    _readyTimeoutTimer = null;
+    showReadyMaskRx.value = false;
+    _setGateMute(false); // 与遮罩淡出同一刻解除声音门
+    _tlMark('就绪($reason)');
+    Log.d('[ready] 就绪门解除（$reason）');
+  }
+
+  /// 任一前置条件变化后调用（restart 到达 / play 发出 / 写链完成）——
+  /// 避开「restart 到时 busy>0 就永不复检」（复核 C：只能等 6s 超时且误报网络慢）。
+  void _maybeFinishReadyGate() {
+    if (readyGateCanFinish(
+      pending: _readyPending,
+      playIssued: _playIssued,
+      restartSeen: _readyRestartSeen,
+      pipelineBusy: _pipelineBusy,
+    )) {
+      _finishReadyGate('restart');
+    }
+  }
+
+  /// 门控静音开关（用 mpv `mute` 属性，不动音量值；非原生平台空操作）。
+  Future<void> _setGateMute(bool muted) async {
+    try {
+      final pp = player.platform;
+      if (pp is NativePlayer) {
+        await pp.setProperty('mute', muted ? 'yes' : 'no');
+      }
+    } catch (e) {
+      Log.logPrint(e);
+    }
+  }
+
+  /// 音量均衡：操作串行队列（探测/应用/移除按发起顺序执行，避免并发交错导致 af 与状态标记不一致）。
+  /// 用 [SerialTaskQueue]：**队列任务内再次入队会内联执行**，杜绝嵌套自死锁（P0，ISS-281）。
+  final SerialTaskQueue _volumeNormQueue = SerialTaskQueue();
+
+  /// 音量均衡：入队执行一次 af 操作（异常在队列内消化，避免 fire-and-forget 产生未处理异步异常）。
+  /// ⚠️ 队列任务体内**不要**再调 [_syncVolumeNorm]（它＝入队）；任务内用 [_syncVolumeNormLocked]。
+  Future<void> _enqueueVolumeNorm(Future<void> Function() task) {
+    _pipelineBusy++;
+    return _volumeNormQueue.run(() async {
+      try {
+        await task();
+      } finally {
+        _pipelineBusy--;
+        _maybeFinishReadyGate();
+      }
+    }, onError: (e, _) => Log.logPrint(e));
   }
 
   /// 音量均衡：起流前预挂链（由 `initializePlayer` 在 `player.open` 之前调用，经串行队列执行）。
@@ -336,19 +596,21 @@ mixin PlayerMixin {
     _volumeNormLogFailure = false;
     _volumeNormLogArmed = true;
     try {
-      // 复核 P2-7：起流前 set 无需等待播放器/视频控制器初始化（mpv 在初始化时应用
-      // 该选项）；waitForInitialization:false 避免进房起流被 setProperty 阻塞。
-      await pp.setProperty('af', volumeNormFilter, waitForInitialization: false);
-      // 复核 P0-3：预挂后立即回读校验——media_kit 的 setProperty 忽略 mpv 返回码，
-      // 「滤镜不存在/参数非法」会静默失败；不回读会把未生效的链标记成已挂。
-      final readback = await pp.getProperty('af', waitForInitialization: false);
-      _volumeNormApplied = volumeNormSupportedFromReadback(readback);
-      if (!_volumeNormApplied) {
-        // 链未挂上（解析期拒绝）：清链保证与 mpv 状态一致；**不持久化能力**——
-        // 能力判定交给首帧（null→探测 / 已知→复查），避免瞬时失败被永久 persist false。
-        await pp.setProperty('af', '', waitForInitialization: false);
-        Log.w('音量均衡：预挂回读未确认（af="$readback"），能力判定推迟到首帧');
-      }
+      await _withWriteMutex(() async {
+        // 复核 P2-7：起流前 set 无需等待播放器/视频控制器初始化（mpv 在初始化时应用
+        // 该选项）；waitForInitialization:false 避免进房起流被 setProperty 阻塞。
+        await pp.setProperty('af', volumeNormFilter, waitForInitialization: false);
+        // 复核 P0-3：预挂后立即回读校验——media_kit 的 setProperty 忽略 mpv 返回码，
+        // 「滤镜不存在/参数非法」会静默失败；不回读会把未生效的链标记成已挂。
+        final readback = await pp.getProperty('af', waitForInitialization: false);
+        _volumeNormApplied = volumeNormSupportedFromReadback(readback);
+        if (!_volumeNormApplied) {
+          // 链未挂上（解析期拒绝）：清链保证与 mpv 状态一致；**不持久化能力**——
+          // 能力判定交给首帧（null→探测 / 已知→复查），避免瞬时失败被永久 persist false。
+          await pp.setProperty('af', '', waitForInitialization: false);
+          Log.w('音量均衡：预挂回读未确认（af="$readback"），能力判定推迟到首帧');
+        }
+      });
     } catch (e) {
       Log.logPrint(e);
       _volumeNormApplied = false;
@@ -395,7 +657,9 @@ mixin PlayerMixin {
     if (pp is! NativePlayer) {
       return;
     }
-    Future.delayed(const Duration(milliseconds: 2000), () async {
+    // Zone.root.bindCallback：该回调与「当前队列任务」已无关，必须转义出任务 Zone，
+    // 否则体内的 [_enqueueVolumeNorm] 会被误判为重入而内联（丢失串行化）
+    Future.delayed(const Duration(milliseconds: 2000), Zone.root.bindCallback(() async {
       if (vnToken != _volumeNormToken || _playerDisposed) {
         return; // 已被更新的音量均衡操作取代或资源已释放（新操作的释放逻辑自会收尾）
       }
@@ -425,7 +689,8 @@ mixin PlayerMixin {
           }
           _volumeNormApplied = false;
           try {
-            await pp.setProperty('af', '', waitForInitialization: false);
+            await _withWriteMutex(
+                () => pp.setProperty('af', '', waitForInitialization: false));
           } catch (_) {}
           PlayerMixin.afLoudnormSupported = false;
           _persistCapability(false);
@@ -441,7 +706,7 @@ mixin PlayerMixin {
         Log.d('音量均衡：$source 终裁回读失链（af="$readbackNote"）——疑似 open 复位，下房自愈');
       }
       _scheduleSuppressRelease(suppressToken);
-    });
+    }));
   }
 
   /// 音量均衡：持久化能力探测结果（带 App 版本前缀，版本变化即失效重探）。
@@ -464,7 +729,7 @@ mixin PlayerMixin {
   /// 用 mpv `--video-crop` 裁掉补边；**坐标空间是滤镜之后的帧**（见 rtx_vsr_crop.dart 注释）。
   ///
   /// 两种状态都写：开了 → 裁切值；没开（或未挂上滤镜链）→ 空串（取消手动裁切）。
-  Future<void> _syncRtxVsrCrop() async {
+  Future<void> _syncRtxVsrCrop({String trigger = 'sync'}) async {
     // 注：_playerDisposed 在 PlayerMixin 内可直接引用，但此处不依赖它——
     // 播放器已 dispose 时 media_kit 的 setProperty/getProperty 会抛 AssertionError
     // 或 StateError（_checkNativeHandle），由 _enqueueCropWrite 的 catch 兜底。
@@ -476,12 +741,7 @@ mixin PlayerMixin {
     // 尺寸未知（如 initializePlayer 在 open 之前那次调用）先不处理：否则会把空值写进去重
     // 缓存，令随后无补边流（裁切值为空串）的真实尺寸事件被误判为「未变化」而漏更（复核 P0）。
     if (rawW <= 0 || rawH <= 0) return;
-    // 起播门控（复核 P1/P5）：任何一次「尺寸已知」的同步都安排一次「布局稳定后放开起播」，
-    // 且后续同步会顺延它。这样既覆盖「自动全屏 / 按分辨率自适应窗口宽度 / 拖窗」在 play()
-    // 之后二次改写 vf 的场景，也不再依赖入队任务是否成功（任务抛异常也能放开）。
-    if (_vsrDeferPlay) {
-      _scheduleVsrDeferPlayRelease();
-    }
+    _tlMark('源分辨率 ${rawW}x$rawH');
     // 纯逻辑决策（自适应倍数 / 裁切 / 显示比例 / 画布），便于单测（见 rtx_vsr_crop.dart）。
     // 自适应倍数：目标 ≈ 播放区物理分辨率（源低就多放大）；拿不到播放区尺寸走固定 2x 兜底；
     // S≤1.05（源≥播放区）→ 不挂 VSR。
@@ -500,79 +760,163 @@ mixin PlayerMixin {
     final renderSize = plan.renderSize;
     // 去重签名：倍数 + 裁切值 + 源尺寸 + 链状态（**不能只用裁切值当键**，见字段注释）。
     final signature = '${s ?? -1}|$desired|${rawW}x$rawH|$_rtxVsrChainApplied';
+    // 起播门控（P1-1 起播前单次写链）：门控期内**吞中间写**——不立即写链，只把最新目标
+    // 记入 _vsrDeferPlayTarget（后续尺寸/布局同步会覆盖成更新目标），settle 尾沿 / 超时
+    // 放行时**一次写入终值**（vf 3 写→1 写，N4/N5）。
+    // 例外：链路已与目标一致（vfAction 'none' + 裁切回读一致）→ 立即放行，0 等待（e8e3dac）。
+    // 判定用**回读**（留存签名会被 open 清链弄陈旧）：vf 用 rtxVsrVfAction 判
+    // （依赖跨 open 存活的 _lastRtxVsrScale），戴切回读比对（戴切/显示比例/画布同源）。
+    if (_vsrDeferPlay) {
+      final (vfAction0, _) = rtxVsrVfAction(
+          enable: enable, scale: s, currentScale: _lastRtxVsrScale);
+      if (vfAction0 == 'none' && await _rtxCropMatches(desired)) {
+        Log.d('[VSR] 门控: 链路无需改动 → 立即放行（chain-unchanged）');
+        _releaseVsrDeferPlay('chain-unchanged');
+        return;
+      }
+      _vsrDeferPlayTarget = _VsrTarget(
+        signature: signature,
+        trigger: trigger,
+        enable: enable,
+        scale: s,
+        crop: desired,
+        aspect: aspectValue,
+        renderSize: renderSize,
+        rawW: rawW,
+        rawH: rawH,
+        area: area,
+      );
+      Log.d('[VSR] 门控: 暂存写链目标(触发=$trigger) scale=${s?.toStringAsFixed(2) ?? '-'}'
+          ' crop="$desired" → settle 尾沿单次写入');
+      _scheduleVsrDeferPlayRelease();
+      return;
+    }
     if (signature == _lastRtxVsrSignature) return;
     _enqueueCropWrite(() async {
       // 队列内再查一次：并发同值时只写第一笔，避免重复设置触发滤镜链重建。
       if (signature == _lastRtxVsrSignature) return;
-      final (vfAction, vfValue) = rtxVsrVfAction(enable: enable, scale: s, currentScale: _lastRtxVsrScale);
-      if (vfAction != 'none') {
-        // 写/摘 vf 会重建 D3D11 链路，期间可能冒 stream.error → 误触重拉流（PR #195）：
-        // 所有会动 vf 的路径（开关、切分辨率、resize 防抖）统一在此加抑制窗。
-        final token = ++_suppressToken;
-        _suppressErrorRetry = true;
-        try {
-          if (vfAction == 'set') {
-            // d3d11vpp 需 D3D11 硬件帧上下文
-            await pp.setProperty('hwdec', 'd3d11va');
-            await pp.setProperty('vf', vfValue);
-            _lastRtxVsrScale = s;
-            Log.d('[VSR] 写入滤镜链 #${++_vsrChainWriteCount}'
-                ' scale=${s?.toStringAsFixed(2)}');
-          } else {
-            await pp.setProperty('vf', '');
-            _lastRtxVsrScale = null;
-            Log.d('[VSR] 摘除滤镜链 #${++_vsrChainWriteCount}');
-          }
-        } finally {
-          _scheduleSuppressRelease(token);
-        }
-      }
-      await pp.setProperty('video-crop', desired);
-      await pp.setProperty('video-aspect-override', aspectValue.toStringAsFixed(6));
-      if (renderSize != null) {
-        await videoController.setSize(width: renderSize.$1, height: renderSize.$2);
-      } else {
-        await videoController.setSize();
-      }
-      // 写入成功后才记缓存（复核 P3-3）：异常（dispose 竞态）时保持旧值，下次同步会重试。
-      // 复核 P4：若写期间源尺寸已变（open/切流把签名作废后又来新尺寸），别用旧签名回填
-      // ——否则新尺寸与旧签名相同会被短路 → 链不纠正、门控只能等超时。
-      if (player.state.width != rawW || player.state.height != rawH) {
-        Log.d('[VSR] 尺寸已变（${player.state.width}x${player.state.height}'
-            ' != ${rawW}x$rawH）—— 不回填签名，等下个尺寸事件重算');
-        return;
-      }
-      _lastRtxVsrSignature = signature;
-      if (desired.isEmpty) return;
-      // 回读校验（参考音量均衡 af 的做法）：media_kit 的 setProperty 不返回错误，
-      // 属性缺失/语法级拒绝时会静默失败 → 回读一次让失败可见（RISK-58）。
-      // 注意：回读只能证明“属性被接受”，不能证明 VO 逐帧应用成功（越界值由 mpv
-      // 在应用阶段忽略并打印日志）——成功日志措辞按此收敛为“已写入”。
-      final readback = (await pp.getProperty('video-crop')).trim();
-      if (readback.replaceAll(' ', '') == desired) {
-        Log.d(
-          '[VSR] 已写入底部补边裁切 video-crop=$desired'
-          ' scale=${s?.toStringAsFixed(2)}'
-          ' aspect=${aspectValue.toStringAsFixed(6)}'
-          ' renderSize=${renderSize?.$1}x${renderSize?.$2}'
-          '（源 ${player.state.width}x${player.state.height}）',
-        );
-      } else {
-        Log.w(
-          '[VSR] video-crop 未生效：期望 $desired，回读 "$readback"'
-          '（源 ${player.state.width}x${player.state.height}）—— 可能 libmpv 不支持该属性',
-        );
-      }
+      await _applyVsrTarget(_VsrTarget(
+        signature: signature,
+        trigger: trigger,
+        enable: enable,
+        scale: s,
+        crop: desired,
+        aspect: aspectValue,
+        renderSize: renderSize,
+        rawW: rawW,
+        rawH: rawH,
+        area: area,
+      ));
     });
+  }
+
+  /// 应用一次 VSR 链写入（vf / video-crop / video-aspect-override / setSize + 回读校验）。
+  /// 常规同步与起播门控放行点共用（P1-1 单次写链）。
+  /// 共用写链逻辑（P1-3 写序互斥）：入写锁后执行 `_applyVsrTargetUnlocked`。
+  Future<void> _applyVsrTarget(_VsrTarget t) =>
+      _withWriteMutex(() => _applyVsrTargetUnlocked(t));
+
+  Future<void> _applyVsrTargetUnlocked(_VsrTarget t) async {
+    final pp = player.platform;
+    if (pp is! NativePlayer) return;
+    // 队列内再查一次（并发同值 / 放行点防重）：只写第一笔，避免重复设置触发滤镜链重建。
+    if (t.signature == _lastRtxVsrSignature) return;
+    // 打点放内层去重之后（定向复验）：width/height 是同一事件成对下发，height 侧那次
+    // 调用时外层签名尚未回填（回填在任务末尾）→ 打在外层仍会双打且归因失真。
+    Log.d('[VSR] 布局同步(触发=${t.trigger}): 源=${t.rawW}x${t.rawH}'
+        ' 播放区=${t.area?.$1 ?? "-"}x${t.area?.$2 ?? "-"}'
+        ' → scale=${t.scale?.toStringAsFixed(2) ?? "-"} crop="${t.crop}" 链=${t.enable}');
+    final (vfAction, vfValue) = rtxVsrVfAction(
+        enable: t.enable, scale: t.scale, currentScale: _lastRtxVsrScale);
+    if (vfAction != 'none') {
+      // 写/摘 vf 会重建 D3D11 链路，期间可能冒 stream.error → 误触重拉流（PR #195）：
+      // 所有会动 vf 的路径（开关、切分辨率、resize 防抖）统一在此加抑制窗。
+      final token = ++_suppressToken;
+      _suppressErrorRetry = true;
+      try {
+        if (vfAction == 'set') {
+          // d3d11vpp 需 D3D11 硬件帧上下文
+          await pp.setProperty('hwdec', 'd3d11va');
+          await pp.setProperty('vf', vfValue);
+          _lastRtxVsrScale = t.scale;
+          Log.d('[VSR] 写入滤镜链 #${++_vsrChainWriteCount}'
+              ' scale=${t.scale?.toStringAsFixed(2)}');
+        } else {
+          await pp.setProperty('vf', '');
+          _lastRtxVsrScale = null;
+          Log.d('[VSR] 摘除滤镜链 #${++_vsrChainWriteCount}');
+        }
+      } finally {
+        _scheduleSuppressRelease(token);
+      }
+    }
+    await pp.setProperty('video-crop', t.crop);
+    await pp.setProperty('video-aspect-override', t.aspect.toStringAsFixed(6));
+    // record 字段不参与 field promotion，先落局部变量再判空（analyze 门禁）。
+    final renderSize = t.renderSize;
+    if (renderSize != null) {
+      await videoController.setSize(width: renderSize.$1, height: renderSize.$2);
+    } else {
+      await videoController.setSize();
+    }
+    // 写入成功后才记缓存（复核 P3-3）：异常（dispose 竞态）时保持旧值，下次同步会重试。
+    // 复核 P4：若写期间源尺寸已变（open/切流把签名作废后又来新尺寸），别用旧签名回填
+    // ——否则新尺寸与旧签名相同会被短路 → 链不纠正、门控只能等超时。
+    if (player.state.width != t.rawW || player.state.height != t.rawH) {
+      Log.d('[VSR] 尺寸已变（${player.state.width}x${player.state.height}'
+          ' != ${t.rawW}x${t.rawH}）—— 不回填签名，等下个尺寸事件重算');
+      return;
+    }
+    _lastRtxVsrSignature = t.signature;
+    _tlMark('链就绪');
+    if (t.crop.isEmpty) return;
+    // 回读校验（参考音量均衡 af 的做法）：media_kit 的 setProperty 不返回错误，
+    // 属性缺失/语法级拒绝时会静默失败 → 回读一次让失败可见（RISK-58）。
+    // 注意：回读只能证明“属性被接受”，不能证明 VO 逐帧应用成功（越界值由 mpv
+    // 在应用阶段忽略并打印日志）——成功日志措辞按此收敛为“已写入”。
+    final readback = (await pp.getProperty('video-crop')).trim();
+    if (readback.replaceAll(' ', '') == t.crop) {
+      Log.d(
+        '[VSR] 已写入底部补边裁切 video-crop=${t.crop}'
+        ' scale=${t.scale?.toStringAsFixed(2)}'
+        ' aspect=${t.aspect.toStringAsFixed(6)}'
+        ' renderSize=${t.renderSize?.$1}x${t.renderSize?.$2}'
+        '（源 ${player.state.width}x${player.state.height}）',
+      );
+    } else {
+      Log.w(
+        '[VSR] video-crop 未生效：期望 ${t.crop}，回读 "$readback"'
+        '（源 ${player.state.width}x${player.state.height}）—— 可能 libmpv 不支持该属性',
+      );
+    }
+  }
+
+  /// 回读比对：当前已挂的 `video-crop` 是否与目标一致（供「链路 noop 立即放行」判定）。
+  /// 只读、免留存（阶段4 复盘：留存签名会被 open 清链弄陈旧）；读失败按「不一致」处理（保守）。
+  Future<bool> _rtxCropMatches(String desired) async {
+    final pp = player.platform;
+    if (pp is! NativePlayer) return false;
+    try {
+      final readback =
+          (await pp.getProperty('video-crop', waitForInitialization: false)).trim();
+      return readback.replaceAll(' ', '') == desired.replaceAll(' ', '');
+    } catch (e) {
+      Log.logPrint(e);
+      return false;
+    }
   }
 
   /// 串行执行一次 video-crop 写入（参考 _enqueueVolumeNorm 的既有惯例）。
   Future<void> _enqueueCropWrite(Future<void> Function() task) {
+    _pipelineBusy++;
     final next = _cropWriteQueue.then((_) async {
       try {
         await task();
       } catch (e) {
         Log.d('[VSR] 设置 video-crop 失败: $e');
+      } finally {
+        _pipelineBusy--;
+        _maybeFinishReadyGate();
       }
     });
     _cropWriteQueue = next;
@@ -583,7 +927,7 @@ mixin PlayerMixin {
   void scheduleRtxVsrSync() {
     _vsrSyncDebounce?.cancel();
     _vsrSyncDebounce = Timer(const Duration(milliseconds: 250), () {
-      _syncRtxVsrCrop();
+      _syncRtxVsrCrop(trigger: 'layout');
     });
   }
 
@@ -593,8 +937,10 @@ mixin PlayerMixin {
     _vsrDeferPlaySettleTimer?.cancel();
     _vsrDeferPlaySettleTimer = null;
     _vsrGateEpoch++;
+    _vsrDeferPlayTarget = null;
     _vsrDeferPlayArmedAt = DateTime.now();
     _vsrDeferPlay = true;
+    Log.d('[VSR] 门控: 武装 timeout=${vsrDeferPlayTimeout.inMilliseconds}ms');
     _vsrDeferPlayTimer = Timer(vsrDeferPlayTimeout, () {
       // 兜底：拿不到源分辨率（异常流）时不卡住，直接起播（此时可能仍有一次重启，属降级）。
       _releaseVsrDeferPlay('timeout');
@@ -626,15 +972,20 @@ mixin PlayerMixin {
     _vsrDeferPlaySettleTimer?.cancel();
     _vsrDeferPlaySettleTimer = null;
     _vsrDeferPlayArmedAt = null;
+    _vsrDeferPlayTarget = null;
     _vsrDeferPlay = false;
   }
 
-  /// 放开起播门控：恢复播放（幂等；未武装则不做）。
+  /// 放开起播门控：先把门控期暂存的写链目标**一次写入**（起播前单次写链；预挂只在超时路径
+  /// 兜底），再恢复播放（幂等；未武装则不做）。
   Future<void> _releaseVsrDeferPlay(String reason) async {
     if (!_vsrDeferPlay) {
       return;
     }
     final epoch = _vsrGateEpoch;
+    final armedAt = _vsrDeferPlayArmedAt;
+    // 先取出暂存目标（_disarmVsrDeferPlay 会清空它），放行点单次写链。
+    final target = _vsrDeferPlayTarget;
     _disarmVsrDeferPlay();
     if (_playerDisposed) {
       return;
@@ -643,17 +994,81 @@ mixin PlayerMixin {
     // （403/超时/流下线）会被直接 return 掉、不重试也不提示。起播这一刻链重建写操作
     // 早已完成，故解除抑制，让真错误走正常 mediaError 路径。
     _suppressErrorRetry = false;
-    // 防御性守卫（当前不可达，见 _vsrGateEpoch 注释）：若将来 play() 前插入了 await，
-    // 这里能挡掉「已被 disarm、又被新换源取代」的过期 release。
+    // 守卫①（await 之前）：挡掉「已被 disarm、又被新换源取代」的过期 release。
     if (epoch != _vsrGateEpoch) {
       Log.d('[VSR] 起播门控 release 作废（已有新换源）: $reason');
       return;
     }
-    Log.d('[VSR] 起播门控放开（$reason）→ play()');
+    if (target != null) {
+      // 起播前单次写链（P1-1）：门控期吞掉的中间写在放行点一次性写入终值。
+      Log.d('[VSR] 门控: 放行点单次写链(原因=$reason) scale=${target.scale?.toStringAsFixed(2) ?? '-'}'
+          ' crop="${target.crop}" 链=${target.enable}');
+      try {
+        await _applyVsrTarget(target);
+      } catch (e) {
+        // 放行点是 fire-and-forget（定时器/宿主 unawaited），不 catch 会成未处理异步异常；
+        // 写链失败不阻塞起播（降级为不带 VSR 直接播）。
+        Log.d('[VSR] 门控放行点写链失败: $e');
+      }
+    } else if (reason == 'timeout') {
+      // 预挂只在超时路径（P1-1）：拿不到源分辨率 → 预挂 2.0 兜底链再起播（降级）。
+      try {
+        await _preHangFallbackChain();
+      } catch (e) {
+        Log.d('[VSR] 门控超时预挂失败: $e');
+      }
+    } else if (reason == 'vsr-off' &&
+        _lastRtxVsrScale != null &&
+        !_rtxVsrChainApplied) {
+      // 门控期热关 VSR 且从未收到尺寸事件（sync 早退、未写摘链目标）——上一路流遗留的链
+      // 仍挂在 mpv 里，这里兜底摘掉，避免「关 VSR 后画面仍被放大/绿条复现」（P0 级残留）。
+      try {
+        await _withWriteMutex(() async {
+          final pp = player.platform;
+          if (pp is NativePlayer) {
+            await pp.setProperty('vf', '');
+            _lastRtxVsrScale = null;
+            Log.d('[VSR] 门控 vsr-off 兜底摘链 #${++_vsrChainWriteCount}（无尺寸事件，sync 未写）');
+          }
+        });
+      } catch (e) {
+        Log.d('[VSR] 门控 vsr-off 兜底摘链失败: $e');
+      }
+    }
+    // 守卫②（所有 await 之后，ISS-283 收口）：上面写链/摘链均为 await，期间可能被重武装取代。
+    if (_playerDisposed || epoch != _vsrGateEpoch) {
+      Log.d('[VSR] 门控 release 作废（写链期间已被新换源取代）: $reason');
+      return;
+    }
+    _tlMark('play()');
+    Log.d('[VSR] 门控放开（$reason）等待=${armedAt == null ? "?" : "${DateTime.now().difference(armedAt).inMilliseconds}ms"} → play()');
     try {
       await player.play();
     } catch (e) {
       Log.d('[VSR] 起播门控 play() 失败: $e');
+    }
+  }
+
+  /// 门控超时兜底（P1-1「预挂只在超时路径」）：拿不到源分辨率时预挂 2.0 兜底链，
+  /// 保证开了 VSR 就有放大效果（此时尺寸未知、无法自适应，可能仍有一次重载，属降级）。
+  /// 若上一路流遗留的链仍在（_lastRtxVsrScale 非空）则不动它，避免无谓改倍数。
+  Future<void> _preHangFallbackChain() =>
+      _withWriteMutex(_preHangFallbackChainUnlocked);
+
+  Future<void> _preHangFallbackChainUnlocked() async {
+    if (!_rtxVsrChainApplied || _lastRtxVsrScale != null) return;
+    final pp = player.platform;
+    if (pp is! NativePlayer) return;
+    final token = ++_suppressToken;
+    _suppressErrorRetry = true;
+    try {
+      await pp.setProperty('hwdec', 'd3d11va');
+      await pp.setProperty('vf', rtxVsrVfChain(rtxVsrScale));
+      _lastRtxVsrScale = rtxVsrScale;
+      Log.d('[VSR] 预挂兜底链 #${++_vsrChainWriteCount}'
+          ' scale=${rtxVsrScale.toStringAsFixed(2)}（门控超时降级）');
+    } finally {
+      _scheduleSuppressRelease(token);
     }
   }
 
@@ -691,6 +1106,14 @@ mixin PlayerMixin {
           )
         : VideoControllerConfiguration(
             enableHardwareAcceleration: AppSettingsController.instance.hardwareDecode.value,
+            // ⚠️ 优先级（P1-3，阶段4 复核）：VSR 依赖硬解（d3d11vpp 需 D3D11 硬件帧），
+            // 故「Windows + VSR 开启」时**强制** d3d11va，忽略「硬解」开关
+            // （否则 create 给 'auto'、起流后又强写 d3d11va，两笔异值写序不定 → 矛盾）。
+            // 其余情况传 null，走 media_kit 默认（由 enableHardwareAcceleration 决定）。
+            hwdec: (Platform.isWindows &&
+                    AppSettingsController.instance.enableRtxVsr.value)
+                ? 'd3d11va'
+                : null,
             androidAttachSurfaceAfterVideoParameters: false,
           ),
   );
@@ -1437,27 +1860,43 @@ class PlayerController extends BaseController
     //音量均衡热切换：设置页/房内开关拨动即时生效
     //PR #195 教训：句柄化管理 + onClose 释放 + 回调内 disposed 短路
     _volumeNormWorker = ever(AppSettingsController.instance.volumeNorm, (bool on) {
+      Log.d('[DIAG] 操作: 音量均衡 → $on'
+          '（disposed=$_playerDisposed applied=$_volumeNormApplied supported=${PlayerMixin.afLoudnormSupported} playing=${player.state.playing}）');
       if (_playerDisposed) {
         return;
       }
+      Future.delayed(const Duration(seconds: 2), () {
+        if (!_playerDisposed) _diagSnapshot('拨均衡后+2s');
+      });
       // 复核 P1-6：已挂链时无条件入队同步——关闭不需要能力探测，
       // 不能因「未播放 + 能力未知」被吞（否则开关拨关、链却仍在均衡）。
       if (_volumeNormApplied) {
-        _syncVolumeNorm();
+        applyPipelineChange('toggle-norm', vsr: false);
         return;
       }
-      //未播放且能力未知：不在此刻探测（空闲探测不可靠，可能假成功），留到首帧钩子统一处理
+      // 未播放且能力未知：不在此刻探测（空闲探测不可靠，可能假成功），留到首帧钩子统一处理。
+      // 复核 N2：**不能静默吞**——记待办，复播时消费，避免「暂停中拨开关」永远失效
+      // （首帧钩子是一次的，不会为复播重跑）。
       if (PlayerMixin.afLoudnormSupported == null && !player.state.playing) {
+        _pendingVolumeNormIntent = on;
+        Log.d('[VN] toggle($on) deferred: not playing');
         return;
       }
-      _syncVolumeNorm();
+      applyPipelineChange('toggle-norm', vsr: false);
     });
     // VSR：直播间接开关即生效（复用音量均衡的热切换范式：worker + 串行队列 + 错误抑制）
     _rtxVsrWorker = ever(AppSettingsController.instance.enableRtxVsr, (bool on) {
       if (_playerDisposed || !Platform.isWindows) {
         return;
       }
+      Log.d('[DIAG] 操作: VSR → $on');
+      // 注：VSR 热切换不直接走 `applyPipelineChange`——`_applyRtxVsrSetting` 除同步外
+      // 还负责「门控期热关 VSR → 摘链后放行」等，不能换成纯委派入口。
+      Log.d('[APPLY] source=toggle-vsr on=$on');
       _applyRtxVsrSetting();
+      Future.delayed(const Duration(seconds: 2), () {
+        if (!_playerDisposed) _diagSnapshot('拨VSR后+2s');
+      });
     });
     super.onInit();
   }
@@ -1497,6 +1936,17 @@ class PlayerController extends BaseController
       if (event) {
         WakelockPlus.enable();
         Log.d("Playing");
+        // 就绪门前置：play 已发出（media_kit 在 play() 返回时即发 playing）
+        _playIssued = true;
+        _maybeFinishReadyGate();
+        _tlMark('首帧/playing');
+        final tlEpoch = _tlEpoch;
+        Future.delayed(const Duration(milliseconds: 2500), () {
+          if (!_playerDisposed && tlEpoch == _tlEpoch) {
+            _tlDump();
+            _diagSnapshot('起播后');
+          }
+        });
         // 进入直播间按分辨率自适应窗口宽度（播放开始时布局已就绪，重试至生效）
         if (AppSettingsController.instance.autoFitWindowWidth.value &&
             !AppSettingsController.instance.autoFullScreen.value) {
@@ -1505,6 +1955,8 @@ class PlayerController extends BaseController
         // 音量均衡：首帧播放后一次性同步（能力未知时顺带探测，必须播放中做）
         if (!_volumeNormInitialized) {
           _volumeNormInitialized = true;
+          _pendingVolumeNormIntent = null; // 首帧已统一同步（读的是当前意愿），清待办
+          Log.d('[VN] 首帧钩子: 触发（本房间首次 playing）');
           // 复核（真机 P0，ISS-278）：首帧的两条路径统一入队，与热切换/探测严格串行；
           // 探测与复查的成败判定都在抑制窗末终裁（playing 事件早于 af 图构建，立即读必漏）。
           _enqueueVolumeNorm(() async {
@@ -1526,13 +1978,18 @@ class PlayerController extends BaseController
                 }
               }
             }
-            await _syncVolumeNorm();
+            // ⚠️ 此处已在队列任务内：必须调**无队版**，否则会嵌套入队 → 自死锁（ISS-281）
+            await _syncVolumeNormLocked();
             if (_volumeNormApplied &&
                 PlayerMixin.afLoudnormSupported == true &&
                 AppSettingsController.instance.volumeNorm.value) {
               await _verifyVolumeNormFirstFrame();
             }
           });
+        } else if (_pendingVolumeNormIntent != null) {
+          // N2：暂停期被推迟的拨动 → 复播时消费
+          _pendingVolumeNormIntent = null;
+          applyPipelineChange('resume-pending', vsr: false);
         }
       }
     });
@@ -1544,6 +2001,17 @@ class PlayerController extends BaseController
     });
     _logSubscription = player.stream.log.listen((event) {
       Log.d("播放器日志：$event");
+      // 起播时间线补充节点（需日志级别到 debug——真机复测时会开着日志开关）
+      if (event.text.contains('Using hardware decoding')) _tlMark('硬解生效');
+      if (event.text.contains('playback restart complete')) {
+        _tlMark('restart完成');
+        // 就绪门：只认 **play 已发出之后** 的 restart（起播前链写入/seek 触发的 restart 不算数），
+        // 再按完整条件判定（定向复验：原 _readyEpoch 是死字段，改用 _playIssued 作门槛）。
+        if (_playIssued) {
+          _readyRestartSeen = true;
+          _maybeFinishReadyGate();
+        }
+      }
       // 音量均衡静默降级防线（复核建议）：武装期内命中滤镜错误关键字即标记失败，
       // 由首帧/探测/热开的窗末终裁消费（真机 P0 ISS-278：记录与抑制窗解耦——失败日志
       // 可能早于/晚于抑制窗，只有「预挂起持续记录、窗末终裁」才不漏）。
@@ -1564,7 +2032,8 @@ class PlayerController extends BaseController
       if (event == null) {
         _lastRtxVsrSignature = null;
       }
-      _syncRtxVsrCrop();
+      _tlMark('源分辨率 ${player.state.width}x${player.state.height}');
+      _syncRtxVsrCrop(trigger: 'size');
       // RISK-17：分辨率一到就记下来（与「自适应/自动全屏」等设置解耦），
       // 供页面判定覆盖式面板；否则在未开自适应或处于全屏时该值恒为 0 → 永不折叠。
       if ((player.state.width ?? 0) > 0 && (player.state.height ?? 0) > 0) {
@@ -1590,7 +2059,7 @@ class PlayerController extends BaseController
       if (event == null) {
         _lastRtxVsrSignature = null;
       }
-      _syncRtxVsrCrop();
+      _syncRtxVsrCrop(trigger: 'size');
       if ((player.state.width ?? 0) > 0 && (player.state.height ?? 0) > 0) {
         videoWidthRx.value = player.state.width!;
         videoHeightRx.value = player.state.height!;
@@ -1617,6 +2086,11 @@ class PlayerController extends BaseController
     _escSubscription?.cancel();
     // 复验 P4：统一走 _disarmVsrDeferPlay，别手写清字段（会漏清 _vsrDeferPlayArmedAt）。
     _disarmVsrDeferPlay();
+    // 就绪门：退房/换房即解除（取消超时并收起遮罩）
+    _readyTimeoutTimer?.cancel();
+    _readyTimeoutTimer = null;
+    _readyPending = false;
+    showReadyMaskRx.value = false;
   }
 
   void mediaEnd() {
@@ -1629,30 +2103,62 @@ class PlayerController extends BaseController
     // WakelockPlus.disable();
   }
 
-  /// 音量均衡：把播放器 af 状态同步到「用户意愿 + 已探测能力」（首帧钩子 / 热切换共用）
-  /// 所有 af 操作经队列串行化：探测期间用户拨开关时，后一次同步会排队到探测结束后执行，
-  /// 避免两次探测并发导致「af 已开但标记为关」而无法关闭的错乱
-  Future<void> _syncVolumeNorm() {
-    return _enqueueVolumeNorm(() async {
-      if (_playerDisposed) {
-        return;
+  /// 统一「管线应用」入口（P2-2 / 方案 §三 C3）：把**外部**变化（拨开关等）收敛到一个入口，
+  /// 统一留痕 `[APPLY] source=`（期望态 vs 已应用态）。
+  ///
+  /// 设计取舍（守既有语义，不重写已验证逻辑）：
+  /// - 两条队列**保持分离**（C3 硬约束），本入口只做「留痕 + 委派」到 _syncVolumeNorm / _syncRtxVsrCrop；
+  /// - **队列内**调用点（首帧钩子 / 探测终裁）仍直接调无队版（ISS-281 修复要求，见各自注释），
+  ///   不入本入口——这是**有意的例外**，不是漏。
+  /// - ⚠️ 默认 `norm && vsr` 会**顺序 await 两条队列**；仅在确需同时应用时给双 true，
+  ///   否则按需传 `vsr: false` / `norm: false`（避免 af 长操作挡住 vf，违背 §8.2 硬约束）。
+  Future<void> applyPipelineChange(String source,
+      {bool norm = true, bool vsr = true}) async {
+    if (_playerDisposed) {
+      return;
+    }
+    Log.d('[APPLY] source=$source 期望: 均衡=${AppSettingsController.instance.volumeNorm.value}'
+        '（已挂=$_volumeNormApplied 能力=${PlayerMixin.afLoudnormSupported}）'
+        ' VSR=${Platform.isWindows && AppSettingsController.instance.enableRtxVsr.value}'
+        '（链=$_rtxVsrChainApplied scale=${_lastRtxVsrScale?.toStringAsFixed(2) ?? "-"}）');
+    if (norm) {
+      await _syncVolumeNorm();
+    }
+    if (vsr && Platform.isWindows) {
+      await _syncRtxVsrCrop(trigger: source);
+    }
+    if (!_playerDisposed) {
+      Log.d('[APPLY] source=$source 结果: 均衡已挂=$_volumeNormApplied'
+          ' 链=$_rtxVsrChainApplied scale=${_lastRtxVsrScale?.toStringAsFixed(2) ?? "-"}');
+    }
+  }
+
+  /// 音量均衡：同步入口（**队列外**调用，如热切换 worker）。内部入队执行 [_syncVolumeNormLocked]。
+  Future<void> _syncVolumeNorm() => _enqueueVolumeNorm(_syncVolumeNormLocked);
+
+  /// 音量均衡同步体（**无队版**，供队列任务内直接调用）。
+  ///
+  /// ⚠️ 只能在队列任务内调用；且任务内**禁止**改调 [_syncVolumeNorm]——那会在队列任务里
+  /// 再入队，形成「内层等外层、外层 await 内层」的嵌套自死锁（P0，ISS-281）。
+  Future<void> _syncVolumeNormLocked() async {
+    if (_playerDisposed) {
+      return;
+    }
+    PlayerMixin.afLoudnormSupported ??= _readPersistedCapability();
+    if (PlayerMixin.afLoudnormSupported == null) {
+      // 能力未知：执行一次探测（探测后按用户意愿自动还原/保持）
+      await _probeVolumeNormCapability();
+      return;
+    }
+    if (AppSettingsController.instance.volumeNorm.value) {
+      // 复核 P3：这里等价于 afLoudnormSupported == true（volumeNormShouldApply 的
+      // userOn 恒为 true 时是冗余包装），直接判断避免误导。
+      if (PlayerMixin.afLoudnormSupported == true) {
+        await _applyVolumeNorm(enable: true);
       }
-      PlayerMixin.afLoudnormSupported ??= _readPersistedCapability();
-      if (PlayerMixin.afLoudnormSupported == null) {
-        // 能力未知：执行一次探测（探测后按用户意愿自动还原/保持）
-        await _probeVolumeNormCapability();
-        return;
-      }
-      if (AppSettingsController.instance.volumeNorm.value) {
-        // 复核 P3：这里等价于 afLoudnormSupported == true（volumeNormShouldApply 的
-        // userOn 恒为 true 时是冗余包装），直接判断避免误导。
-        if (PlayerMixin.afLoudnormSupported == true) {
-          await _applyVolumeNorm(enable: true);
-        }
-      } else if (_volumeNormApplied) {
-        await _applyVolumeNorm(enable: false);
-      }
-    });
+    } else if (_volumeNormApplied) {
+      await _applyVolumeNorm(enable: false);
+    }
   }
 
   /// 音量均衡：探测能力（设置 af → 回读校验），探测后按用户意愿还原或保持
@@ -1671,12 +2177,13 @@ class PlayerController extends BaseController
     // 数百 ms 内到达）。旧逻辑「回读后立即读标志」在真机上系统性漏判。
     _volumeNormLogFailure = false;
     _volumeNormLogArmed = true;
+    Log.d('[VN] 探测: applied=$_volumeNormApplied supported=${PlayerMixin.afLoudnormSupported}');
     var chainSet = true;
     try {
       // 起流前已预挂（_volumeNormApplied=true）时只回读校验、不再 set：
       // set 会重建整条链并重置 loudnorm 收敛状态 → 进房第一秒响度又爬一遍。
       if (!_volumeNormApplied) {
-        await pp.setProperty('af', volumeNormFilter);
+        await _withWriteMutex(() => pp.setProperty('af', volumeNormFilter));
       }
       // 回读校验：mpv 对非法/不存在的滤镜会拒绝写入并保持旧值，
       // 因此回读必须同时包含 dynaudnorm 与 loudnorm 才算支持（只查 loudnorm 不严）。
@@ -1695,7 +2202,8 @@ class PlayerController extends BaseController
     }
     // 链已挂上但「运行时是否真的建链成功」→ 窗末终裁（失败日志异步到达）
     final vnToken = ++_volumeNormToken;
-    Future.delayed(const Duration(milliseconds: 2000), () async {
+    // 转义出任务 Zone（同 _scheduleVolumeNormAdjudication）：定时器回调属队列外
+    Future.delayed(const Duration(milliseconds: 2000), Zone.root.bindCallback(() async {
       if (vnToken != _volumeNormToken || _playerDisposed) {
         // glm 复核 P3：终裁被更新的音量均衡操作取代时能力停留 null（本房不再重探，
         // 下房预挂/探测重来）——低频边角，可接受。
@@ -1713,8 +2221,16 @@ class PlayerController extends BaseController
       } catch (e) {
         Log.logPrint(e);
       }
-      _finishVolumeNormProbe(supported: !failed, token: token);
-    });
+      // 复核 N2/C1 补充：终裁落地入队执行（体内 setProperty 不再绕过队列与热切换交错）
+      await _enqueueVolumeNorm(() async {
+        // 阶段4 复核：入队后再自查代际——排队等待期间可能被新热切换/新探测取代
+        // （对齐 _scheduleVolumeNormAdjudication 的入队后复查惯例）
+        if (vnToken != _volumeNormToken || _playerDisposed) {
+          return;
+        }
+        await _finishVolumeNormProbe(supported: !failed, token: token);
+      });
+    }));
   }
 
   /// 音量均衡：探测终裁落地（能力持久化 + UI 同步 + 链状态收敛）。
@@ -1732,7 +2248,7 @@ class PlayerController extends BaseController
     } else {
       // 用户未开启或能力不支持：探测后立即还原为空 af，不影响实际听感
       try {
-        await pp.setProperty('af', '');
+        await _withWriteMutex(() => pp.setProperty('af', ''));
       } catch (e) {
         Log.logPrint(e);
       }
@@ -1745,8 +2261,12 @@ class PlayerController extends BaseController
     _scheduleSuppressRelease(token);
   }
 
-  /// 音量均衡：对播放器应用/移除 loudnorm 滤镜（能力已知时使用；仅由 _syncVolumeNorm 在队列内调用）
-  Future<void> _applyVolumeNorm({required bool enable}) async {
+  /// 音量均衡：对播放器应用/移除 loudnorm 滤镜（能力已知时使用；仅由 _syncVolumeNorm 在队列内调用）。
+  /// 入写锁（P1-3 写序互斥）后执行。
+  Future<void> _applyVolumeNorm({required bool enable}) =>
+      _withWriteMutex(() => _applyVolumeNormUnlocked(enable: enable));
+
+  Future<void> _applyVolumeNormUnlocked({required bool enable}) async {
     if (_playerDisposed) {
       return;
     }
@@ -1763,6 +2283,8 @@ class PlayerController extends BaseController
     }
     final token = ++_suppressToken;
     _suppressErrorRetry = true;
+    final opStart = DateTime.now();
+    Log.d('[VN] 执行: enable=$enable（原 applied=$_volumeNormApplied supported=${PlayerMixin.afLoudnormSupported}）');
     // 阶段1（L3）修正：日志防线记录在 set **之前**武装——set 完成到武装赋值之间
     // 有微任务间隙，失败日志（异步到达）可能落入该缝而漏记；预挂/探测均为 set 前
     // 武装，此处对齐。
@@ -1777,6 +2299,7 @@ class PlayerController extends BaseController
     try {
       await pp.setProperty('af', enable ? volumeNormFilter : '');
       _volumeNormApplied = enable;
+      Log.d('[VN] 执行完成: enable=$enable 耗时=${DateTime.now().difference(opStart).inMilliseconds}ms');
     } catch (e) {
       Log.logPrint(e);
       if (enable) {
@@ -1880,7 +2403,7 @@ class PlayerController extends BaseController
     // 在决定动作前清空会导致关闭时永不摘链→绿条复现（阶段4 复核 P0）。
     // hwdec 与错误抑制由 `_syncRtxVsrCrop` 内部统一处理。
     try {
-      await _syncRtxVsrCrop();
+      await _syncRtxVsrCrop(trigger: 'toggle');
     } catch (e) {
       Log.d('[VSR] 热切换失败: $e');
     }
