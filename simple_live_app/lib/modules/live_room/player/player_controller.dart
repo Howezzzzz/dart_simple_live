@@ -174,7 +174,8 @@ mixin PlayerMixin {
       vsrEnabled: AppSettingsController.instance.enableRtxVsr.value,
     );
     if (vsrOn) {
-      await pp.setProperty('hwdec', 'd3d11va');
+      // P1-3：硬解已在 `videoController` 创建期随 `hwdec: 'd3d11va'` 一次给定（见 videoController），
+      // 此处不再重复写（此前三笔同值写之一，阶段4 复核抓）。
       // 起播门控（P1-1 起播前单次写链）：不再预挂 2.0 兜底链——链在门控放行时按自适应
       // 终值**一次**写入；预挂 2.0 只在门控**超时**路径兜底（见 _preHangFallbackChain）。
       // _rtxVsrChainApplied 置 true 表示本次播放启用 VSR（门控期 plan 按「开」算自适应倍数）。
@@ -182,7 +183,7 @@ mixin PlayerMixin {
     } else if (Platform.isWindows) {
       // 关闭 VSR 时必须摘掉已挂上的滤镜链（复核 P2-1）：只改标志不摘链的话，
       // 同一会话 F5/切清晰度重初始化后，链仍在放大画面、裁切却被清空 → 绿条复现且 VSR 代价照付。
-      await pp.setProperty('vf', '');
+      await _withWriteMutex(() => pp.setProperty('vf', ''));
       _lastRtxVsrScale = null;
       _rtxVsrChainApplied = false;
       // 注（复核澄清）：这里 disarm 是安全的——initializePlayer 全仓只有一个调用点
@@ -453,11 +454,19 @@ mixin PlayerMixin {
   /// VSR 的 vf 写入、破坏「VSR 点即生效」），但**真正写 mpv 的瞬间**互斥，避免「vf 重建中写 af」
   /// 交错。只在**叶子写函数**取锁（三个叶子互不调用 → 无嵌套、无死锁；锁内无长耗时环节）。
   Future<void> _writeMutex = Future<void>.value();
+  static final Object _writeMutexZoneKey = Object();
   Future<T> _withWriteMutex<T>(Future<T> Function() body) {
+    // 重入（已在锁体内再取锁）：直接执行，避开自死锁（今日无此调用，属未来防护）。
+    if (Zone.current[_writeMutexZoneKey] == true) {
+      return body();
+    }
     final prev = _writeMutex;
     final gate = Completer<void>();
     _writeMutex = gate.future;
-    return prev.then((_) => body()).whenComplete(gate.complete);
+    return prev
+        .then((_) =>
+            runZoned(() => body(), zoneValues: {_writeMutexZoneKey: true}))
+        .whenComplete(gate.complete);
   }
 
   void _armReadyGate() {
@@ -572,19 +581,21 @@ mixin PlayerMixin {
     _volumeNormLogFailure = false;
     _volumeNormLogArmed = true;
     try {
-      // 复核 P2-7：起流前 set 无需等待播放器/视频控制器初始化（mpv 在初始化时应用
-      // 该选项）；waitForInitialization:false 避免进房起流被 setProperty 阻塞。
-      await pp.setProperty('af', volumeNormFilter, waitForInitialization: false);
-      // 复核 P0-3：预挂后立即回读校验——media_kit 的 setProperty 忽略 mpv 返回码，
-      // 「滤镜不存在/参数非法」会静默失败；不回读会把未生效的链标记成已挂。
-      final readback = await pp.getProperty('af', waitForInitialization: false);
-      _volumeNormApplied = volumeNormSupportedFromReadback(readback);
-      if (!_volumeNormApplied) {
-        // 链未挂上（解析期拒绝）：清链保证与 mpv 状态一致；**不持久化能力**——
-        // 能力判定交给首帧（null→探测 / 已知→复查），避免瞬时失败被永久 persist false。
-        await pp.setProperty('af', '', waitForInitialization: false);
-        Log.w('音量均衡：预挂回读未确认（af="$readback"），能力判定推迟到首帧');
-      }
+      await _withWriteMutex(() async {
+        // 复核 P2-7：起流前 set 无需等待播放器/视频控制器初始化（mpv 在初始化时应用
+        // 该选项）；waitForInitialization:false 避免进房起流被 setProperty 阻塞。
+        await pp.setProperty('af', volumeNormFilter, waitForInitialization: false);
+        // 复核 P0-3：预挂后立即回读校验——media_kit 的 setProperty 忽略 mpv 返回码，
+        // 「滤镜不存在/参数非法」会静默失败；不回读会把未生效的链标记成已挂。
+        final readback = await pp.getProperty('af', waitForInitialization: false);
+        _volumeNormApplied = volumeNormSupportedFromReadback(readback);
+        if (!_volumeNormApplied) {
+          // 链未挂上（解析期拒绝）：清链保证与 mpv 状态一致；**不持久化能力**——
+          // 能力判定交给首帧（null→探测 / 已知→复查），避免瞬时失败被永久 persist false。
+          await pp.setProperty('af', '', waitForInitialization: false);
+          Log.w('音量均衡：预挂回读未确认（af="$readback"），能力判定推迟到首帧');
+        }
+      });
     } catch (e) {
       Log.logPrint(e);
       _volumeNormApplied = false;
@@ -663,7 +674,8 @@ mixin PlayerMixin {
           }
           _volumeNormApplied = false;
           try {
-            await pp.setProperty('af', '', waitForInitialization: false);
+            await _withWriteMutex(
+                () => pp.setProperty('af', '', waitForInitialization: false));
           } catch (_) {}
           PlayerMixin.afLoudnormSupported = false;
           _persistCapability(false);
@@ -1079,11 +1091,11 @@ mixin PlayerMixin {
           )
         : VideoControllerConfiguration(
             enableHardwareAcceleration: AppSettingsController.instance.hardwareDecode.value,
-            // P1-3（启动编排）：Windows + 硬解开启 + VSR 开启 → create 期就把硬解定为 `d3d11va`。
-            // 否则起流后 initializePlayer 再写一次 hwdec → 软解→硬解 Reinit → 首帧要等下一个 IDR
-            // （N6 的主要代价）；create 期给定后首帧直接走硬解。其余情况传 null，走 media_kit 默认 'auto'。
-            hwdec: (AppSettingsController.instance.hardwareDecode.value &&
-                    Platform.isWindows &&
+            // ⚠️ 优先级（P1-3，阶段4 复核）：VSR 依赖硬解（d3d11vpp 需 D3D11 硬件帧），
+            // 故「Windows + VSR 开启」时**强制** d3d11va，忽略「硬解」开关
+            // （否则 create 给 'auto'、起流后又强写 d3d11va，两笔异值写序不定 → 矛盾）。
+            // 其余情况传 null，走 media_kit 默认（由 enableHardwareAcceleration 决定）。
+            hwdec: (Platform.isWindows &&
                     AppSettingsController.instance.enableRtxVsr.value)
                 ? 'd3d11va'
                 : null,
@@ -2124,7 +2136,7 @@ class PlayerController extends BaseController
       // 起流前已预挂（_volumeNormApplied=true）时只回读校验、不再 set：
       // set 会重建整条链并重置 loudnorm 收敛状态 → 进房第一秒响度又爬一遍。
       if (!_volumeNormApplied) {
-        await pp.setProperty('af', volumeNormFilter);
+        await _withWriteMutex(() => pp.setProperty('af', volumeNormFilter));
       }
       // 回读校验：mpv 对非法/不存在的滤镜会拒绝写入并保持旧值，
       // 因此回读必须同时包含 dynaudnorm 与 loudnorm 才算支持（只查 loudnorm 不严）。
@@ -2189,7 +2201,7 @@ class PlayerController extends BaseController
     } else {
       // 用户未开启或能力不支持：探测后立即还原为空 af，不影响实际听感
       try {
-        await pp.setProperty('af', '');
+        await _withWriteMutex(() => pp.setProperty('af', ''));
       } catch (e) {
         Log.logPrint(e);
       }
