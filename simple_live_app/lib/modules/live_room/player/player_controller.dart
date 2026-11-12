@@ -461,8 +461,10 @@ mixin PlayerMixin {
   bool _playIssued = false; // 本次门控内 play() 是否已发出
   bool _readyRestartSeen = false; // 本次门控内「play 已发之后」是否已见 restart 完成
 
-  /// 在途管线写入计数（音量均衡队列 + VSR 裁切队列）。
-  /// 注：**放行点写链不经队列**（在 play() 之前 await 完成，restart 必在其后），故不计入也不影响判定。
+  /// 在途管线写入计数（音量均衡队列 + VSR 裁切队列 + 放行点写链）。
+  /// 注：放行点写链（② 改序后落在 play() **之后**）也计入——若不计入，就绪门会在
+  /// 「play 已发 + restart 已见 + busy==0」时**提前解除**，随后写链的 VIDEO_RECONFIG 会让
+  /// 画面 1080→2160 的跳变在**无遮罩**下可见（阶段4 复核发现）。计入后门会等写链落地才揭。
   int _pipelineBusy = 0;
 
   /// af/vf 写序互斥（P1-3）：两条队列保持**分离**（C3 硬约束：不合并——避免长 af 建链堆住
@@ -1036,22 +1038,27 @@ mixin PlayerMixin {
     if (_playerDisposed || epoch != _vsrGateEpoch) {
       return;
     }
-    if (target != null) {
-      // play 后单次写链（P1-1）：门控期吞掉的中间写在放行点一次性写入终值；此时非暂停态，
-      // mp_force_video_refresh 不 seek。
-      Log.d('[VSR] 门控: play 后单次写链(原因=$reason) scale=${target.scale?.toStringAsFixed(2) ?? '-'}'
-          ' crop="${target.crop}" 链=${target.enable}');
+    if (target != null || reason == 'timeout') {
+      // 放行点写链计入就绪门 busy（② 整改）：改序后写链落在 play() 之后，若不计入，就绪门会在
+      // 「play 已发 + restart 已见 + busy==0」时就**提前解除** → 随后写链的 VIDEO_RECONFIG 让
+      // 画面 1080→2160 跳变在无遮罩下可见。计入后门等写链落地（含 vf reconfig）才揭。
+      _pipelineBusy++;
       try {
-        await _applyVsrTarget(target);
+        if (target != null) {
+          // play 后单次写链（P1-1）：门控期吞掉的中间写在放行点一次性写入终值；此时非暂停态，
+          // mp_force_video_refresh 不 seek。
+          Log.d('[VSR] 门控: play 后单次写链(原因=$reason) scale=${target.scale?.toStringAsFixed(2) ?? '-'}'
+              ' crop="${target.crop}" 链=${target.enable}');
+          await _applyVsrTarget(target);
+        } else {
+          // 预挂只在超时路径（P1-1）：拿不到源分辨率 → play 后预挂 2.0 兜底链（降级）。
+          await _preHangFallbackChain();
+        }
       } catch (e) {
         Log.d('[VSR] 门控写链失败: $e');
-      }
-    } else if (reason == 'timeout') {
-      // 预挂只在超时路径（P1-1）：拿不到源分辨率 → play 后预挂 2.0 兜底链（降级）。
-      try {
-        await _preHangFallbackChain();
-      } catch (e) {
-        Log.d('[VSR] 门控超时预挂失败: $e');
+      } finally {
+        _pipelineBusy--;
+        _maybeFinishReadyGate();
       }
     }
   }
