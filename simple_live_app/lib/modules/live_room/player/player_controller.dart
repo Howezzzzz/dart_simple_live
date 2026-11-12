@@ -202,12 +202,14 @@ mixin PlayerMixin {
     // 让 open 后的 playing 重发时再跑一次自愈+复查（否则一次性钩子跳过，open 清链
     // 后本房静默失去均衡且无人重挂）。
     _volumeNormInitialized = false;
-    Log.d('[APPLY] source=room-enter');
     if (!_volumeNormApplied &&
         volumeNormShouldPreApply(
           userOn: AppSettingsController.instance.volumeNorm.value,
           supported: afLoudnormSupported,
         )) {
+      // 实际会预挂才留痕（避免「什么都没做」也打 [APPLY]，阶段4 复核）
+      Log.d('[APPLY] source=room-enter/reinit 均衡预挂（已挂=$_volumeNormApplied'
+          ' 能力=${PlayerMixin.afLoudnormSupported}）');
       await _enqueueVolumeNorm(() => _preApplyVolumeNorm());
     }
     // 同步底部补边裁切（VSR 开启才裁；关闭时显式清空，避免切线路等场景残留上次的裁切）。
@@ -310,7 +312,6 @@ mixin PlayerMixin {
     // 否则（RISK-71：open 可能清掉链）换线路后均衡会静默丢失，直到下次重初始化。
     _volumeNormInitialized = false;
     Log.d('[VSR] 换线路/重试走起播门控：open(play:false) index=$index');
-    Log.d('[APPLY] source=switch-line/retry（openSourceGated）');
     _tlMark('open 发起');
     _armVsrDeferPlay();
     try {
@@ -412,8 +413,11 @@ mixin PlayerMixin {
     final sb = StringBuffer('[TL] 汇总: 总=${total}ms');
     _tlMarks.forEach((k, v) => sb.write('; $k=${v}ms'));
     Log.d(sb.toString());
-    if (total > tlSlowThresholdMs) {
-      Log.w('[TL] 起播耗时超阈（${total}ms > ${tlSlowThresholdMs}ms）——见上方分节点耗时');
+    // 超阈判据用「就绪时刻」而非汇总时刻——汇总由 playing 后固定 2.5s 触发，
+    // 直接用 total 会系统性多算 2.5s（阶段4 复核：达标的 4s 脏流也会误报 WARN）。
+    final readyMs = _tlMarks['restart完成'] ?? _tlMarks['首帧/playing'];
+    if (readyMs != null && readyMs > tlSlowThresholdMs) {
+      Log.w('[TL] 起播耗时超阈（就绪=${readyMs}ms > ${tlSlowThresholdMs}ms）——见上方分节点耗时');
     }
     _tlT0 = null;
   }
@@ -1985,8 +1989,7 @@ class PlayerController extends BaseController
         } else if (_pendingVolumeNormIntent != null) {
           // N2：暂停期被推迟的拨动 → 复播时消费
           _pendingVolumeNormIntent = null;
-          Log.d('[VN] 待办消费: 复播 → 同步');
-          _syncVolumeNorm();
+          applyPipelineChange('resume-pending', vsr: false);
         }
       }
     });
@@ -2107,6 +2110,8 @@ class PlayerController extends BaseController
   /// - 两条队列**保持分离**（C3 硬约束），本入口只做「留痕 + 委派」到 _syncVolumeNorm / _syncRtxVsrCrop；
   /// - **队列内**调用点（首帧钩子 / 探测终裁）仍直接调无队版（ISS-281 修复要求，见各自注释），
   ///   不入本入口——这是**有意的例外**，不是漏。
+  /// - ⚠️ 默认 `norm && vsr` 会**顺序 await 两条队列**；仅在确需同时应用时给双 true，
+  ///   否则按需传 `vsr: false` / `norm: false`（避免 af 长操作挡住 vf，违背 §8.2 硬约束）。
   Future<void> applyPipelineChange(String source,
       {bool norm = true, bool vsr = true}) async {
     if (_playerDisposed) {
@@ -2121,6 +2126,10 @@ class PlayerController extends BaseController
     }
     if (vsr && Platform.isWindows) {
       await _syncRtxVsrCrop(trigger: source);
+    }
+    if (!_playerDisposed) {
+      Log.d('[APPLY] source=$source 结果: 均衡已挂=$_volumeNormApplied'
+          ' 链=$_rtxVsrChainApplied scale=${_lastRtxVsrScale?.toStringAsFixed(2) ?? "-"}');
     }
   }
 

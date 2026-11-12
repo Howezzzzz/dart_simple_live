@@ -783,6 +783,9 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     // 下面 openSourceGated（VSR 路径）与 jump（非 VSR 路径）都会触发一次重载；
     // _tlMark 按 key 去重，重复调用无害。
     tlMarkOpen();
+    // [APPLY] 覆盖「换线路 + 出错重试」两路（openSourceGated 与非 VSR 的 jump 都走这里，
+    // 阶段4 复核：原来打在 openSourceGated 内、非 VSR 路径会漏）。
+    Log.d('[APPLY] source=switch-line/retry');
     if (await openSourceGated(buildPlayerMediaList(), index: currentLineIndex)) {
       return;
     }
