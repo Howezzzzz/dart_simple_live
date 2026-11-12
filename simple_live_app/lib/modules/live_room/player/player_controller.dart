@@ -308,7 +308,10 @@ mixin PlayerMixin {
     // 否则（RISK-71：open 可能清掉链）换线路后均衡会静默丢失，直到下次重初始化。
     _volumeNormInitialized = false;
     Log.d('[VSR] 换线路/重试走起播门控：open(play:false) index=$index');
-    _tlMark('open 发起');
+    // P1-2 整改 D 项修复（阶段4 定向复验 P1）：换线路/重试也武装就绪门（遮罩 + 声音门）——
+    // 之前只打点不武装，导致这条路径“restart 前已出声/露画面”违反 §8.2 硬约束。
+    // tlMarkOpen = _tlMark('open 发起') + _armReadyGate()，与进房同享 6s 遮罩与 mute。
+    tlMarkOpen();
     _armVsrDeferPlay();
     try {
       await player.open(Playlist(mediaList, index: index), play: false);
@@ -441,8 +444,9 @@ mixin PlayerMixin {
   Timer? _readyTimeoutTimer;
   static const Duration readyGateTimeout = Duration(seconds: 6);
 
-  /// 就绪门前置条件（阶段4 复核 B/C：缺「play 已发」与代际过滤 → 热拨 VSR/seek 会被误判成进房就绪）。
-  int _readyEpoch = 0;
+  /// 就绪门前置条件（阶段4 复核 B/C：缺「play 已发」→ 热拨 VSR/seek 的 restart 会被误判成
+  /// 进房就绪；需等 play() 已发才认）。代际安全不依赖额外 epoch——武装发生在 open() 之前，
+  /// Dart 流 FIFO 保证旧源的 playing/restart 事件在 open→stop 的复位事件之前送达，不会污染新代。
   bool _playIssued = false; // 本次门控内 play() 是否已发出
   bool _readyRestartSeen = false; // 本次门控内是否已见「restart 完成」
 
@@ -451,7 +455,6 @@ mixin PlayerMixin {
   int _pipelineBusy = 0;
 
   void _armReadyGate() {
-    _readyEpoch++;
     _readyPending = true;
     _playIssued = false;
     _readyRestartSeen = false;
