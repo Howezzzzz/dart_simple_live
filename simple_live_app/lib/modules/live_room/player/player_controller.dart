@@ -1027,39 +1027,35 @@ mixin PlayerMixin {
       Log.d('[VSR] 门控 release 作废（摘链期间已被新换源取代）: $reason');
       return;
     }
-    // **先 play（非暂停态）**——写链必须在暂停态之外，否则触发 refresh seek。
-    _tlMark('play()');
-    Log.d('[VSR] 门控放开（$reason）等待=${armedAt == null ? "?" : "${DateTime.now().difference(armedAt).inMilliseconds}ms"} → play()（先播后写链）');
+    // **先 play（非暂停态）再写链**——写链必须在暂停态之外，否则触发 refresh seek。
+    // 整个「play + 写链」计入就绪门 busy（② 整改2）；`busy++` 必须在 play() **之前**：
+    // 否则 playing 事件（置 _playIssued）可能先到，叠加已记的 restart → 就绪门在写链前就揭。
+    _pipelineBusy++;
     try {
-      await player.play();
-    } catch (e) {
-      Log.d('[VSR] 起播门控 play() 失败: $e');
-    }
-    if (_playerDisposed || epoch != _vsrGateEpoch) {
-      return;
-    }
-    if (target != null || reason == 'timeout') {
-      // 放行点写链计入就绪门 busy（② 整改）：改序后写链落在 play() 之后，若不计入，就绪门会在
-      // 「play 已发 + restart 已见 + busy==0」时就**提前解除** → 随后写链的 VIDEO_RECONFIG 让
-      // 画面 1080→2160 跳变在无遮罩下可见。计入后门等写链落地（含 vf reconfig）才揭。
-      _pipelineBusy++;
+      _tlMark('play()');
+      Log.d('[VSR] 门控放开（$reason）等待=${armedAt == null ? "?" : "${DateTime.now().difference(armedAt).inMilliseconds}ms"} → play()（先播后写链）');
       try {
+        await player.play();
+      } catch (e) {
+        Log.d('[VSR] 起播门控 play() 失败: $e');
+      }
+      if (!_playerDisposed && epoch == _vsrGateEpoch) {
         if (target != null) {
           // play 后单次写链（P1-1）：门控期吞掉的中间写在放行点一次性写入终值；此时非暂停态，
           // mp_force_video_refresh 不 seek。
           Log.d('[VSR] 门控: play 后单次写链(原因=$reason) scale=${target.scale?.toStringAsFixed(2) ?? '-'}'
               ' crop="${target.crop}" 链=${target.enable}');
           await _applyVsrTarget(target);
-        } else {
+        } else if (reason == 'timeout') {
           // 预挂只在超时路径（P1-1）：拿不到源分辨率 → play 后预挂 2.0 兜底链（降级）。
           await _preHangFallbackChain();
         }
-      } catch (e) {
-        Log.d('[VSR] 门控写链失败: $e');
-      } finally {
-        _pipelineBusy--;
-        _maybeFinishReadyGate();
       }
+    } catch (e) {
+      Log.d('[VSR] 门控写链失败: $e');
+    } finally {
+      _pipelineBusy--;
+      _maybeFinishReadyGate();
     }
   }
 
@@ -2019,12 +2015,12 @@ class PlayerController extends BaseController
       if (event.text.contains('Using hardware decoding')) _tlMark('硬解生效');
       if (event.text.contains('playback restart complete')) {
         _tlMark('restart完成');
-        // 就绪门：只认 **play 已发出之后** 的 restart（起播前链写入/seek 触发的 restart 不算数），
-        // 再按完整条件判定（定向复验：原 _readyEpoch 是死字段，改用 _playIssued 作门槛）。
-        if (_playIssued) {
-          _readyRestartSeen = true;
-          _maybeFinishReadyGate();
-        }
+        // 就绪门：**门控窗口内任何时刻的 restart 完成都记**（② 改序后：VSR 开的路径没有 seek
+        // → 管线在暂停期就绪 → restart 完成会落在 play() **之前**，原「仅认 play 之后」会拿不到
+        // 信号、只能干等 6s 超时）。「play 已发 + 无在途写入」仍由 readyGateCanFinish 强制，
+        // 防「进房期热拨 VSR/seek 被误判就绪」的那道闸还在。
+        _readyRestartSeen = true;
+        _maybeFinishReadyGate();
       }
       // 音量均衡静默降级防线（复核建议）：武装期内命中滤镜错误关键字即标记失败，
       // 由首帧/探测/热开的窗末终裁消费（真机 P0 ISS-278：记录与抑制窗解耦——失败日志
