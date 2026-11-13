@@ -1,15 +1,15 @@
 {
-    "version": "1.08.71",
-    "version_num": 1008071,
-    "version_desc": "- fix(vsr): P4 黑边 D0——aspect-override 恒写 \"no\" 复位 PAR + updateScaleMode 面板折算（ISS-284）\n- fix(vsr): C4 真源斩 aspect→dw→plan 反馈环 + C5 面板一次到位 + P2 crop 延时重写（含阶段4/定向复验整改）\n- docs(changelog): 1.08.70（VSR 弹幕栏跳两次/crop 补写）+ 1.08.69（就绪门空等）\n- fix(vsr): 就绪门认门控期内 restart + busy++ 提前——修 VSR 开时遮罩干等 6s\n- docs(changelog): 1.08.68 小节\n- fix(vsr): 进房起播改「先 play 后写链」+ 就绪门计入写链 busy（② B1 重设计 v3 / E-②-0）",
+    "version": "1.08.72",
+    "version_num": 1008072,
+    "version_desc": "- 同步上游 dev 更新（5 个提交）\n- 修复：**斗鱼账号掉登录 / 登录态不刷新**——cookie 失效判定更准（除看过期时间外，还会实测接口是否仍有效），并在 cookie 有效但已被其它设备换发时自动换新设备号重新申请，减少「看着已登录、实际已失效」\n- 修复：斗鱼账号信息改为**先验证再回写**——校验通过才把新凭证写回本地，避免把失效/空的 cookie 写本地导致越用越坏\n- 修复：斗鱼登录态跨会话残留导致的错乱（上游统一 did 处理，登录/刷新更稳定）\n- 修复：启动阶段账号失效不再调用尚未就绪的弹窗组件（改记日志），避免启动期异常；运行中的账号失效提示改为「请检查网络或重新设置」\n- 加固：安全模式启动流程避免重复初始化 / 重复解码（对齐上游修复，规避安全模式下登录态异常）",
     "prerelease": true,
     "download_url": "https://github.com/Howezzzzz/dart_simple_live/releases",
     "download_urls": {
-        "android": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.71/app-arm64-v8a-release.apk",
-        "windows": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.71/Slive-1.08.71+1008071-windows-setup.exe",
-        "macos": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.71/simple_live_app-1.08.71+1008071-macos.dmg",
-        "linux": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.71/Slive-x86_64-linux.deb",
-        "linux_flatpak": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.71/Slive-x86_64.flatpak"
+        "android": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.72/app-arm64-v8a-release.apk",
+        "windows": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.72/Slive-1.08.72+1008072-windows-setup.exe",
+        "macos": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.72/simple_live_app-1.08.72+1008072-macos.dmg",
+        "linux": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.72/Slive-x86_64-linux.deb",
+        "linux_flatpak": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.72/Slive-x86_64.flatpak"
     },
     "mirror_prefixes": [
         "https://gh-proxy.com/",
@@ -17,10 +17,10 @@
         "https://ghproxy.cc/"
     ],
     "download_sha256": {
-        "android": "29ca779b525e20c04edc55e16527a561e2bb8d85de3da2548d004430e9c1c987",
-        "windows": "58553b03557865752e61efa68acbb642c1133d15e4c9a1e0fc8a625930ed8948",
-        "macos": "6dac92ceb415742dab596de1f060cc627837826d4b70c6919804b06797bcbeb1",
-        "linux": "06a95c72426c058060a15befdc2bd56e79bf8f0eb78179d933c4938ef67406ca",
-        "linux_flatpak": "fb8e3e84dc2c09e2becb7f8126fe4e2424dff8549e1a149fdde4f28c77f08e65"
+        "android": "afb93474a56b4915d4f9327c696aac1a901b3aeb9c4295dc3133b25ef3e147b9",
+        "windows": "d769921314c4eadf55a04b4798b025ba493129c9928383bbbaa5e4be1d975cc7",
+        "macos": "f6c57d1d1cc3cc6ffa7ca05e4a008a33b3ed169afacbb67653202966b9f8dfac",
+        "linux": "2dc4db81b7f69cebc6fe63c69dd076fd33c08a179768bf560ed69267a1c917c8",
+        "linux_flatpak": "8a0bb22223518e472316369cf0363c817a413442cfa1427fe9cbe9982b73ab15"
     }
 }
