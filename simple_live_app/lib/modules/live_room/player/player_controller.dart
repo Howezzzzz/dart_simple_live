@@ -310,6 +310,9 @@ mixin PlayerMixin {
       return false;
     }
     _lastRtxVsrSignature = null;
+    // 阶段4 整改：换线路/重试＝换源，作废旧流的 crop 重试代际（否则旧重试会重写旧 crop、
+    // 且签名短路后续纠正 → 错裁持续）。
+    _vsrCropRetryToken++;
     // 复核（换线路）：open 内部会 stop()，等价一次「重开」——音量均衡的首帧自愈钩子
     // 只在 initializePlayer 里重置过，换线路/重试不走那条路，这里补一次重置。
     // 否则（RISK-71：open 可能清掉链）换线路后均衡会静默丢失，直到下次重初始化。
@@ -2162,6 +2165,8 @@ class PlayerController extends BaseController
   }
 
   void disposeStream() {
+    _vsrDisplayAspect = null;
+    _vsrCropRetryToken++;
     _errorSubscription?.cancel();
     _completedSubscription?.cancel();
     _widthSubscription?.cancel();
