@@ -202,6 +202,9 @@ mixin PlayerMixin {
     // 让 open 后的 playing 重发时再跑一次自愈+复查（否则一次性钩子跳过，open 清链
     // 后本房静默失去均衡且无人重挂）。
     _volumeNormInitialized = false;
+    // ② P3/P2：进房重置 VSR 面板比例缓存 + 作废旧的重试代际。
+    _vsrDisplayAspect = null;
+    _vsrCropRetryToken++;
     if (!_volumeNormApplied &&
         volumeNormShouldPreApply(
           userOn: AppSettingsController.instance.volumeNorm.value,
@@ -731,6 +734,70 @@ mixin PlayerMixin {
   /// 用 mpv `--video-crop` 裁掉补边；**坐标空间是滤镜之后的帧**（见 rtx_vsr_crop.dart 注释）。
   ///
   /// 两种状态都写：开了 → 裁切值；没开（或未挂上滤镜链）→ 空串（取消手动裁切）。
+  /// ② P3/C4：当前 VSR 链的**终态显示比例**（= plan.aspect），供面板宽一次到位。
+  /// 仅「VSR 已生效」时非空；进房重置/退房时清空。
+  double? _vsrDisplayAspect;
+
+  /// ② P2：crop 延迟重写的代际（新进房/重置时自增，旧回调自动作废）。
+  int _vsrCropRetryToken = 0;
+
+  /// ② P3/C4：当前「真源」尺寸 = 解码器输出（mpv `video-params/w,h`），
+  /// **不受 `video-aspect-override` 影响**（`state.width/height` 是 dw/dh，会被它污染）。
+  /// rotate 90/270 时回退 `state.width/height`（videoParams.w/h 是未旋转的存储尺寸）。
+  (int, int) _trueSourceSize() {
+    final vp = player.state.videoParams;
+    final rotated = vp.rotate == 90 || vp.rotate == 270;
+    if (!rotated) {
+      final w = vp.w;
+      final h = vp.h;
+      if (w != null && h != null && w > 0 && h > 0) return (w, h);
+    }
+    return (player.state.width ?? 0, player.state.height ?? 0);
+  }
+
+  /// ② P3/C5：面板用的宽高——VSR 生效时按**终态显示比例**折算（一次到位），否则原样。
+  /// 门控＝Windows ∧ `_vsrDisplayAspect` 非空（VSR 关 / 安卓天然不命中）。
+  (int, int) _panelAspectSize(int? w, int? h) {
+    final a = _vsrDisplayAspect;
+    if (Platform.isWindows && a != null && h != null && h > 0) {
+      return ((h * a).round(), h);
+    }
+    return (w ?? 0, h ?? 0);
+  }
+
+  /// ② P2：crop 回读失败后的**专用单笔重写**（不走 `_syncRtxVsrCrop`，避免按当时 area
+  /// 重算而连带改写 vf 触发链重建）。等放大帧流过（vf 写后数十 ms 才到 VO）再写，有界重试。
+  void _scheduleVsrCropRetry(String crop, int attempt) {
+    const delaysMs = [250, 600, 1200];
+    if (attempt >= delaysMs.length || crop.isEmpty) return;
+    final token = ++_vsrCropRetryToken;
+    Future.delayed(Duration(milliseconds: delaysMs[attempt]), () async {
+      if (_playerDisposed || token != _vsrCropRetryToken) return;
+      final pp = player.platform;
+      if (pp is! NativePlayer) return;
+      if (!_rtxVsrChainApplied) return;
+      try {
+        final cur = (await pp.getProperty('video-crop')).trim();
+        if (cur.replaceAll(' ', '') == crop) {
+          Log.d('[VSR] crop 重试已生效（第 ${attempt + 1} 次检查）');
+          return;
+        }
+        await _withWriteMutex(() async {
+          await pp.setProperty('video-crop', crop);
+        });
+        final re = (await pp.getProperty('video-crop')).trim();
+        if (re.replaceAll(' ', '') == crop) {
+          Log.d('[VSR] crop 延时重写成功（第 ${attempt + 1} 次）video-crop=$crop');
+          return;
+        }
+        _scheduleVsrCropRetry(crop, attempt + 1);
+      } catch (e) {
+        Log.d('[VSR] crop 延时重写异常: $e');
+        _scheduleVsrCropRetry(crop, attempt + 1);
+      }
+    });
+  }
+
   Future<void> _syncRtxVsrCrop({String trigger = 'sync'}) async {
     // 注：_playerDisposed 在 PlayerMixin 内可直接引用，但此处不依赖它——
     // 播放器已 dispose 时 media_kit 的 setProperty/getProperty 会抛 AssertionError
@@ -738,8 +805,9 @@ mixin PlayerMixin {
     if (!Platform.isWindows) return;
     final pp = player.platform;
     if (pp is! NativePlayer) return;
-    final rawW = player.state.width ?? 0;
-    final rawH = player.state.height ?? 0;
+    // ② P3/C4：用**真源**（解码器输出，不受 video-aspect-override 污染），
+    // 否则第二次尺寸事件（dw 被 aspect 改写后）会让 plan/签名被污染 → 多余写链。
+    final (rawW, rawH) = _trueSourceSize();
     // 尺寸未知（如 initializePlayer 在 open 之前那次调用）先不处理：否则会把空值写进去重
     // 缓存，令随后无补边流（裁切值为空串）的真实尺寸事件被误判为「未变化」而漏更（复核 P0）。
     if (rawW <= 0 || rawH <= 0) return;
@@ -760,6 +828,8 @@ mixin PlayerMixin {
     final desired = plan.crop;
     final aspectValue = plan.aspect;
     final renderSize = plan.renderSize;
+    // ② P3/C5：缓存终态显示比例（VSR 生效时），供面板宽一次到位。
+    _vsrDisplayAspect = _rtxVsrChainApplied ? aspectValue : null;
     // 去重签名：倍数 + 裁切值 + 源尺寸 + 链状态（**不能只用裁切值当键**，见字段注释）。
     final signature = '${s ?? -1}|$desired|${rawW}x$rawH|$_rtxVsrChainApplied';
     // 起播门控（P1-1 起播前单次写链）：门控期内**吞中间写**——不立即写链，只把最新目标
@@ -864,8 +934,9 @@ mixin PlayerMixin {
     // 写入成功后才记缓存（复核 P3-3）：异常（dispose 竞态）时保持旧值，下次同步会重试。
     // 复核 P4：若写期间源尺寸已变（open/切流把签名作废后又来新尺寸），别用旧签名回填
     // ——否则新尺寸与旧签名相同会被短路 → 链不纠正、门控只能等超时。
-    if (player.state.width != t.rawW || player.state.height != t.rawH) {
-      Log.d('[VSR] 尺寸已变（${player.state.width}x${player.state.height}'
+    final (trueW, trueH) = _trueSourceSize();
+    if (trueW != t.rawW || trueH != t.rawH) {
+      Log.d('[VSR] 尺寸已变（${trueW}x${trueH}'
           ' != ${t.rawW}x${t.rawH}）—— 不回填签名，等下个尺寸事件重算');
       return;
     }
@@ -888,8 +959,10 @@ mixin PlayerMixin {
     } else {
       Log.w(
         '[VSR] video-crop 未生效：期望 ${t.crop}，回读 "$readback"'
-        '（源 ${player.state.width}x${player.state.height}）—— 可能 libmpv 不支持该属性',
+        '（源 ${player.state.width}x${player.state.height}）—— 可能 libmpv 不支持该属性'
+        '；已排延时重写（P2）',
       );
+      _scheduleVsrCropRetry(t.crop, 0);
     }
   }
 
@@ -1440,8 +1513,7 @@ mixin PlayerSystemMixin on PlayerMixin, PlayerStateMixin, PlayerDanmakuMixin {
     if (fullScreenState.value || windowFillState.value || smallWindowState.value) {
       return;
     }
-    final w = player.state.width ?? 0;
-    final h = player.state.height ?? 0;
+    final (w, h) = _panelAspectSize(player.state.width, player.state.height);
     if (w <= 0 || h <= 0) return;
     // 供页面判定覆盖式面板（分辨率变化时也能刷新；RISK-17）
     videoWidthRx.value = w;
@@ -2047,8 +2119,10 @@ class PlayerController extends BaseController
       // RISK-17：分辨率一到就记下来（与「自适应/自动全屏」等设置解耦），
       // 供页面判定覆盖式面板；否则在未开自适应或处于全屏时该值恒为 0 → 永不折叠。
       if ((player.state.width ?? 0) > 0 && (player.state.height ?? 0) > 0) {
-        videoWidthRx.value = player.state.width!;
-        videoHeightRx.value = player.state.height!;
+        final (pw, ph) =
+            _panelAspectSize(player.state.width, player.state.height);
+        videoWidthRx.value = pw;
+        videoHeightRx.value = ph;
       }
       if (player.state.width == null) {
         return;
@@ -2071,8 +2145,10 @@ class PlayerController extends BaseController
       }
       _syncRtxVsrCrop(trigger: 'size');
       if ((player.state.width ?? 0) > 0 && (player.state.height ?? 0) > 0) {
-        videoWidthRx.value = player.state.width!;
-        videoHeightRx.value = player.state.height!;
+        final (pw, ph) =
+            _panelAspectSize(player.state.width, player.state.height);
+        videoWidthRx.value = pw;
+        videoHeightRx.value = ph;
       }
       isVertical.value = (player.state.height ?? 9) > (player.state.width ?? 16);
       if (AppSettingsController.instance.autoFitWindowWidth.value &&
