@@ -202,9 +202,10 @@ mixin PlayerMixin {
     // 让 open 后的 playing 重发时再跑一次自愈+复查（否则一次性钩子跳过，open 清链
     // 后本房静默失去均衡且无人重挂）。
     _volumeNormInitialized = false;
-    // ② P3/P2：进房重置 VSR 面板比例缓存 + 作废旧的重试代际。
+    // ② P3/P2：进房重置 VSR 面板比例缓存 + 作废旧的重试代际/目标。
     _vsrDisplayAspect = null;
     _vsrCropRetryToken++;
+    _vsrDesiredCrop = '';
     if (!_volumeNormApplied &&
         volumeNormShouldPreApply(
           userOn: AppSettingsController.instance.volumeNorm.value,
@@ -741,8 +742,11 @@ mixin PlayerMixin {
   /// 仅「VSR 已生效」时非空；进房重置/退房时清空。
   double? _vsrDisplayAspect;
 
-  /// ② P2：crop 延迟重写的代际（新进房/重置时自增，旧回调自动作废）。
+  /// ② P2：crop 延迟重写的代际（新进房/重置/换源时自增，旧回调自动作废）。
   int _vsrCropRetryToken = 0;
+
+  /// ② P2：当前**期望**的 crop 目标（供重试回调做「目标未变」守卫——比代际更强）。
+  String _vsrDesiredCrop = '';
 
   /// ② P3/C4：当前「真源」尺寸 = 解码器输出（mpv `video-params/w,h`），
   /// **不受 `video-aspect-override` 影响**（`state.width/height` 是 dw/dh，会被它污染）。
@@ -774,31 +778,43 @@ mixin PlayerMixin {
     const delaysMs = [250, 600, 1200];
     if (attempt >= delaysMs.length || crop.isEmpty) return;
     final token = ++_vsrCropRetryToken;
-    Future.delayed(Duration(milliseconds: delaysMs[attempt]), () async {
-      if (_playerDisposed || token != _vsrCropRetryToken) return;
-      final pp = player.platform;
-      if (pp is! NativePlayer) return;
-      if (!_rtxVsrChainApplied) return;
-      try {
-        final cur = (await pp.getProperty('video-crop')).trim();
-        if (cur.replaceAll(' ', '') == crop) {
-          Log.d('[VSR] crop 重试已生效（第 ${attempt + 1} 次检查）');
-          return;
+    Future.delayed(
+      Duration(milliseconds: delaysMs[attempt]),
+      // 必须在**写锁 Zone 之外**调度：本方法在 `_applyVsrTargetUnlocked` 锁体内被调用，
+      // `Future.delayed` 回调会继承该 Zone → 命中 `_withWriteMutex` 的重入短路（不排队）。
+      // 与 `_scheduleSuppressRelease` 同款用 `Zone.root.bindCallback` 转义（阶段4 定向复验）。
+      Zone.root.bindCallback(() async {
+        // 守卫①：代际 + 目标未变（比代际更强，防旧目标被新流覆盖后又重写）。
+        if (_playerDisposed || token != _vsrCropRetryToken) return;
+        if (!_rtxVsrChainApplied || _vsrDesiredCrop != crop) return;
+        final pp = player.platform;
+        if (pp is! NativePlayer) return;
+        try {
+          final cur = (await pp.getProperty('video-crop')).trim();
+          // 守卫②：每个 await 之后复查代际（期间可能换源/退房）。
+          if (_playerDisposed || token != _vsrCropRetryToken) return;
+          if (cur.replaceAll(' ', '') == crop) {
+            Log.d('[VSR] crop 重试已生效（第 ${attempt + 1} 次检查）');
+            return;
+          }
+          await _withWriteMutex(() async {
+            await pp.setProperty('video-crop', crop);
+          });
+          if (_playerDisposed || token != _vsrCropRetryToken) return;
+          final re = (await pp.getProperty('video-crop')).trim();
+          if (re.replaceAll(' ', '') == crop) {
+            Log.d('[VSR] crop 延时重写成功（第 ${attempt + 1} 次）video-crop=$crop');
+            return;
+          }
+          _scheduleVsrCropRetry(crop, attempt + 1);
+        } catch (e) {
+          Log.d('[VSR] crop 延时重写异常: $e');
+          if (!_playerDisposed && token == _vsrCropRetryToken) {
+            _scheduleVsrCropRetry(crop, attempt + 1);
+          }
         }
-        await _withWriteMutex(() async {
-          await pp.setProperty('video-crop', crop);
-        });
-        final re = (await pp.getProperty('video-crop')).trim();
-        if (re.replaceAll(' ', '') == crop) {
-          Log.d('[VSR] crop 延时重写成功（第 ${attempt + 1} 次）video-crop=$crop');
-          return;
-        }
-        _scheduleVsrCropRetry(crop, attempt + 1);
-      } catch (e) {
-        Log.d('[VSR] crop 延时重写异常: $e');
-        _scheduleVsrCropRetry(crop, attempt + 1);
-      }
-    });
+      }),
+    );
   }
 
   Future<void> _syncRtxVsrCrop({String trigger = 'sync'}) async {
@@ -829,6 +845,7 @@ mixin PlayerMixin {
     final s = plan.scale; // 捕获为 final，便于闭包里做空值提升
     final enable = plan.applied;
     final desired = plan.crop;
+    _vsrDesiredCrop = desired; // ② P2：供重试回调做「目标未变」守卫
     final aspectValue = plan.aspect;
     final renderSize = plan.renderSize;
     // ② P3/C5：缓存终态显示比例（VSR 生效时），供面板宽一次到位。
