@@ -24,8 +24,6 @@ class PlatformService extends GetxService {
 
   RxList<Account> accountList = RxList();
 
-  bool _inited = false;
-
   Future<void> _initAccount() async {
     accountList.value = await SafeService.instance.getDecodeAccounts();
     // 加密模式, 未登录->跳过cookie使用/登录->解码
@@ -34,7 +32,7 @@ class PlatformService extends GetxService {
     }
     // 自动更新
     for (var account in accountList) {
-      accountLogin(account);
+      accountLogin(account, init: true);
     }
   }
 
@@ -189,7 +187,7 @@ class PlatformService extends GetxService {
     return clean;
   }
 
-  Future<bool> accountLogin(Account ac) async {
+  Future<bool> accountLogin(Account ac, {bool init = false}) async {
     var site = Sites.allSites[ac.siteId]!;
     AccountInfo info = await site.liveSite.getAccountInfo(credential: ac.credential);
     var resAc = ac.copyWith(
@@ -201,7 +199,12 @@ class PlatformService extends GetxService {
       updatedAt: DateTime.now().millisecondsSinceEpoch,
     );
     if (!info.isValid) {
-      SmartDialog.showToast('${site.name}账号失效，请重新设置');
+      if (init) {
+        Log.e('${site.name}账号失效，请重新设置');
+      } else {
+        // smart_dialog be used after init
+        SmartDialog.showToast('${site.name}账号失效，请检查网络或重新设置');
+      }
       // 失效也要回写 isActive，否则 UI 无法反映账号已失效（见 ISS-220）；不覆盖原 credential
       await updateAccount(ac.copyWith(
         isActive: false,
@@ -209,7 +212,11 @@ class PlatformService extends GetxService {
       ));
     } else {
       site.liveSite.setSiteAttrs(resAc.credential);
-      await updateAccount(resAc);
+      // 针对 douyu cookie 更新问题 , bilibili && douyin 不更新cookie
+      if(resAc.credential != ac.credential){
+        await updateAccount(resAc);
+        Log.i('douyu credential has refresh');
+      }
     }
     return info.isValid;
   }
@@ -273,16 +280,15 @@ class PlatformService extends GetxService {
   }
 
   // ==================== 生命周期 ====================
+  // 真实初始化收敛到 init()（对齐上游 762203ac/fb294676 的拆分）。
+  // Get.put 会自动触发 onInit（TV 端 main 只 Get.put 不显式 init），
+  // 手机/桌面端 main 又显式 `await Get.put(X).init()`；两路收敛同一 Future，
+  // 保证只初始化一次且显式路径能正确 await（见 ISS-217）。
+  Future<void>? _initFuture;
 
-  @override
-  Future<void> onInit() async {
-    // 幂等：Get.put 内部已会触发 onInit，调用方再手动调一次不得重复初始化
-    // （否则 EventBus 双订阅泄漏 + _initAccount/accountLogin 双跑，见 ISS-217）
-    if (_inited) {
-      super.onInit();
-      return;
-    }
-    _inited = true;
+  Future<void> init() => _initFuture ??= _doInit();
+
+  Future<void> _doInit() async {
     subscription = EventBus.instance.listen(Constant.kUpdateAccount, (data) {
       Log.i('update Account');
       if (data is Account) {
@@ -295,6 +301,11 @@ class PlatformService extends GetxService {
     await _initAccount();
     _updateDouyinAttr();
     _initHuya();
+  }
+
+  @override
+  Future<void> onInit() async {
+    await init();
     super.onInit();
   }
 

@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:math';
 
 import 'package:dio/dio.dart';
 import 'package:html_unescape/html_unescape.dart';
@@ -239,7 +238,7 @@ class DouyuSite implements LiveSite {
 
   @override
   Future<LiveSearchRoomResult> searchRooms(String keyword, {int page = 1}) async {
-    var did = generateRandomString(32);
+    var did = DouyuUtils.generateRandomString(32);
     var result = await HttpClient.instance.getJson(
       "https://www.douyu.com/japi/search/api/searchShow",
       queryParameters: {
@@ -288,20 +287,11 @@ class DouyuSite implements LiveSite {
     return roomInfo;
   }
 
-  //生成指定长度的16进制随机字符串
-  String generateRandomString(int length) {
-    var random = Random.secure();
-    var values = List<int>.generate(length, (i) => random.nextInt(16));
-    StringBuffer stringBuffer = StringBuffer();
-    for (var item in values) {
-      stringBuffer.write(item.toRadixString(16));
-    }
-    return stringBuffer.toString();
-  }
+
 
   @override
   Future<LiveSearchAnchorResult> searchAnchors(String keyword, {int page = 1}) async {
-    var did = generateRandomString(32);
+    var did = DouyuUtils.generateRandomString(32);
     var result = await HttpClient.instance.getJson(
       "https://www.douyu.com/japi/search/api/searchUser",
       queryParameters: {
@@ -358,16 +348,6 @@ class DouyuSite implements LiveSite {
     return Future.value([]);
   }
 
-  Future<String> refreshCookie(String dy_did, String ltp0) async {
-    var newCookie = await DouyuUtils.refreshCookie(
-        did: dy_did, ltp0: ltp0, cookie: _cookie);
-    // 刷新失败返回空串时保留旧值，避免 core 内部 cookie 被清空但持久层仍认为“已登录”
-    if (newCookie.isNotEmpty) {
-      _cookie = newCookie;
-    }
-    return newCookie;
-  }
-
   @override
   Future<void> setSiteAttrs(String data) async {
     final Map<String, dynamic> map;
@@ -406,10 +386,15 @@ class DouyuSite implements LiveSite {
     } catch (e) {
       return info;
     }
-    setSiteAttrs(credential);
-    var newCookie = await DouyuUtils.refreshCookie(did: _dy_did, ltp0: _ltp0, cookie: _cookie);
-    var newCredential = map;
-    newCredential['cookie'] = newCookie;
+    // 先验证 再设置（上游 86a3470c：避免把未验证的 credential 直接写回）
+    String dy_did = map['dy_did'] is String ? map['dy_did'] as String : '';
+    String ltp0 = map['LTP0'] is String ? map['LTP0'] as String : '';
+    String cookie = map['cookie'] is String ? map['cookie'] as String : '';
+
+    Map<String, dynamic> newCredential =
+        await DouyuUtils.refreshCookie(did: dy_did, ltp0: ltp0, cookie: cookie);
+    var newCookie = newCredential['cookie']?.toString() ?? '';
+    setSiteAttrs(jsonEncode(newCredential));
     return AccountInfo(
       uid: DouyuUtils.pickCookie(newCookie, 'acf_uid'),
       name: Uri.decodeComponent(DouyuUtils.pickCookie(newCookie, 'acf_nickname')),
@@ -487,9 +472,16 @@ class DouyuSite implements LiveSite {
         // cookie-jar maybe better
         var pollCookie = resp.headers['set-cookie']!;
         final ltp0 = DouyuUtils.pickSetCookie(pollCookie, 'LTP0');
-        var newCookie = await DouyuUtils.refreshCookie(did: _dy_did, ltp0: ltp0, cookie: _cookie);
+        // refreshCookie 现返回 Map（上游 86a3470c 改签名）；改用其中回传的 did/LTP0/cookie，
+        // 以便服务端换发新 did 时也能带回持久层
+        final newCred =
+            await DouyuUtils.refreshCookie(did: _dy_did, ltp0: ltp0, cookie: _cookie);
         // 拼装一下
-        final Map<String, dynamic> credentialJson = {'dy_did': _dy_did, 'LTP0': ltp0, 'cookie': newCookie};
+        final Map<String, dynamic> credentialJson = {
+          'dy_did': newCred['dy_did'] ?? _dy_did,
+          'LTP0': newCred['LTP0'] ?? ltp0,
+          'cookie': newCred['cookie'] ?? '',
+        };
         qrPollResult.credential = jsonEncode(credentialJson);
         qrPollResult.status = QRStatus.scanned;
       default:
