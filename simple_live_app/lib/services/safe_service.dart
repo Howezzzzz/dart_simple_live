@@ -244,17 +244,15 @@ class SafeService extends GetxService {
     SmartDialog.showToast('已重置敏感数据');
   }
 
-  bool _inited = false;
+  Future<void>? _initFuture;
+
+  /// 幂等初始化（对齐上游 762203ac/fb294676 的 init 拆分）：Get.put 会自动触发 onInit，
+  /// main.dart 又显式 `await Get.put(SafeService()).init()`；两路收敛同一 Future（见 ISS-217）。
+  Future<void> init() => _initFuture ??= checkKeyValid();
 
   @override
   Future<void> onInit() async {
-    // 幂等：避免 main.dart 里 Get.put 与手动 onInit 双跑（见 ISS-217）
-    if (_inited) {
-      super.onInit();
-      return;
-    }
-    _inited = true;
-    await checkKeyValid();
+    await init();
     super.onInit();
   }
 }
