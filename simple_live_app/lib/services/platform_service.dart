@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:collection/collection.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:get/get.dart';
@@ -213,12 +214,32 @@ class PlatformService extends GetxService {
     } else {
       site.liveSite.setSiteAttrs(resAc.credential);
       // 针对 douyu cookie 更新问题 , bilibili && douyin 不更新cookie
-      if(resAc.credential != ac.credential){
+      // 写回条件：① 凭证内容变化（JSON 语义比较、键序无关，见 ISS-286：douyu 凭证为
+      // jsonEncode 后的 JSON 串，map 键序差异曾导致「内容相同却判不等」→ 每次启动误写库）
+      // ② 本地 isActive 已被写坏为 false 而本次验证通过（需恢复，见 ISS-285：
+      // bilibili/douyin 凭证恒不变，仅凭 credential 判变化永远无法自愈）
+      if (_credentialChanged(ac.credential, resAc.credential) || !ac.isActive) {
         await updateAccount(resAc);
-        Log.i('douyu credential has refresh');
+        Log.i('${site.name} credential has refreshed${!ac.isActive ? ' / isActive recovered' : ''}');
       }
     }
     return info.isValid;
+  }
+
+  /// 凭证变化判定（ISS-286）：先做字符串比较；两侧均为 JSON Map 时（douyu 凭证为
+  /// jsonEncode 后的 JSON 串）做键序无关的深度比较；非 JSON 凭证退回字符串比较。
+  bool _credentialChanged(String oldC, String newC) {
+    if (oldC == newC) return false;
+    try {
+      final o = jsonDecode(oldC);
+      final n = jsonDecode(newC);
+      if (o is Map && n is Map) {
+        return !const DeepCollectionEquality().equals(o, n);
+      }
+    } catch (_) {
+      // 非 JSON 凭证（bilibili/douyin 等普通串）走字符串比较结果
+    }
+    return true;
   }
 
   // ==================== 抖音 ====================
