@@ -314,6 +314,7 @@ mixin PlayerMixin {
     // 阶段4 整改：换线路/重试＝换源，作废旧流的 crop 重试代际（否则旧重试会重写旧 crop、
     // 且签名短路后续纠正 → 错裁持续）。
     _vsrCropRetryToken++;
+    _vsrDesiredCrop = ''; // 换源即清期望目标（严格更强、零风险；新源必有尺寸事件重设）
     // 复核（换线路）：open 内部会 stop()，等价一次「重开」——音量均衡的首帧自愈钩子
     // 只在 initializePlayer 里重置过，换线路/重试不走那条路，这里补一次重置。
     // 否则（RISK-71：open 可能清掉链）换线路后均衡会静默丢失，直到下次重初始化。
@@ -802,6 +803,9 @@ mixin PlayerMixin {
           });
           if (_playerDisposed || token != _vsrCropRetryToken) return;
           final re = (await pp.getProperty('video-crop')).trim();
+          // 复查代际（第二次 IPC 期间也可能换源/退房）——否则递归 `++token` 会复活旧链、
+          // 且误杀新源刚排的合法重试（定向复验 2）。
+          if (_playerDisposed || token != _vsrCropRetryToken) return;
           if (re.replaceAll(' ', '') == crop) {
             Log.d('[VSR] crop 延时重写成功（第 ${attempt + 1} 次）video-crop=$crop');
             return;
