@@ -64,9 +64,11 @@ int _evenFloor(num v) => (v / 2).floor() * 2;
 
 /// VSR 裁切生效时画面真实的显示比例（宽/高），如 960x544 → 960/540（16:9）。
 ///
-/// 裁切后内容比例 ≠ 源补边比例，而 mpv 的渲染窗口（video-params 的 dw/dh）与界面布局都
-/// 按「源比例」算 → 画面在窗口里上下留 2px（4K 下约 8px）黑边。把该真实比例通过
-/// `video-aspect-override` 告诉 mpv 即可校正。无裁切时返回 null（调用方按源比例处理）。
+/// ⚠️ 该值**仅供 app 侧面板宽折算**（`_vsrDisplayAspect` → `_panelAspectSize`），
+/// **不再写入 mpv**（② P4/D0，复验-b 裁定 T2）：把 16:9 写 `video-aspect-override` 会被
+/// mpv 折算成未裁切帧的 PAR=1.0074 → 裁切区显示尺寸膨胀 3868x2160 → contain-fit x 卡
+/// → 上下各 8px 黑边——它正是黑边制造者；mpv 侧改恒写 "no"（PAR=1:1，满窗无黑边）。
+/// 无裁切时返回 null（调用方按源比例处理）。
 double? rtxVsrDisplayAspect(int width, int height) {
   final pad = rtxVsrBottomPadRows(width, height);
   if (pad <= 0) return null;
@@ -143,7 +145,7 @@ class RtxVsrPlan {
   /// mpv `video-crop` 值（空串 = 取消手动裁切）。
   final String crop;
 
-  /// 显示比例（写 `video-aspect-override`）。
+  /// 面板折算用显示比例（② P4/D0 起**仅面板宽折算**，不再写 mpv——mpv 侧恒写 "no"）。
   final double aspect;
 
   /// 渲染画布尺寸（null = 恢复默认）。

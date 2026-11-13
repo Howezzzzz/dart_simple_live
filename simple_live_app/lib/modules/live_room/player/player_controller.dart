@@ -947,7 +947,12 @@ mixin PlayerMixin {
       }
     }
     await pp.setProperty('video-crop', t.crop);
-    await pp.setProperty('video-aspect-override', t.aspect.toStringAsFixed(6));
+    // ② P4/D0（复验-b 裁定 T2）：`video-aspect-override` 不复写计算出的 16:9——
+    // 对带补边源它被 mpv 折算成未裁切帧的 PAR=1.0074 → 裁切区显示尺寸膨胀 3868x2160
+    // → contain-fit x 卡 → 上下各 8px 黑边（黑边制造者）。恒写 "no"（=mpv 默认 -2.0，
+    // PAR 回 1:1 → 裁切区 3840x2160=窗口 → 满窗无黑边无左右条；对 16:9 源 no-op）。
+    // 属性有粘性（上房写过 1.777778 后不写不会复位）→ 每房主动写，含 16:9 源。
+    await pp.setProperty('video-aspect-override', 'no');
     // record 字段不参与 field promotion，先落局部变量再判空（analyze 门禁）。
     final renderSize = t.renderSize;
     if (renderSize != null) {
@@ -976,7 +981,7 @@ mixin PlayerMixin {
       Log.d(
         '[VSR] 已写入底部补边裁切 video-crop=${t.crop}'
         ' scale=${t.scale?.toStringAsFixed(2)}'
-        ' aspect=${t.aspect.toStringAsFixed(6)}'
+        ' aspectOverride=no（复位 PAR=1:1；面板比例 ${t.aspect.toStringAsFixed(6)}）'
         ' renderSize=${t.renderSize?.$1}x${t.renderSize?.$2}'
         '（源 ${player.state.width}x${player.state.height}）',
       );
@@ -1335,7 +1340,13 @@ mixin PlayerStateMixin on PlayerMixin {
     var boxFit = BoxFit.contain;
     double? aspectRatio;
     if (player.state.width != null && player.state.height != null) {
-      aspectRatio = player.state.width! / player.state.height!;
+      // ② P4/D0（复验-b）：state.width/height 是 dw/dh（会被 aspect 撑宽）。D0 起
+      // mpv 侧 aspect 复位 "no" → dw/dh=1.7647（带补边源）≠ 纹理 16:9 → 用户切
+      // 「画面尺寸→适应」按错误比例夹框会出现 ~0.7% 左右细条。改用面板折算比例：
+      // _panelAspectSize 在非 Windows / 缓存空时原样返回（行为不变），VSR 生效时
+      // 返回与面板一致的 (h*a, h) → 夹框比例与面板宽同源、细条消除。
+      final ps = _panelAspectSize(player.state.width, player.state.height);
+      aspectRatio = ps.$1 / ps.$2;
     }
 
     if (AppSettingsController.instance.scaleMode.value == 0) {
