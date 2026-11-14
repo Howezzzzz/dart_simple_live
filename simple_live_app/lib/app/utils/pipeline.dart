@@ -125,6 +125,8 @@ class PipelineVsrIntent {
   });
 
   /// 动作标签：
+  /// - 'size-unknown'：源尺寸未知（0/负）——controller 的 _syncRtxVsrCrop 此时**早退不动作**，
+  ///   diff 如实标记（避免把 rtxVsrPlan 对未知尺寸返回的 applied:false 误描述成 remove-vf，R1V-1）；
   /// - 'deferred'：门控期聚合（不写，等放行单次写——diff 只描述不驱动）；
   /// - 'set-vf'：期望写链；
   /// - 'remove-vf'：期望摘链；
@@ -246,21 +248,33 @@ PipelineChange pipelineDiff(PipelineDesired desired, PipelineApplied applied) {
   // --- vsr 侧 ---
   PipelineVsrIntent? vsrIntent;
   if (desired.isWindows) {
-    // plan 重算：enabled 用已应用链状态（与 _syncRtxVsrCrop 同输入同公式，
-    // 保证镜像一致）。
-    final plan = rtxVsrPlan(
-      enabled: applied.rtxVsrChainApplied,
-      areaW: desired.areaW,
-      areaH: desired.areaH,
-      srcW: desired.srcW,
-      srcH: desired.srcH,
-    );
-    vsrIntent = _vsrIntentFrom(
-      isWindows: desired.isWindows,
-      gateArmed: applied.gateArmed,
-      plan: plan,
-      applied: applied,
-    );
+    // 与 _syncRtxVsrCrop 对齐：源尺寸未知（0/负）时 controller **早退不动作**——
+    // diff 如实标记 size-unknown（R1V-1：若交由 rtxVsrPlan 计算会把未知尺寸的
+    // applied:false 误描述成 remove-vf，而实际没有摘链动作）。
+    if (desired.srcW <= 0 || desired.srcH <= 0) {
+      vsrIntent = PipelineVsrIntent(
+        action: 'size-unknown',
+        scale: null,
+        crop: applied.vsrDesiredCrop,
+        chain: applied.rtxVsrChainApplied,
+      );
+    } else {
+      // plan 重算：enabled 用已应用链状态（与 _syncRtxVsrCrop 同输入同公式，
+      // 保证镜像一致）。
+      final plan = rtxVsrPlan(
+        enabled: applied.rtxVsrChainApplied,
+        areaW: desired.areaW,
+        areaH: desired.areaH,
+        srcW: desired.srcW,
+        srcH: desired.srcH,
+      );
+      vsrIntent = _vsrIntentFrom(
+        isWindows: desired.isWindows,
+        gateArmed: applied.gateArmed,
+        plan: plan,
+        applied: applied,
+      );
+    }
   }
 
   return PipelineChange(normAction: normAction, normEnable: normEnable, vsrIntent: vsrIntent);

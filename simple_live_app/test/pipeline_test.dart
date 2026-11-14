@@ -172,6 +172,24 @@ void main() {
       expect(c.vsrIntent!.action, 'set-vf');
       expect(c.vsrIntent!.scale, rtxVsrScale);
     });
+
+    test('源尺寸未知（srcW=0）→ size-unknown（对齐 controller 早退，R1V-1）', () {
+      final c = pipelineDiff(
+        desired(srcW: 0, srcH: 544, normOn: false),
+        applied(chain: true, scale: 2.0, crop: ''),
+      );
+      expect(c.vsrIntent!.action, 'size-unknown');
+      expect(c.vsrIntent!.chain, true);
+      expect(c.vsrIntent!.scale == null, true);
+    });
+
+    test('源尺寸未知（srcH=0）→ size-unknown（不误报 remove-vf）', () {
+      final c = pipelineDiff(
+        desired(srcW: 960, srcH: 0, normOn: false),
+        applied(chain: true, scale: 2.0, crop: 'OLD'),
+      );
+      expect(c.vsrIntent!.action, 'size-unknown');
+    });
   });
 
   group('serializeApplied（组件展开，FV3-3）', () {
