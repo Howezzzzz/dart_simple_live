@@ -2290,6 +2290,7 @@ class PlayerController extends BaseController
     Log.d('[APPLY-diff] source=$source diff: norm=$r1ChangeNote'
         ' vsr=${r1Change.vsrIntent?.action ?? "-"}'
         '${r1Change.vsrIntent?.deferred ?? false ? ' (deferred)' : ''}'
+        ' gateApplicable=${r1Desired.vsrGateApplicable}'
         ' | ${serializeApplied(r1Desired, r1Applied)}');
     if (norm) {
       await _syncVolumeNorm();

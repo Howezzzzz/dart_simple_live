@@ -150,6 +150,18 @@ void main() {
       expect(c.vsrIntent!.scale != null, true);
     });
 
+    test('remove-vf 臂（vfAction clear 镜像，FV4-4）', () {
+      // 构造：非门控 + plan.applied=false（chain=false）+ currentScale 非空 → vfAction 'clear'
+      // → remove-vf。生产可达场景：VSR 关时链仍挂（摘链路径），diff 如实描述。
+      final c = pipelineDiff(
+        desired(srcW: 960, srcH: 544, normOn: false, areaW: 1920, areaH: 1080),
+        applied(chain: false, scale: 2.0, crop: 'OLD'),
+      );
+      expect(c.vsrIntent!.action, 'remove-vf');
+      expect(c.vsrIntent!.chain, false);
+      expect(c.vsrIntent!.scale == null, true);
+    });
+
     test('非门控 + 链关但 plan 认为应挂（由于 enabled 传递链状态）→ none（镜像同源）', () {
       // enabled 用 applied.chain（false）→ plan.applied=false → 期望不挂 → none。
       // 这验证「diff 用链状态而非用户开关当 enabled」（与 _syncRtxVsrCrop 同源）。

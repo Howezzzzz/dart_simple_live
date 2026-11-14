@@ -193,7 +193,8 @@ PipelineVsrIntent? _vsrIntentFrom({
       chain: plan.applied,
     );
   }
-  if (vfAction == 'remove') {
+  if (vfAction == 'clear') {
+    // rtxVsrVfAction 返回约定：'none'|'set'|'clear'（clear=摘链）——修正镜像臂名（FV4-4 用例捕获）。
     return PipelineVsrIntent(
       action: 'remove-vf',
       scale: null,
