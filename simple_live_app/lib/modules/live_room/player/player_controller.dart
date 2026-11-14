@@ -24,6 +24,7 @@ import 'package:simple_live_app/app/log.dart';
 import 'package:simple_live_app/app/utils.dart';
 import 'package:simple_live_app/app/utils/panel_width.dart';
 import 'package:simple_live_app/app/utils/ready_gate.dart';
+import 'package:simple_live_app/app/utils/pipeline.dart';
 import 'package:simple_live_app/app/utils/rtx_vsr_crop.dart';
 import 'package:simple_live_app/app/utils/serial_queue.dart';
 import 'package:simple_live_app/app/utils/volume_norm.dart';
@@ -2227,6 +2228,39 @@ class PlayerController extends BaseController
   }
 
   /// 统一「管线应用」入口（P2-2 / 方案 §三 C3）：把**外部**变化（拨开关等）收敛到一个入口，
+  /// R1（C3·纯增量）：聚合已应用态——**即时聚合视图**（每次从现字段构造、不复制存储，实施卡 §三/FV3-4）。
+  /// 只读、无副作用；字段与 §二 状态字段一一对应（PARITY 锚点见实施卡 §五.2 映射表）。
+  PipelineApplied _aggregateApplied() => PipelineApplied(
+        volumeNormApplied: _volumeNormApplied,
+        rtxVsrChainApplied: _rtxVsrChainApplied,
+        lastRtxVsrScale: _lastRtxVsrScale,
+        vsrDesiredCrop: _vsrDesiredCrop,
+        vsrDisplayAspect: _vsrDisplayAspect,
+        lastRtxVsrSignature: _lastRtxVsrSignature,
+        gateArmed: _vsrDeferPlay,
+      );
+
+  /// R1（C3·纯增量）：构造期望态——只读开关/能力/播放器事实，与 pc.dart 决策路径同源
+  /// （镜像层，非独立期望源）。`_trueSourceSize` 取自 player.state（中枢入口已有
+  /// `_playerDisposed` 早退）；area 门控同 `_syncRtxVsrCrop`（仅链已应用时取），
+  /// `_playerAreaPhysicalSize` 自带 try-catch 安全网（队列外调用有 `_diagSnapshot` 先例）。
+  PipelineDesired _buildDesired() {
+    final (srcW, srcH) = _trueSourceSize();
+    final chainApplied = _rtxVsrChainApplied;
+    final area = chainApplied ? _playerAreaPhysicalSize() : null;
+    return PipelineDesired(
+      volumeNormUserOn: AppSettingsController.instance.volumeNorm.value,
+      vsrUserOn: AppSettingsController.instance.enableRtxVsr.value,
+      isWindows: Platform.isWindows,
+      srcW: srcW,
+      srcH: srcH,
+      areaW: area?.$1,
+      areaH: area?.$2,
+      afLoudnormSupported: PlayerMixin.afLoudnormSupported,
+      vsrGateApplicable: _vsrGateApplicable,
+    );
+  }
+
   /// 统一留痕 `[APPLY] source=`（期望态 vs 已应用态）。
   ///
   /// 设计取舍（守既有语义，不重写已验证逻辑）：
@@ -2244,6 +2278,19 @@ class PlayerController extends BaseController
         '（已挂=$_volumeNormApplied 能力=${PlayerMixin.afLoudnormSupported}）'
         ' VSR=${Platform.isWindows && AppSettingsController.instance.enableRtxVsr.value}'
         '（链=$_rtxVsrChainApplied scale=${_lastRtxVsrScale?.toStringAsFixed(2) ?? "-"}）');
+    // R1（C3·纯增量）：期望/已应用聚合 → 纯 diff 留痕。
+    // [APPLY-diff] 为新增行，不影响现有 [APPLY] 行格式；**仅描述不驱动**——
+    // 不做任何短路/跳过，委派保持无条件（实施卡 §三 三条例证）。
+    final r1Desired = _buildDesired();
+    final r1Applied = _aggregateApplied();
+    final r1Change = pipelineDiff(r1Desired, r1Applied);
+    final r1ChangeNote = r1Change.normEnable == null
+        ? '${r1Change.normAction.name}'
+        : '${r1Change.normAction.name}(enable=${r1Change.normEnable})';
+    Log.d('[APPLY-diff] source=$source diff: norm=$r1ChangeNote'
+        ' vsr=${r1Change.vsrIntent?.action ?? "-"}'
+        '${r1Change.vsrIntent?.deferred ?? false ? ' (deferred)' : ''}'
+        ' | ${serializeApplied(r1Desired, r1Applied)}');
     if (norm) {
       await _syncVolumeNorm();
     }
