@@ -151,9 +151,15 @@ class PipelineChange {
   final bool? normEnable;
   final PipelineVsrIntent? vsrIntent;
 
-  /// 快判「什么都不用做」（仅供日志读感，**不用于跳过分派**）。
+  /// 快判「无实质变更意图」（仅供日志读感，**不用于跳过分派**）。
+  ///
+  /// vsr 侧 'none'（与已应用一致）与 'size-unknown'（尺寸未知不动作）均视为无事——
+  /// 修复 A6V-2：原实现 Windows 下 vsrIntent 恒非空 → isEmpty 恒 false，读感失真。
   bool get isEmpty =>
-      normAction == VolumeNormAction.none && vsrIntent == null;
+      normAction == VolumeNormAction.none &&
+      (vsrIntent == null ||
+          vsrIntent!.action == 'none' ||
+          vsrIntent!.action == 'size-unknown');
 }
 
 /// 计算 vsr 期望意图（纯函数）。

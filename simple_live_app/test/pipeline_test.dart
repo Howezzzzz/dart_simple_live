@@ -162,6 +162,65 @@ void main() {
       expect(c.vsrIntent!.scale == null, true);
     });
 
+    test('负尺寸边界：srcW<0/srcH<0 → size-unknown（≥=0 同界，FV4 #2）', () {
+      final c1 = pipelineDiff(
+        desired(srcW: -1, srcH: 544, normOn: false),
+        applied(chain: true, scale: 2.0),
+      );
+      expect(c1.vsrIntent!.action, 'size-unknown');
+      final c2 = pipelineDiff(
+        desired(srcW: 960, srcH: -2, normOn: false),
+        applied(chain: true, scale: 2.0),
+      );
+      expect(c2.vsrIntent!.action, 'size-unknown');
+    });
+
+    test('非 Windows ∧ srcW=0 → vsrIntent null（锁 isWindows 优先级，FV4 #3）', () {
+      final c = pipelineDiff(
+        desired(isWindows: false, srcW: 0, srcH: 544, normOn: false),
+        applied(chain: true, scale: 2.0),
+      );
+      expect(c.vsrIntent == null, true);
+    });
+
+    test('gateArmed ∧ srcW=0 → size-unknown 而非 deferred（顺序锁，FV4 #4）', () {
+      // 与 controller 对齐：尺寸检查先于门控（pc L837 早退在门控分支之前）。
+      final c = pipelineDiff(
+        desired(srcW: 0, srcH: 544, normOn: false),
+        applied(chain: true, scale: 2.0, gateArmed: true),
+      );
+      expect(c.vsrIntent!.action, 'size-unknown');
+      expect(c.vsrIntent!.deferred, false);
+    });
+
+    test('vsrUserOn=false ∧ chain=true → plan.enabled 仍 true（镜用链状态，FV4 #5）', () {
+      // 镜像语义锁：diff 的 plan enabled 用链状态而非用户开关（同 _syncRtxVsrCrop）。
+      // 链叉=开关关态（生产可达：初始化预_btn置）→ plan 仍按「开」算 scale。
+      final c = pipelineDiff(
+        desired(srcW: 960, srcH: 544, vsrOn: false, normOn: false, areaW: 1920, areaH: 1080),
+        applied(chain: true, scale: null, crop: ''),
+      );
+      // chain=true → plan.enabled=true → 计算 scale 非空 → vfAction 'set'
+      expect(c.vsrIntent!.action, 'set-vf');
+      expect(c.vsrIntent!.scale != null, true);
+    });
+
+    test('deferred 意图载荷与 plan 一致（FV4 #6）', () {
+      final c = pipelineDiff(
+        desired(srcW: 960, srcH: 544, normOn: false, areaW: 1920, areaH: 1080),
+        applied(chain: true, scale: null, gateArmed: true),
+      );
+      expect(c.vsrIntent!.action, 'deferred');
+      expect(c.vsrIntent!.deferred, true);
+      // 载荷 = plan 的 scale/crop/chain（门控期仍按已应用链状态算 plan）
+      final plan = rtxVsrPlan(
+        enabled: true, areaW: 1920, areaH: 1080, srcW: 960, srcH: 544,
+      );
+      expect(c.vsrIntent!.scale, plan.scale);
+      expect(c.vsrIntent!.crop, plan.crop);
+      expect(c.vsrIntent!.chain, plan.applied);
+    });
+
     test('非门控 + 链关但 plan 认为应挂（由于 enabled 传递链状态）→ none（镜像同源）', () {
       // enabled 用 applied.chain（false）→ plan.applied=false → 期望不挂 → none。
       // 这验证「diff 用链状态而非用户开关当 enabled」（与 _syncRtxVsrCrop 同源）。
@@ -250,8 +309,8 @@ void main() {
     });
   });
 
-  group('isEmpty（仅日志读感，不用于短路）', () {
-    test('norm none + vsrIntent null → isEmpty', () {
+  group('isEmpty（仅日志读感，不用于短路；A6V-2：none/size-unknown 视为无事）', () {
+    test('norm none + vsrIntent null（非 Windows）→ isEmpty', () {
       final c = pipelineDiff(desired(isWindows: false, normOn: false), applied());
       // 用户关 ∧ 未挂 → none；非 Windows → vsr null
       expect(c.isEmpty, true);
@@ -260,6 +319,25 @@ void main() {
     test('非空场景回 false', () {
       final c = pipelineDiff(desired(normOn: true), applied());
       expect(c.isEmpty, false);
+    });
+
+    test('Windows + vsr none（链/裁切全同）→ isEmpty true（不再恒 false，A6V-2）', () {
+      final c = pipelineDiff(
+        desired(srcW: 960, srcH: 544, normOn: false, areaW: 1920, areaH: 1080),
+        applied(chain: false, scale: null, crop: ''),
+      );
+      // plan(enabled=false).applied=false → vfAction(enable=false, scale=null, currentScale=null) → 'none'
+      // crop ''=='' → none → isEmpty true
+      expect(c.vsrIntent!.action, 'none');
+      expect(c.isEmpty, true);
+    });
+
+    test('size-unknown → isEmpty true（尺寸未知=无事，A6V-2）', () {
+      final c = pipelineDiff(
+        desired(srcW: 0, srcH: 544, normOn: false),
+        applied(chain: true, scale: 2.0),
+      );
+      expect(c.isEmpty, true);
     });
   });
 }
