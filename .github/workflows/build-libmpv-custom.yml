@@ -37,7 +37,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 350
     container:
-      image: docker://ghcr.io/shinchiro/archlinux@sha256:f531a32ce7b58411385c29ca307b0366b919effb5e1a5fe12028c2cdf09ab2be  # 钉 11-11 成功那次（浮动 latest 曾更新致 openal-soft 构建确定性红）
+      image: docker://ghcr.io/shinchiro/archlinux:latest
     env:
       CACHE_PREFIX: slive-vnorm-v1
       BUILD_REPO: Predidit/libmpv-win32-video-cmake
@@ -192,6 +192,23 @@ jobs:
           PATCH
           echo "--- injected patch head ---"; head -6 packages/ffmpeg-0002-loudnorm-global-seed.patch
           test -s packages/ffmpeg-0002-loudnorm-global-seed.patch || { echo "::error::patch empty"; exit 1; }
+
+      - name: Pin openal-soft source (floating -> 11-11 good commit)
+        run: |
+          python3 - <<'PY'
+          import sys
+          p = "packages/openal-soft.cmake"
+          s = open(p, encoding="utf-8").read()
+          anchor = "    GIT_REPOSITORY https://github.com/kcat/openal-soft.git\n"
+          if s.count(anchor) != 1:
+              sys.exit(f"ERROR: openal anchor not unique ({s.count(anchor)})")
+          if "GIT_TAG" in s:
+              sys.exit("ERROR: openal-soft.cmake already has GIT_TAG; aborting to avoid mis-pin")
+          s = s.replace(anchor, anchor + "    GIT_TAG cf441a6996e54f314db113fa46055ceb943326bd\n", 1)
+          open(p, "w", encoding="utf-8").write(s)
+          print("pinned openal-soft")
+          PY
+          grep -n "GIT_TAG" packages/openal-soft.cmake
 
       # 2026-11-10：若干上游包用浮动分支（GIT_TAG main）自带补丁，上游前进后补丁上下文失配 → 包的 patch 步骤红。
       # 已触发：fontconfig（gitlab，git am --3way 因 tree:0 替身克隆取不到基线 blob）、libvpl（github，git apply 硬失败）。
