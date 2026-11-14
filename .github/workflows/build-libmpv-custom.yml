@@ -327,6 +327,7 @@ jobs:
         run: |
           sha=$(sha256sum "release_x86_64/${CUSTOM_LIBMPV_NAME}" | awk '{print $1}')
           echo "CUSTOM_bundles.windows_x64=$sha" >> "$GITHUB_ENV"
+          echo "CUSTOM_LIBMPV_SHA256=$sha" >> "$GITHUB_ENV"   # 修上游 bug：release 步读的是这个名字
           {
             echo "## Custom libmpv (stage 2/2) built"
             echo
