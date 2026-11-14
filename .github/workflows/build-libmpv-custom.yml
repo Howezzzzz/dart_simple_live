@@ -37,7 +37,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 350
     container:
-      image: docker://ghcr.io/shinchiro/archlinux:latest
+      image: docker://ghcr.io/shinchiro/archlinux@sha256:f531a32ce7b58411385c29ca307b0366b919effb5e1a5fe12028c2cdf09ab2be  # 钉 11-11 成功那次（浮动 latest 曾更新致 openal-soft 构建确定性红）
     env:
       CACHE_PREFIX: slive-vnorm-v1
       BUILD_REPO: Predidit/libmpv-win32-video-cmake
@@ -265,7 +265,7 @@ jobs:
       - name: Build mpv
         run: |
           ninja -C build_x86_64 update
-          ninja -C build_x86_64 mpv
+          ninja -C build_x86_64 mpv || { echo "::group::stamp build logs (tail)"; for f in build_x86_64/packages/*-prefix/src/*-stamp/*-build-*.log build_x86_64/packages/*-prefix/src/*-stamp/*-build.log; do [ -f "$f" ] && { echo "===== $f ====="; tail -80 "$f"; }; done; echo "::endgroup::"; exit 1; }
 
       # 用 Python 字节匹配（CI 容器的 strings 实测对 PE 匹配不可靠，曾把好产物误判）。
       # 取最大的 libmpv-2.dll（真身），并带对照项与候选清单。
