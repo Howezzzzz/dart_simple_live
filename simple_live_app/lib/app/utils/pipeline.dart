@@ -92,7 +92,7 @@ class PipelineApplied {
   /// vsr：面板显示比例缓存（VSR 生效时非空；C5 面板宽一次到位）。
   final double? vsrDisplayAspect;
 
-  /// vsr：去重签名（scale|crop|源尺寸|链状态 拼接；10 处使用点，R4 枚举样本）。
+  /// vsr：去重签名（scale|crop|源尺寸|链状态 拼接；11 处使用点——f4277c5 基线 10 处 + R1 聚合视图只读引用 1 处，R4 枚举样本）。
   final String? lastRtxVsrSignature;
 
   /// 门控态：起播门控是否武装（_vsrDeferPlay）。
