@@ -36,8 +36,8 @@
       "library": "libmpv-2.dll"
     },
     "windows_x64": {
-      "url": "https://github.com/Howezzzzz/dart_simple_live/releases/download/libmpv-custom-v4/mpv-dev-x86_64-slive-custom.7z",
-      "sha256": "99898dc1e21ab9235b43aa64b8398b8bc738a7d6326080a9c0c3631de2c919d3",
+      "url": "https://github.com/Howezzzzz/dart_simple_live/releases/download/libmpv-custom-v4-loudnorm-v2/mpv-dev-x86_64-slive-custom.7z",
+      "sha256": "7eeb4ced8c9824f6ec0bc2b0083420a5751717db406b0eccc510f1190a9d9a00",
       "format": "7z",
       "library": "libmpv-2.dll"
     },
