@@ -764,6 +764,53 @@ mixin PlayerMixin {
     return (player.state.width ?? 0, player.state.height ?? 0);
   }
 
+  // ===== v3 诊断（1.08.75 · 行为零改动，仅打点；用于定位「稳态黑边」的陈旧比例）=====
+
+  /// 是否已订阅 `video-out-params`（防重复订阅）。
+  bool _geomObserving = false;
+
+  /// 是否已启动几何轮询。
+  bool _geomPolling = false;
+
+  /// 抓一次几何快照（**只读**：getProperty + widget/窗口尺寸 + 面板宽）。
+  Future<void> _logGeom(String tag) async {
+    try {
+      final pp = player.platform;
+      if (pp is! NativePlayer) {
+        Log.d('[GEOM] $tag platform≠NativePlayer');
+        return;
+      }
+      final vp = await pp.getProperty('video-params');
+      final vout = await pp.getProperty('video-out-params');
+      final crop = await pp.getProperty('video-crop');
+      final ao = await pp.getProperty('video-aspect-override');
+      final ctx = globalPlayerKey.currentContext;
+      final cs = ctx?.size;
+      final panel = AppSettingsController.instance.messagePanelWidth.value;
+      Log.d('[GEOM] $tag'
+          ' mpv{vp=$vp out=$vout dw=${player.state.width}x${player.state.height}'
+          ' crop="$crop" ao=$ao}'
+          ' flutter{widget=${cs?.width.toStringAsFixed(1)}x${cs?.height.toStringAsFixed(1)}'
+          ' panel=$panel vsrAspect=${_vsrDisplayAspect?.toStringAsFixed(4) ?? "-"}}');
+    } catch (e) {
+      Log.d('[GEOM] $tag 取样异常: $e');
+    }
+  }
+
+  /// 每 5s 抓一次稳态几何（自续期；`_playerDisposed` 即停）。
+  void _startGeomPoller() {
+    if (_geomPolling) return;
+    _geomPolling = true;
+    Future.delayed(const Duration(seconds: 5), () {
+      if (_playerDisposed) {
+        _geomPolling = false;
+        return;
+      }
+      unawaited(_logGeom('poll'));
+      _startGeomPoller();
+    });
+  }
+
   /// ② P3/C5：面板用的宽高——VSR 生效时按**终态显示比例**折算（一次到位），否则原样。
   /// 门控＝Windows ∧ `_vsrDisplayAspect` 非空（VSR 关 / 安卓天然不命中）。
   (int, int) _panelAspectSize(int? w, int? h) {
@@ -2146,7 +2193,19 @@ class PlayerController extends BaseController
         _volumeNormLogFailure = true;
       }
     });
+    // v3 诊断（1.08.75 · 行为零改动）：订阅 VO 侧输出尺寸 + 启动 5s 几何轮询。
+    if (!_geomObserving && player.platform is NativePlayer) {
+      _geomObserving = true;
+      final np = player.platform as NativePlayer;
+      unawaited(np
+          .observeProperty('video-out-params',
+              (v) async => Log.d('[GEOM] event video-out-params=$v'))
+          .catchError((e) => Log.d('[GEOM] observeProperty(video-out-params) 失败: $e')));
+    }
+    _startGeomPoller();
     _widthSubscription = player.stream.width.listen((event) {
+      // v3 诊断：尺寸事件是「稳态黑边」定位的关键时点。
+      unawaited(_logGeom('size-event w=$event'));
       Log.d('width:$event  W:${(player.state.width)}  H:${(player.state.height)}');
       // 源尺寸被重置（open/stop 后 media_kit 会发 null）→ 作废去重签名：
       // 否则新流尺寸与上次完全相同时签名相同→短路→链不纠正、起播门控只靠超时放开（复核发现）。
@@ -2568,6 +2627,7 @@ class PlayerController extends BaseController
     final pp = player.platform;
     if (pp is! NativePlayer) return;
     final enabled = AppSettingsController.instance.enableRtxVsr.value;
+    unawaited(_logGeom('toggle-vsr-entry user=$enabled'));
     _rtxVsrChainApplied = enabled;
     // 强制重算（开关变化必须重挂/摘链）。
     _lastRtxVsrSignature = null;
@@ -2590,6 +2650,7 @@ class PlayerController extends BaseController
     } catch (e) {
       Log.d('[VSR] 热切换失败: $e');
     }
+    unawaited(_logGeom('toggle-vsr-write-done user=$enabled'));
     if (releaseGateAfterSync) {
       Log.d('[VSR] 门控期间热关 VSR → 摘链后放行起播');
       unawaited(_releaseVsrDeferPlay('vsr-off'));
