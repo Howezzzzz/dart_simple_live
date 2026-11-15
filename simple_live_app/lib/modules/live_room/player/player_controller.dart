@@ -2013,7 +2013,7 @@ class PlayerController extends BaseController
       // 门控期「先摘链、后放行」）仍由 `_applyRtxVsrSetting` 承担——故本 worker
       // 仍经它进入，不换成纯委派调用。
       // [APPLY] 留痕随 R2 收口进中枢（原散点 `source=toggle-vsr on=$on` 移除；
-      // on= 语义由中枢期望行 `VSR=<值>` 覆盖，见实施卡 §四 R2 / §五.2 豁免声明）。
+      // on= 语义由中枢期望行 `VSR=<值>` 覆盖，见实施卡 §四 R2 验收·日志对照豁免声明）。
       _applyRtxVsrSetting();
       Future.delayed(const Duration(seconds: 2), () {
         if (!_playerDisposed) _diagSnapshot('拨VSR后+2s');
@@ -2583,7 +2583,7 @@ class PlayerController extends BaseController
       // C3·R2：写链委派中枢（原直调 `_syncRtxVsrCrop(trigger: 'toggle')`）。
       // trigger 仅用于日志、无分支判定（RV-6 实证）→ source='toggle-vsr' 行为等价。
       // 中枢内为无条件委派、不短路（实施卡 §三）；norm 侧不涉及故传 false。
-      // 日志注记：本路径在委派前已预置 `_rtxVsrChainApplied`（L2565 既有语义），
+      // 日志注记：本路径在委派前已预置 `_rtxVsrChainApplied`（函数开头的既有预置，非本次新增），
       // 故中枢期望行的「链=」是**目标链状态**而非实际已挂状态；实际结果由中枢
       // 同步后的结果行如实输出（与 pipelineDiff 的 plan 入参同源，镜像不失真）。
       await applyPipelineChange('toggle-vsr', norm: false, vsr: true);
