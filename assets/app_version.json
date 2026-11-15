@@ -1,15 +1,15 @@
 {
-    "version": "1.08.75",
-    "version_num": 1008075,
-    "version_desc": "- 内部：新增 VSR 显示几何诊断日志（`[GEOM]`）——用于定位「切换 RTX VSR 后画面出现持续黑边」；本版仅加诊断，行为与 1.08.74 完全一致\n- 说明：诊断版，不含功能或行为变更；复测黑边时请保留日志",
+    "version": "1.08.76",
+    "version_num": 1008076,
+    "version_desc": "- 修复：**切换 RTX VSR 后画面出现持续黑边**——VSR 开关切换不会触发播放器尺寸事件，导致右侧面板/播放区几何仍按旧比例计算；现改为在 VSR 写链完成后按目标显示比例（开=超分 16:9、关=源比例）立即刷新面板几何，开关\n- 说明：本版修复 1.08.75 诊断版定位的黑边根因；请复测「房内开/关 VSR」「开着/不开 VSR 进房」「进房后立刻关 VSR（门控期热关）」四场景，开关后黑边应消失或不再持续",
     "prerelease": true,
     "download_url": "https://github.com/Howezzzzz/dart_simple_live/releases",
     "download_urls": {
-        "android": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.75/app-arm64-v8a-release.apk",
-        "windows": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.75/Slive-1.08.75+1008075-windows-setup.exe",
-        "macos": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.75/simple_live_app-1.08.75+1008075-macos.dmg",
-        "linux": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.75/Slive-x86_64-linux.deb",
-        "linux_flatpak": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.75/Slive-x86_64.flatpak"
+        "android": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.76/app-arm64-v8a-release.apk",
+        "windows": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.76/Slive-1.08.76+1008076-windows-setup.exe",
+        "macos": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.76/simple_live_app-1.08.76+1008076-macos.dmg",
+        "linux": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.76/Slive-x86_64-linux.deb",
+        "linux_flatpak": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.76/Slive-x86_64.flatpak"
     },
     "mirror_prefixes": [
         "https://gh-proxy.com/",
@@ -17,10 +17,10 @@
         "https://ghproxy.cc/"
     ],
     "download_sha256": {
-        "android": "b3d34e7657feff708d4d86e5c56d6bda30707d0d39524b01b345b0cd7f6068c4",
-        "windows": "ef6a98739a03cdd1f1bd9eb9ad80438a6945842f7a2a596c4f40823afa0e20e6",
-        "macos": "0b86ac8bd409f8f4e1de9e5d26332d5da9b2545e123f9709054d49aaca2a8f89",
-        "linux": "5312a483f69796b664c718ee1d70a373ae7014dcd0d5f88c0342758ea221791e",
-        "linux_flatpak": "3ec6b0de903b7f36bb0154330cc434283ea21f7553966681539bd3679d22af91"
+        "android": "1ddec9a2fe571a29fd2002483d7b869c664ed5f6329fe09710d7075082fd58d1",
+        "windows": "daf10f67018b0e7bde2ba70b81dc805ab135a96014feea7b9abfa674bdb6f033",
+        "macos": "8da4efdd03a35d23b0fc6c5c22eb2d8a2947bc353299e8dcf0267be4cff17b57",
+        "linux": "7a1f5662c2822b7a23014d7da7ed4ec53a4de978f1e4cea3d5b51d367f4c9871",
+        "linux_flatpak": "3ff113e9c7a591f0ef6b43f0b7385bdae79db0f4e330563df62a41b9dc35df24"
     }
 }
