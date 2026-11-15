@@ -1028,6 +1028,17 @@ mixin PlayerMixin {
     }
     _lastRtxVsrSignature = t.signature;
     _tlMark('链就绪');
+    // 1.08.76 几何修复（EV-464 根因）：VSR 切换不产生尺寸事件 → 面板几何（videoWidthRx/
+    // videoHeightRx）滞留旧比例 → 持续黑边。写链完成（签名回填后）按**目标显示比例**刷新
+    // 这对 Rx：VSR 开 = t.aspect（16:9 折算）、关 = srcW/srcH（源比，plan.aspect 恒非空
+    // 回退）——开/关两方向通吃。必须放在 crop 空早退（L1031）**之前**：关方向 crop=''
+    // 在此 return，放函数尾会漏关方向。用 t.aspect 而非 `_vsrDisplayAspect`（关时已置
+    // null，且它是全局态、队列在途时可能已被后续 sync 更新）。锁内同步赋值、页面 Obx
+    // 只读 Rx → 无死锁；不碰 busy/readyGate/pipeline/留痕（零外溢门禁）。
+    if (Platform.isWindows && t.rawH > 0) {
+      videoWidthRx.value = (t.rawH * t.aspect).round();
+      videoHeightRx.value = t.rawH;
+    }
     if (t.crop.isEmpty) return;
     // 回读校验（参考音量均衡 af 的做法）：media_kit 的 setProperty 不返回错误，
     // 属性缺失/语法级拒绝时会静默失败 → 回读一次让失败可见（RISK-58）。
@@ -1174,6 +1185,17 @@ mixin PlayerMixin {
           if (pp is NativePlayer) {
             await pp.setProperty('vf', '');
             _lastRtxVsrScale = null;
+            // 1.08.76 几何修复（次点）：此路径不经 `_applyVsrTargetUnlocked`、摘链不产
+            // 尺寸事件（日志「无尺寸事件，sync 未写」）→ 门控期热关（T6-③）摘链后同样
+            // 刷新面板几何回**源比例**（VSR 已关；经 `_panelAspectSize`，此时
+            // `_vsrDisplayAspect`=null → 原样返回源尺寸）。state 未知（0/null）时跳过，
+            // 首个尺寸事件自愈（落地门禁②守卫）。
+            final (geomW, geomH) =
+                _panelAspectSize(player.state.width, player.state.height);
+            if (Platform.isWindows && geomW > 0 && geomH > 0) {
+              videoWidthRx.value = geomW;
+              videoHeightRx.value = geomH;
+            }
             Log.d('[VSR] 门控 vsr-off 兜底摘链 #${++_vsrChainWriteCount}（无尺寸事件，sync 未写）');
           }
         });
