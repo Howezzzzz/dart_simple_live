@@ -2008,9 +2008,12 @@ class PlayerController extends BaseController
         return;
       }
       Log.d('[DIAG] 操作: VSR → $on');
-      // 注：VSR 热切换不直接走 `applyPipelineChange`——`_applyRtxVsrSetting` 除同步外
-      // 还负责「门控期热关 VSR → 摘链后放行」等，不能换成纯委派入口。
-      Log.d('[APPLY] source=toggle-vsr on=$on');
+      // C3·R2：VSR 热切换的**写链**已委派中枢（`_applyRtxVsrSetting` 内部调
+      // `applyPipelineChange('toggle-vsr', …)`）；编排（预置链状态 / 签名清零 /
+      // 门控期「先摘链、后放行」）仍由 `_applyRtxVsrSetting` 承担——故本 worker
+      // 仍经它进入，不换成纯委派调用。
+      // [APPLY] 留痕随 R2 收口进中枢（原散点 `source=toggle-vsr on=$on` 移除；
+      // on= 语义由中枢期望行 `VSR=<值>` 覆盖，见实施卡 §四 R2 / §五.2 豁免声明）。
       _applyRtxVsrSetting();
       Future.delayed(const Duration(seconds: 2), () {
         if (!_playerDisposed) _diagSnapshot('拨VSR后+2s');
@@ -2557,6 +2560,9 @@ class PlayerController extends BaseController
   /// 重挂/摘除滤镜链会让 mpv 重建 D3D11 链路，期间可能冒 `stream.error` → 被当成
   /// 媒体错误去重拉流/切线路（PR #195 教训）→ 用音量均衡同款抑制窗口兜住。
   /// 不走 250ms 防抖（用户点了要立即生效），串行安全由 `_syncRtxVsrCrop` 内部队列兜底。
+  ///
+  /// C3·R2：**写链**委派统一入口 `applyPipelineChange`（中枢留痕 + 无条件委派）；
+  /// 本函数的编排职责与判据（链状态预置 / 签名清零 / 门控期先摘链后放行）一字不变。
   Future<void> _applyRtxVsrSetting() async {
     if (_playerDisposed || !Platform.isWindows) return;
     final pp = player.platform;
@@ -2574,7 +2580,13 @@ class PlayerController extends BaseController
     // 在决定动作前清空会导致关闭时永不摘链→绿条复现（阶段4 复核 P0）。
     // hwdec 与错误抑制由 `_syncRtxVsrCrop` 内部统一处理。
     try {
-      await _syncRtxVsrCrop(trigger: 'toggle');
+      // C3·R2：写链委派中枢（原直调 `_syncRtxVsrCrop(trigger: 'toggle')`）。
+      // trigger 仅用于日志、无分支判定（RV-6 实证）→ source='toggle-vsr' 行为等价。
+      // 中枢内为无条件委派、不短路（实施卡 §三）；norm 侧不涉及故传 false。
+      // 日志注记：本路径在委派前已预置 `_rtxVsrChainApplied`（L2565 既有语义），
+      // 故中枢期望行的「链=」是**目标链状态**而非实际已挂状态；实际结果由中枢
+      // 同步后的结果行如实输出（与 pipelineDiff 的 plan 入参同源，镜像不失真）。
+      await applyPipelineChange('toggle-vsr', norm: false, vsr: true);
     } catch (e) {
       Log.d('[VSR] 热切换失败: $e');
     }
