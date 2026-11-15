@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'package:auto_orientation_v2/auto_orientation_v2.dart';
 import 'package:device_info_plus/device_info_plus.dart';
@@ -207,6 +208,8 @@ mixin PlayerMixin {
     _vsrDisplayAspect = null;
     _vsrCropRetryToken++;
     _vsrDesiredCrop = '';
+    // v3.2 g1：代际重置 VO 尺寸缓存（本点在 initializePlayer 内，新源起流后由事件重填）。
+    _resetLastVoutDwh();
     if (!_volumeNormApplied &&
         volumeNormShouldPreApply(
           userOn: AppSettingsController.instance.volumeNorm.value,
@@ -316,6 +319,9 @@ mixin PlayerMixin {
     // 且签名短路后续纠正 → 错裁持续）。
     _vsrCropRetryToken++;
     _vsrDesiredCrop = ''; // 换源即清期望目标（严格更强、零风险；新源必有尺寸事件重设）
+    // v3.2 g1：换线路/重试路径不走 initializePlayer，这里补 VO 缓存代际重置（轮2 W3-a/轮3 X1 直测
+    // 换线路直接 player.open 不经 disposeStream → 此第三点是关键补漏）。
+    _resetLastVoutDwh();
     // 复核（换线路）：open 内部会 stop()，等价一次「重开」——音量均衡的首帧自愈钩子
     // 只在 initializePlayer 里重置过，换线路/重试不走那条路，这里补一次重置。
     // 否则（RISK-71：open 可能清掉链）换线路后均衡会静默丢失，直到下次重初始化。
@@ -744,6 +750,18 @@ mixin PlayerMixin {
   /// 仅「VSR 已生效」时非空；进房重置/退房时清空。
   double? _vsrDisplayAspect;
 
+  /// v3.2：最近一次 VO 输出尺寸（`video-out-params` 的 dw/dh）——面板几何跟随 VO 实测的主源。
+  /// 代际（门禁 g1）：`initializePlayer` / `disposeStream` / `openSourceGated` 三点置空。
+  /// 注：**不设时间戳字段**——可行性验证 W1-a「时间戳仅诊断、禁做新鲜度阈值」；直接无字段
+  /// 从根上杜绝阈值误用，且避免 unused_field 告警。
+  (int, int)? _lastVoutDwh;
+
+  /// v3.2：VO 实测比例应用去抖 timer（120ms，按值变化重置）。
+  Timer? _voutApplierTimer;
+
+  /// v3.2：去抖应用延迟。
+  static const Duration _voutApplierDelay = Duration(milliseconds: 120);
+
   /// ② P2：crop 延迟重写的代际（新进房/重置/换源时自增，旧回调自动作废）。
   int _vsrCropRetryToken = 0;
 
@@ -828,6 +846,55 @@ mixin PlayerMixin {
       return ((h * a).round(), h);
     }
     return (w ?? 0, h ?? 0);
+  }
+
+  /// v3.2：从 `video-out-params` 事件值解析 dw/dh → 更新缓存；**仅当 dw/dh 值变化时**
+  /// 重置 120ms one-shot 去抖 timer（门禁 g4 + 首轮验证 P0：事件是 ~30/s 常态连续流，
+  /// 按条数重置会让 timer 永不触发——只对值变化才有意义）。解析失败跳过该条、
+  /// 缓存保持旧值（30/s 连续流自愈）。**必须纯同步、禁 await 重活**（obs 回调在主
+  /// isolate 的 native event drain 里串行执行，拖住会阻塞全部后续 mpv 事件）。
+  void _updateLastVoutDwh(String raw) {
+    try {
+      final m = jsonDecode(raw);
+      if (m is! Map<String, dynamic>) return;
+      final dwNum = m['dw'];
+      final dhNum = m['dh'];
+      final dw = dwNum is num ? dwNum.toInt() : null;
+      final dh = dhNum is num ? dhNum.toInt() : null;
+      if (dw == null || dh == null || dw <= 0 || dh <= 0) {
+        return; // g4：>0 才入库
+      }
+      final prev = _lastVoutDwh;
+      _lastVoutDwh = (dw, dh);
+      // 值变化才重置 timer（P0 去抖语义）——稳态（值不变）零重置零应用。
+      if (prev == null || prev.$1 != dw || prev.$2 != dh) {
+        _voutApplierTimer?.cancel();
+        _voutApplierTimer = Timer(_voutApplierDelay, _applyLastVoutDwh);
+      }
+    } catch (_) {
+      // 解析失败：跳过该条、缓存保持旧值（g4）。
+    }
+  }
+
+  /// v3.2：去抖到期应用 VO 实测比例（门禁 g3/g5）。
+  /// 只调宽度：高度基准 = `videoHeightRx` 现值（页面只消费比例），绝不写绝对 dw/dh。
+  void _applyLastVoutDwh() {
+    _voutApplierTimer = null;
+    if (_playerDisposed || !Platform.isWindows || !_rtxVsrChainApplied) {
+      return; // g3：四门 + dispose 复查
+    }
+    final v = _lastVoutDwh;
+    final curH = videoHeightRx.value;
+    if (v == null || v.$1 <= 0 || v.$2 <= 0 || curH <= 0) return;
+    videoWidthRx.value = (curH * v.$1 / v.$2).round();
+  }
+
+  /// v3.2：代际重置 VO 尺寸缓存（门禁 g1，三点：`initializePlayer` / `disposeStream` /
+  /// `openSourceGated`）——防换线路/退房/重试把上一线路的 dw/dh 当新线路初值。
+  void _resetLastVoutDwh() {
+    _lastVoutDwh = null;
+    _voutApplierTimer?.cancel();
+    _voutApplierTimer = null;
   }
 
   /// ② P2：crop 回读失败后的**专用单笔重写**（不走 `_syncRtxVsrCrop`，避免按当时 area
@@ -1036,7 +1103,15 @@ mixin PlayerMixin {
     // null，且它是全局态、队列在途时可能已被后续 sync 更新）。锁内同步赋值、页面 Obx
     // 只读 Rx → 无死锁；不碰 busy/readyGate/pipeline/留痕（零外溢门禁）。
     if (Platform.isWindows && t.rawH > 0) {
-      videoWidthRx.value = (t.rawH * t.aspect).round();
+      // v3.2：VO 实测比例优先（_lastVoutDwh = 最近 video-out-params dw/dh），假说 t.aspect 兑底。
+      // 开向读缓存（t.enable）；关向禁读（关向 write-done 时缓存=放大值，恒用 srcW/srcH）。
+      // 防御性再判 dw/dh > 0（dh=0 → NaN/Infinity.round() 会在写锁内抛异常中断写链——门禁 g2）。
+      final v = _lastVoutDwh;
+      final voAspect = (t.enable && v != null && v.$1 > 0 && v.$2 > 0)
+          ? v.$1 / v.$2
+          : null;
+      final aspect = voAspect ?? t.aspect;
+      videoWidthRx.value = (t.rawH * aspect).round();
       videoHeightRx.value = t.rawH;
     }
     if (t.crop.isEmpty) return;
@@ -2229,8 +2304,10 @@ class PlayerController extends BaseController
       _geomObserving = true;
       final np = player.platform as NativePlayer;
       unawaited(np
-          .observeProperty('video-out-params',
-              (v) async => Log.d('[GEOM] event video-out-params=$v'))
+          .observeProperty('video-out-params', (v) async {
+            Log.d('[GEOM] event video-out-params=$v');
+            _updateLastVoutDwh(v);
+          })
           .catchError((e) => Log.d('[GEOM] observeProperty(video-out-params) 失败: $e')));
     }
     _startGeomPoller();
@@ -2292,6 +2369,8 @@ class PlayerController extends BaseController
 
   void disposeStream() {
     _vsrDisplayAspect = null;
+    // v3.2 g1：代际重置 VO 尺寸缓存 + 取消去抖 timer（防 dispose 后写入，g3）。
+    _resetLastVoutDwh();
     _vsrCropRetryToken++;
     _errorSubscription?.cancel();
     _completedSubscription?.cancel();
