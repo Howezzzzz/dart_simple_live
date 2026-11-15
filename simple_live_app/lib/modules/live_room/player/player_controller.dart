@@ -1103,7 +1103,7 @@ mixin PlayerMixin {
     // null，且它是全局态、队列在途时可能已被后续 sync 更新）。锁内同步赋值、页面 Obx
     // 只读 Rx → 无死锁；不碰 busy/readyGate/pipeline/留痕（零外溢门禁）。
     if (Platform.isWindows && t.rawH > 0) {
-      // v3.2：VO 实测比例优先（_lastVoutDwh = 最近 video-out-params dw/dh），假说 t.aspect 兑底。
+      // v3.2：VO 实测比例优先（_lastVoutDwh = 最近 video-out-params dw/dh），假说 t.aspect 兜底。
       // 开向读缓存（t.enable）；关向禁读（关向 write-done 时缓存=放大值，恒用 srcW/srcH）。
       // 防御性再判 dw/dh > 0（dh=0 → NaN/Infinity.round() 会在写锁内抛异常中断写链——门禁 g2）。
       final v = _lastVoutDwh;
