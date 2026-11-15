@@ -1,15 +1,15 @@
 {
-    "version": "1.08.74",
-    "version_num": 1008074,
-    "version_desc": "- 内部：播放器「统一入口」重构前两步落地——音量均衡与 RTX VSR 的状态判定、写入委派收拢到单一入口，用户可感行为与 1.08.73 一致\n- 观察项：日志新增统一留痕（`[APPLY]` / `[APPLY-diff]` 期望与结果成对，字段更全，便于排障）；欢迎复测 VSR 开关（含进房门控期热关）、音量均衡开关、双开双关与换线路\n- 说明：本版为重构中间版，不含新功能；若发现任何与 1.08.73 不一致的观感，请记下场景反馈",
+    "version": "1.08.75",
+    "version_num": 1008075,
+    "version_desc": "- 内部：新增 VSR 显示几何诊断日志（`[GEOM]`）——用于定位「切换 RTX VSR 后画面出现持续黑边」；本版仅加诊断，行为与 1.08.74 完全一致\n- 说明：诊断版，不含功能或行为变更；复测黑边时请保留日志",
     "prerelease": true,
     "download_url": "https://github.com/Howezzzzz/dart_simple_live/releases",
     "download_urls": {
-        "android": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.74/app-arm64-v8a-release.apk",
-        "windows": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.74/Slive-1.08.74+1008074-windows-setup.exe",
-        "macos": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.74/simple_live_app-1.08.74+1008074-macos.dmg",
-        "linux": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.74/Slive-x86_64-linux.deb",
-        "linux_flatpak": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.74/Slive-x86_64.flatpak"
+        "android": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.75/app-arm64-v8a-release.apk",
+        "windows": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.75/Slive-1.08.75+1008075-windows-setup.exe",
+        "macos": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.75/simple_live_app-1.08.75+1008075-macos.dmg",
+        "linux": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.75/Slive-x86_64-linux.deb",
+        "linux_flatpak": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.75/Slive-x86_64.flatpak"
     },
     "mirror_prefixes": [
         "https://gh-proxy.com/",
@@ -17,10 +17,10 @@
         "https://ghproxy.cc/"
     ],
     "download_sha256": {
-        "android": "34fdf5898c614ce88d953a6248afd582b301b6c926ae653056b1ecc7a88be471",
-        "windows": "8503ef9520fe0e2837985466f04c2010fd4fb9a4607841abf8453bb970f02374",
-        "macos": "7b2d561cafd20d3a7a8775548264d4940c8385ba8599fe083159ee8873a6ac39",
-        "linux": "f41c4efdfc69f11d0c645f94bad7bc3d10ffb05333d4097b70d6eff9df13607a",
-        "linux_flatpak": "f9ef3bc1a205b1cab46c35f329fda3ff86140863f7f7f9267c23b7a72847253a"
+        "android": "b3d34e7657feff708d4d86e5c56d6bda30707d0d39524b01b345b0cd7f6068c4",
+        "windows": "ef6a98739a03cdd1f1bd9eb9ad80438a6945842f7a2a596c4f40823afa0e20e6",
+        "macos": "0b86ac8bd409f8f4e1de9e5d26332d5da9b2545e123f9709054d49aaca2a8f89",
+        "linux": "5312a483f69796b664c718ee1d70a373ae7014dcd0d5f88c0342758ea221791e",
+        "linux_flatpak": "3ec6b0de903b7f36bb0154330cc434283ea21f7553966681539bd3679d22af91"
     }
 }
