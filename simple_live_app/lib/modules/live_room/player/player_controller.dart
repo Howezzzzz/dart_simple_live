@@ -791,23 +791,32 @@ mixin PlayerMixin {
           ' mpv{vp=$vp out=$vout dw=${player.state.width}x${player.state.height}'
           ' crop="$crop" ao=$ao}'
           ' flutter{widget=${cs?.width.toStringAsFixed(1)}x${cs?.height.toStringAsFixed(1)}'
-          ' panel=$panel vsrAspect=${_vsrDisplayAspect?.toStringAsFixed(4) ?? "-"}}');
+          ' panelIntent=$panel vsrAspect=${_vsrDisplayAspect?.toStringAsFixed(4) ?? "-"}}');
+      // 注：面板**实际渲染宽**（renderW）与窗口内容宽由既有 `panelOverlay content=… renderW: …` 行给出
+      // （由页面单帧派生，控制器侧拿不到）→ 按时间戳与本行对照即可。
     } catch (e) {
       Log.d('[GEOM] $tag 取样异常: $e');
     }
   }
 
   /// 每 5s 抓一次稳态几何（自续期；`_playerDisposed` 即停）。
+  ///
+  /// 注：**不要在续期路径里走同一个守卫**（首个实现踩过：`_startGeomPoller()` 递归时
+  /// `_geomPolling` 仍为 true → 守卫直接 return → 整个房间只采一次「+5s」样本）。
   void _startGeomPoller() {
     if (_geomPolling) return;
     _geomPolling = true;
+    _scheduleNextGeomPoll();
+  }
+
+  void _scheduleNextGeomPoll() {
     Future.delayed(const Duration(seconds: 5), () {
       if (_playerDisposed) {
         _geomPolling = false;
         return;
       }
       unawaited(_logGeom('poll'));
-      _startGeomPoller();
+      _scheduleNextGeomPoll();
     });
   }
 
