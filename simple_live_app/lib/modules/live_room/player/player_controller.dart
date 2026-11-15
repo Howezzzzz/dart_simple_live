@@ -1031,7 +1031,7 @@ mixin PlayerMixin {
     // 1.08.76 几何修复（EV-464 根因）：VSR 切换不产生尺寸事件 → 面板几何（videoWidthRx/
     // videoHeightRx）滞留旧比例 → 持续黑边。写链完成（签名回填后）按**目标显示比例**刷新
     // 这对 Rx：VSR 开 = t.aspect（16:9 折算）、关 = srcW/srcH（源比，plan.aspect 恒非空
-    // 回退）——开/关两方向通吃。必须放在 crop 空早退（L1031）**之前**：关方向 crop=''
+    // 回退）——开/关两方向通吃。必须放在 crop 空早退（`if (t.crop.isEmpty) return;`）**之前**：关方向 crop=''
     // 在此 return，放函数尾会漏关方向。用 t.aspect 而非 `_vsrDisplayAspect`（关时已置
     // null，且它是全局态、队列在途时可能已被后续 sync 更新）。锁内同步赋值、页面 Obx
     // 只读 Rx → 无死锁；不碰 busy/readyGate/pipeline/留痕（零外溢门禁）。
