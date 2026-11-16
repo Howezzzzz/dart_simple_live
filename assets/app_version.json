@@ -1,15 +1,15 @@
 {
-    "version": "1.08.76",
-    "version_num": 1008076,
-    "version_desc": "- 修复：**切换 RTX VSR 后画面出现持续黑边**——VSR 开关切换不会触发播放器尺寸事件，导致右侧面板/播放区几何仍按旧比例计算；现改为在 VSR 写链完成后按目标显示比例（开=超分 16:9、关=源比例）立即刷新面板几何，开关\n- 说明：本版修复 1.08.75 诊断版定位的黑边根因；请复测「房内开/关 VSR」「开着/不开 VSR 进房」「进房后立刻关 VSR（门控期热关）」四场景，开关后黑边应消失或不再持续",
+    "version": "1.08.77",
+    "version_num": 1008077,
+    "version_desc": "- 修复：**部分直播间开 RTX VSR 后仍残留一条窄黑边**（1.08.76 遗留）——1.08.76 按「超分后即 16:9」折算面板比例，遇到实际输出比例不是 16:9 的源（如 960x544 带补边源，实测 1.7647）就会\n- 保持：不改变画面本身、不改变解码/超分行为，只修面板几何；关 VSR 仍严格按源比例，与 1.08.76 行为一致\n- 请复测：房B（960x544 类源）开 VSR 后有无黑边、房内开/关切换、开着/不开进房、进房后立刻关 VSR、换线路后再开 VSR",
     "prerelease": true,
     "download_url": "https://github.com/Howezzzzz/dart_simple_live/releases",
     "download_urls": {
-        "android": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.76/app-arm64-v8a-release.apk",
-        "windows": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.76/Slive-1.08.76+1008076-windows-setup.exe",
-        "macos": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.76/simple_live_app-1.08.76+1008076-macos.dmg",
-        "linux": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.76/Slive-x86_64-linux.deb",
-        "linux_flatpak": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.76/Slive-x86_64.flatpak"
+        "android": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.77/app-arm64-v8a-release.apk",
+        "windows": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.77/Slive-1.08.77+1008077-windows-setup.exe",
+        "macos": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.77/simple_live_app-1.08.77+1008077-macos.dmg",
+        "linux": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.77/Slive-x86_64-linux.deb",
+        "linux_flatpak": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.77/Slive-x86_64.flatpak"
     },
     "mirror_prefixes": [
         "https://gh-proxy.com/",
@@ -17,10 +17,10 @@
         "https://ghproxy.cc/"
     ],
     "download_sha256": {
-        "android": "1ddec9a2fe571a29fd2002483d7b869c664ed5f6329fe09710d7075082fd58d1",
-        "windows": "daf10f67018b0e7bde2ba70b81dc805ab135a96014feea7b9abfa674bdb6f033",
-        "macos": "8da4efdd03a35d23b0fc6c5c22eb2d8a2947bc353299e8dcf0267be4cff17b57",
-        "linux": "7a1f5662c2822b7a23014d7da7ed4ec53a4de978f1e4cea3d5b51d367f4c9871",
-        "linux_flatpak": "3ff113e9c7a591f0ef6b43f0b7385bdae79db0f4e330563df62a41b9dc35df24"
+        "android": "63d3321adaf7d6e8551c29e3fa4b41adbe1c73d6fdf3227b980c65255bcb37f7",
+        "windows": "bc4fdae2d777c99dc59951781f81bbabe92c642dd91693e3a6da7a46478e506f",
+        "macos": "4b3784737e5a93745d4a660ba10201c26bb64bf1bc2236639ebd5871bf9513cf",
+        "linux": "19fac1ab16bb59fa6fd4c7096e60b5d018dc136bbd21671f30f890a57322a284",
+        "linux_flatpak": "5ef52a6f26bd3b8090329603803baac6d02cb248652d7b283802ea30ffd04d92"
     }
 }
