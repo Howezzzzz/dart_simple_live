@@ -27,6 +27,7 @@ import 'package:simple_live_app/app/utils/panel_width.dart';
 import 'package:simple_live_app/app/utils/ready_gate.dart';
 import 'package:simple_live_app/app/utils/pipeline.dart';
 import 'package:simple_live_app/app/utils/rtx_vsr_crop.dart';
+import 'package:simple_live_app/app/utils/vsr_replay_policy.dart';
 import 'package:simple_live_app/app/utils/serial_queue.dart';
 import 'package:simple_live_app/app/utils/volume_norm.dart';
 import 'package:simple_live_app/services/local_storage_service.dart';
@@ -781,6 +782,23 @@ mixin PlayerMixin {
   /// ② P2：当前**期望**的 crop 目标（供重试回调做「目标未变」守卫——比代际更强）。
   String _vsrDesiredCrop = '';
 
+  // ===== v3.5 C2（写链定序）：vf 重建后等新 scale 帧在 VO 落定，再下发 crop/setSize =====
+  /// 非空 = 有写链正在等新 scale 帧落定（事件驱动：`_updateLastVoutDwh` 唤醒）。
+  Completer<void>? _vsrSettleWaiter;
+  /// 期望的 out dw / dh 候选集（crop 生效与否两态都算落定）。
+  Set<int>? _vsrSettleDws;
+  Set<int>? _vsrSettleDhs;
+  /// 等待期间的目标 crop（与 `_vsrDesiredCrop` 比对做 abort）。
+  String _vsrSettleCrop = '';
+  /// 等待上限（轮4 定值）：双链连写实测 vf 落定 ≈2s。
+  static const Duration vsrSettleTimeout = Duration(seconds: 2);
+
+  // ===== v3.5 C1（应用级 watchdog + 统一重放调度器）=====
+  /// 本代际 watchdog 还可重放几次（有界 2~3；三站点 + R8 重臂点重置）。
+  int _watchdogReplaysLeft = 3;
+  /// 校正器四门已通过、等重放结果：重放若失败/耗尽 → 落「Rx=960 迁就」兜底。
+  bool _vsrCorrectorFallbackPending = false;
+
   /// ② P3/C4：当前「真源」尺寸 = 解码器输出（mpv `video-params/w,h`），
   /// **不受 `video-aspect-override` 影响**（`state.width/height` 是 dw/dh，会被它污染）。
   /// rotate 90/270 时回退 `state.width/height`（videoParams.w/h 是未旋转的存储尺寸）。
@@ -884,9 +902,77 @@ mixin PlayerMixin {
       if (prev == null || prev.$1 != dw || prev.$2 != dh) {
         _voutStableSince = DateTime.now();
       }
+      _maybeCompleteVsrSettle(); // v3.5 C2：唤醒写链定序等待器
       _maybeApplyVsrCorrector();
+      _maybeWatchdogCropReplay(); // v3.5 C1：应用级 watchdog（crop 未被 VO 应用 → 重放自救）
     } catch (_) {
       // 解析失败：跳过该条、缓存保持旧值（g4）。
+    }
+  }
+
+  /// v3.5 C2（写链定序）：计算 vf 重建后新 scale 帧在 VO 落定时的期望 out (dw,{dh})。
+  /// dw ∈ {rawW×scale, renderSize.w}；dh ∈ {rawH×scale（未裁满高）, renderSize.h（裁后高）}——
+  /// crop 生效与否两态都算「已落定」（本步只等**新 scale 帧**到位，crop 应用由 C1 兜底）。
+  (Set<int>, Set<int>)? _vsrExpectedOutDwh(_VsrTarget t) {
+    final s = t.scale;
+    if (s == null || t.rawW <= 0 || t.rawH <= 0) return null;
+    final dws = <int>{(t.rawW * s).round()};
+    final dhs = <int>{(t.rawH * s).round()};
+    final rs = t.renderSize;
+    if (rs != null) {
+      dws.add(rs.$1);
+      dhs.add(rs.$2);
+    }
+    return (dws, dhs);
+  }
+
+  /// v3.5 C2：写链定序等待——vf 重建后等新 scale 帧在 VO 落定，或超时（2s），或被新目标 abort。
+  /// 事件驱动（`_updateLastVoutDwh` 唤醒）；锁内 await 期间 obs 回调不取写锁 → 无死锁。
+  Future<void> _awaitVsrChainSettle(_VsrTarget t) async {
+    final exp = _vsrExpectedOutDwh(t);
+    if (exp == null) return;
+    final cur = _lastVoutDwh;
+    if (cur != null && exp.$1.contains(cur.$1) && exp.$2.contains(cur.$2)) {
+      return; // 已在新 scale 态，无需等待
+    }
+    final c = Completer<void>();
+    _vsrSettleWaiter = c;
+    _vsrSettleDws = exp.$1;
+    _vsrSettleDhs = exp.$2;
+    _vsrSettleCrop = t.crop;
+    Timer(vsrSettleTimeout, () {
+      if (!c.isCompleted) {
+        Log.d('[VSR] 写链定序：等新 scale 帧超时 ${vsrSettleTimeout.inSeconds}s'
+            ' → 照写（交 C1 兜底）');
+        c.complete();
+      }
+    });
+    try {
+      await c.future;
+    } finally {
+      if (identical(_vsrSettleWaiter, c)) {
+        _vsrSettleWaiter = null;
+        _vsrSettleDws = null;
+        _vsrSettleDhs = null;
+        _vsrSettleCrop = '';
+      }
+    }
+  }
+
+  /// v3.5 C2：out-params 事件到达时唤醒等待器——命中期望 dw/dh 或被新目标 abort 即完成。
+  void _maybeCompleteVsrSettle() {
+    final c = _vsrSettleWaiter;
+    if (c == null || c.isCompleted) return;
+    if (_vsrDesiredCrop != _vsrSettleCrop) {
+      c.complete(); // abort：等待期间目标已被新写链替换（新链排在写锁之后）
+      return;
+    }
+    final v = _lastVoutDwh;
+    final dws = _vsrSettleDws;
+    final dhs = _vsrSettleDhs;
+    if (v == null || dws == null || dhs == null) return;
+    if (dws.contains(v.$1) && dhs.contains(v.$2)) {
+      c.complete();
     }
   }
 
@@ -940,25 +1026,27 @@ mixin PlayerMixin {
       return;
     }
     _vsrCorrectorFired = true;
-    _vsrDisplayAspect = voRatio; // P1-2：同步实测比（W3/W4/W5 同值幂等）
-    videoWidthRx.value = (curH * voRatio).round();
-    Log.d('[VSR] 房B 稳态校正器：Rx=${curW}x$curH → ${videoWidthRx.value}x$curH'
-        '（dw/dh 比=$voRatio 假说比=${_vsrDesiredCropRatio() ?? (curW / curH)}）');
+    // v3.5 C1/C3（校正器降级为兜底）：四门通过 → **先「重放修因」**（应用级 watchdog 因
+    // dw/dh 比 ≠ crop 目标而触发统一重放），不再直接迁就 Rx。重放成功 → dw/dh 命中目标 →
+    // 门④/门③自关 → Rx 保持 967（房B 黑边由 crop 应用消除，而非靠迁就面板宽）；重放预算
+    // 耗尽 → 由 `_scheduleVsrCropRetry` 耗尽分支落 v3.3「Rx=960 迁就」兜底。
+    // 无 crop 目标（比例不可解析）时 watchdog 不触发 → 直接迁就（保 v3.3 语义）。
+    final cTarget = _vsrDesiredCropRatio();
+    if (cTarget != null) {
+      _vsrCorrectorFallbackPending = true;
+      Log.d('[VSR] 房B 校正器：四门通过 → 请求 crop 重放'
+          '（Rx=${curW}x$curH 暂不迁就，dw/dh 比=$voRatio 目标=$cTarget）');
+    } else {
+      _vsrDisplayAspect = voRatio; // P1-2：同步实测比（W3/W4/W5 同值幂等）
+      videoWidthRx.value = (curH * voRatio).round();
+      Log.d('[VSR] 房B 稳态校正器（无 crop 目标）：Rx=${curW}x$curH'
+          ' → ${videoWidthRx.value}x$curH（dw/dh 比=$voRatio）');
+    }
   }
 
   /// 解析 `_vsrDesiredCrop`（格式 "WxH+X+Y"，如 "3600x2024+0+0"）为宽高比；
   /// 未设置/格式异常返回 null（门④对无裁切源不设防，靠门③即可）。
-  double? _vsrDesiredCropRatio() {
-    final s = _vsrDesiredCrop;
-    if (s.isEmpty) return null;
-    final x = s.indexOf('x');
-    final plus = s.indexOf('+');
-    if (x <= 0 || plus <= x) return null;
-    final w = double.tryParse(s.substring(0, x));
-    final h = double.tryParse(s.substring(x + 1, plus));
-    if (w == null || h == null || w <= 0 || h <= 0) return null;
-    return w / h;
-  }
+  double? _vsrDesiredCropRatio() => vsrCropRatio(_vsrDesiredCrop);
 
   /// v3.2→v3.3：代际重置 VO 尺寸缓存 + 校正器计时状态（门禁 g1，三点：`initializePlayer` /
   /// `disposeStream` / `openSourceGated`）——防换线路/退房/重试把上一线路的 dw/dh 当新线路
@@ -970,13 +1058,87 @@ mixin PlayerMixin {
     _lastVoutDwh = null;
     _voutStableSince = null;
     _vsrCorrectorFired = false;
+    _watchdogReplaysLeft = 3; // v3.5 C1：重放预算随代际重置
+    _vsrCorrectorFallbackPending = false;
   }
 
-  /// ② P2：crop 回读失败后的**专用单笔重写**（不走 `_syncRtxVsrCrop`，避免按当时 area
-  /// 重算而连带改写 vf 触发链重建）。等放大帧流过（vf 写后数十 ms 才到 VO）再写，有界重试。
+  /// v3.5 C1：dw/dh 比是否已命中 crop 目标比（**应用级**判据，带容差）——
+  /// 回读只能证「属性被接受」，此判据才是「VO 逐帧应用成功」。
+  bool _voutAppliedCropTarget() {
+    final v = _lastVoutDwh;
+    if (v == null) return false;
+    return vsrOutAppliedCrop(
+      dw: v.$1,
+      dh: v.$2,
+      targetRatio: _vsrDesiredCropRatio(),
+      tolerance: vsrCorrectorRatioTolerance,
+    );
+  }
+
+  /// v3.5 C1（应用级 watchdog）：链已挂 + 有 crop 目标 + 双门（静默≥2s、稳定≥2s）皆过，
+  /// 但 dw/dh 比 ≠ crop 目标比 ⇒ crop 未被 VO 应用（写链竞态/被丢弃）→ 触发重放自救。
+  /// 重放有界（`_watchdogReplaysLeft`）；命中目标即清 `_vsrCorrectorFallbackPending`。
+  void _maybeWatchdogCropReplay() {
+    if (_playerDisposed || !Platform.isWindows) return;
+    final v = _lastVoutDwh;
+    if (v == null) return;
+    if (_voutAppliedCropTarget()) {
+      _vsrCorrectorFallbackPending = false; // 已应用 → 无需兜底
+      return;
+    }
+    final now = DateTime.now();
+    final lastWrite = _lastVsrChainWriteAt;
+    final stableSince = _voutStableSince;
+    // 策略判据抽在 vsr_replay_policy.dart（纯逻辑，可单测）。
+    final go = vsrWatchdogShouldReplay(
+      chainApplied: _rtxVsrChainApplied,
+      crop: _vsrDesiredCrop,
+      dw: v.$1,
+      dh: v.$2,
+      sinceChainWrite: lastWrite == null ? null : now.difference(lastWrite),
+      stableFor: stableSince == null ? null : now.difference(stableSince),
+      quiet: vsrCorrectorQuietAfterWrite,
+      stable: vsrCorrectorStableDuration,
+      tolerance: vsrCorrectorRatioTolerance,
+      budgetLeft: _watchdogReplaysLeft,
+    );
+    if (!go) return;
+    _watchdogReplaysLeft--;
+    Log.d('[VSR] 应用级 watchdog：dw/dh=${v.$1}x${v.$2}'
+        '（比 ${(v.$1 / v.$2).toStringAsFixed(6)}）≠ crop 目标'
+        '${_vsrDesiredCropRatio()!.toStringAsFixed(6)} → 触发 crop 重放'
+        '（本代际剩 $_watchdogReplaysLeft）');
+    _scheduleVsrCropRetry(_vsrDesiredCrop, 0);
+  }
+
+  /// v3.5 C1（C3 降级）：重放预算耗尽时的兜底——v3.3 的「Rx=960 迁就」语义。
+  void _applyVsrCorrectorFallback() {
+    final v = _lastVoutDwh;
+    final curW = videoWidthRx.value;
+    final curH = videoHeightRx.value;
+    if (v == null || v.$1 <= 0 || v.$2 <= 0 || curW <= 0 || curH <= 0) return;
+    final voRatio = v.$1 / v.$2;
+    _vsrDisplayAspect = voRatio; // P1-2：同步实测比（W3/W4/W5 同值幂等）
+    videoWidthRx.value = (curH * voRatio).round();
+    Log.d('[VSR] 校正器兜底（重放耗尽）：Rx=${curW}x$curH'
+        ' → ${videoWidthRx.value}x$curH（dw/dh 比=$voRatio）');
+  }
+
+  /// ② P2（v3.5 统一为唯一重放调度器）：crop 未被 VO 应用时的**专用单笔重写**（不走
+  /// `_syncRtxVsrCrop`，避免按当时 area 重算而连带改写 vf 触发链重建）。等放大帧流过
+  /// （vf 写后数十 ms 才到 VO）再写，有界重试；C1 watchdog / C3 校正器 / readback 失败
+  /// 三源共用（单 token 互斥）。成功判定 = **应用级**（dw/dh == crop 目标）。
   void _scheduleVsrCropRetry(String crop, int attempt) {
     const delaysMs = [250, 600, 1200];
-    if (attempt >= delaysMs.length || crop.isEmpty) return;
+    if (crop.isEmpty || !_rtxVsrChainApplied) return;
+    if (attempt >= delaysMs.length) {
+      // v3.5 C1：重放预算耗尽——若校正器在等兜底，落 v3.3「Rx=960 迁就」语义。
+      if (_vsrCorrectorFallbackPending) {
+        _vsrCorrectorFallbackPending = false;
+        _applyVsrCorrectorFallback();
+      }
+      return;
+    }
     final token = ++_vsrCropRetryToken;
     Future.delayed(
       Duration(milliseconds: delaysMs[attempt]),
@@ -990,28 +1152,23 @@ mixin PlayerMixin {
         final pp = player.platform;
         if (pp is! NativePlayer) return;
         try {
-          final cur = (await pp.getProperty('video-crop')).trim();
-          // 守卫②：每个 await 之后复查代际（期间可能换源/退房）。
-          if (_playerDisposed || token != _vsrCropRetryToken) return;
-          if (cur.replaceAll(' ', '') == crop) {
-            Log.d('[VSR] crop 重试已生效（第 ${attempt + 1} 次检查）');
+          // v3.5 C1：成功判定升级为**应用级**（dw/dh 比 == crop 目标比，带容差）——延迟后
+          // VO 已刷新，取代原「属性回读==crop」判据（回读只能证「属性被接受」，证不了
+          // 「VO 逐帧应用」，即 Gen-1/16:31 漏检盲区）。命中即停（不再无谓重写）。
+          if (_voutAppliedCropTarget()) {
+            Log.d('[VSR] crop 重放成功（应用级）第 ${attempt + 1} 次 video-crop=$crop');
+            _vsrCorrectorFallbackPending = false;
             return;
           }
+          // v3.5 C1：先清后写，强制走「属性变更」路径（mpv 对同值 set 是否重求值未证实）。
           await _withWriteMutex(() async {
+            await pp.setProperty('video-crop', '');
             await pp.setProperty('video-crop', crop);
           });
           if (_playerDisposed || token != _vsrCropRetryToken) return;
-          final re = (await pp.getProperty('video-crop')).trim();
-          // 复查代际（第二次 IPC 期间也可能换源/退房）——否则递归 `++token` 会复活旧链、
-          // 且误杀新源刚排的合法重试（定向复验 2）。
-          if (_playerDisposed || token != _vsrCropRetryToken) return;
-          if (re.replaceAll(' ', '') == crop) {
-            Log.d('[VSR] crop 延时重写成功（第 ${attempt + 1} 次）video-crop=$crop');
-            return;
-          }
           _scheduleVsrCropRetry(crop, attempt + 1);
         } catch (e) {
-          Log.d('[VSR] crop 延时重写异常: $e');
+          Log.d('[VSR] crop 重放异常: $e');
           if (!_playerDisposed && token == _vsrCropRetryToken) {
             _scheduleVsrCropRetry(crop, attempt + 1);
           }
@@ -1144,6 +1301,10 @@ mixin PlayerMixin {
           // 振荡期链恒已挂（scale 非 null）→ 不重臂，防自激一次性语义不破坏。
           if (_lastRtxVsrScale == null) {
             _vsrCorrectorFired = false;
+            // v3.5 C1（P2-1）：链无→有（同代际 off→on）重臂时，重放预算与兜底标记也要重置，
+            // 否则校正器/ watchdog 重放哑火。
+            _watchdogReplaysLeft = 3;
+            _vsrCorrectorFallbackPending = false;
           }
           _lastRtxVsrScale = t.scale;
           _lastVsrChainWriteAt = DateTime.now(); // v3.3：校正器静默门计时点
@@ -1154,6 +1315,14 @@ mixin PlayerMixin {
           _lastRtxVsrScale = null;
           _lastVsrChainWriteAt = DateTime.now(); // v3.3：校正器静默门计时点（摘链也计）
           Log.d('[VSR] 摘除滤镜链 #${++_vsrChainWriteCount}');
+        }
+        // v3.5 C2（写链定序）：vf 重建（升档/挂链）后，**等新 scale 的帧在 VO 落定**再下发
+        // crop/setSize——否则 crop 会在旧 scale 帧上越界被 mpv 静默丢弃
+        // （`Ignoring invalid --video-crop…`）且永不自动重放 → VO 滞留未裁满帧 → contain 黑带。
+        // 仅「重挂链（set）+ 有 crop 目标」才等；摘链向 / 无裁源（crop=''）不涉及该竞态，跳过
+        // （P2-①）。超时 2s 兜底（双链连写实测落定 ≈2s）、可被新目标 abort。
+        if (vfAction == 'set' && t.crop.isNotEmpty && t.scale != null) {
+          await _awaitVsrChainSettle(t);
         }
       } finally {
         _scheduleSuppressRelease(token);
