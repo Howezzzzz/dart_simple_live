@@ -960,9 +960,12 @@ mixin PlayerMixin {
     return w / h;
   }
 
-  /// v3.2→v3.3：代际重置 VO 尺寸缓存 + 校正器全部时间状态（门禁 g1，三点：`initializePlayer` /
+  /// v3.2→v3.3：代际重置 VO 尺寸缓存 + 校正器计时状态（门禁 g1，三点：`initializePlayer` /
   /// `disposeStream` / `openSourceGated`）——防换线路/退房/重试把上一线路的 dw/dh 当新线路
-  /// 初值；P1-5：连同静默/稳定计时起点与一次性标记全部清空（v3.2 的 timer 已随回灌拆除）。
+  /// 初值；P1-5：清空稳定计时起点与一次性标记（v3.2 的 timer 已随回灌拆除）。
+  /// 注（实现复核 P2-偏差1 修正）：`_lastVsrChainWriteAt` **故意不清**——同签名换线路（新源
+  /// 与旧源同分辨率）时若清空，静默门①将因 null 而哑火直到下次链写；保留旧时间戳让校正器
+  /// 在 ≥2s 后可再次评估（行为方向更优，取舍依据已补记方案文档）。
   void _resetLastVoutDwh() {
     _lastVoutDwh = null;
     _voutStableSince = null;
@@ -1136,6 +1139,12 @@ mixin PlayerMixin {
           // d3d11vpp 需 D3D11 硬件帧上下文
           await pp.setProperty('hwdec', 'd3d11va');
           await pp.setProperty('vf', vfValue);
+          // 实现复核 R8（P1）：链从无到有（上次摘链后重新挂上，如同代际内 toggle-off→on）
+          // 时重臂校正器——否则房B 开向修复哑火到下一代际，违反 Howe「不可退让」红线。
+          // 振荡期链恒已挂（scale 非 null）→ 不重臂，防自激一次性语义不破坏。
+          if (_lastRtxVsrScale == null) {
+            _vsrCorrectorFired = false;
+          }
           _lastRtxVsrScale = t.scale;
           _lastVsrChainWriteAt = DateTime.now(); // v3.3：校正器静默门计时点
           Log.d('[VSR] 写入滤镜链 #${++_vsrChainWriteCount}'
@@ -1408,6 +1417,10 @@ mixin PlayerMixin {
     try {
       await pp.setProperty('hwdec', 'd3d11va');
       await pp.setProperty('vf', rtxVsrVfChain(rtxVsrScale));
+      // 同主写链分支（实现复核 R8 P1）：链从无到有 → 重臂校正器（门控超时兜底等价 off→on）。
+      if (_lastRtxVsrScale == null) {
+        _vsrCorrectorFired = false;
+      }
       _lastRtxVsrScale = rtxVsrScale;
       _lastVsrChainWriteAt = DateTime.now(); // v3.3：校正器静默门计时点（预挂兜底也计）
       Log.d('[VSR] 预挂兜底链 #${++_vsrChainWriteCount}'
