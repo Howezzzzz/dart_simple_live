@@ -1,15 +1,15 @@
 {
-    "version": "1.08.78",
-    "version_num": 1008078,
-    "version_desc": "- 修复：**1.08.77 回归——开 RTX VSR（或进房后开）画面反复闪黑、弹幕栏宽度连跳数次**——1.08.77 用播放引擎实测输出比例驱动面板几何，而实测值本身又受「播放区尺寸→超分倍数→滤镜链→输出尺寸」反向影响，开关瞬间两者互相放大形成振荡（超分倍数在 3.50 与 3.75 之间反复重写滤镜链，每次重写即一次画面中断）；本版拆除这条回灌回路，面板几何按目标显示比例一步到位（回归 1.08.76 已验证行为），另对「实测比例与目标不一致」的特殊源（如 960x544 带补边源）保留稳态校正：开 VSR 约 3 秒内自动消除该类源的开向黑边\n- 保持：不改变画面本身、不改变解码/超分行为；关 VSR 仍严格按源比例，与 1.08.76 行为一致\n- 请复测：房内开/关 VSR 无闪屏、开关后弹幕栏宽度只变一次、开着/不开进房、进房后立刻关、换线路后再开、房B（960x544 类源）开 VSR 约 3 秒内黑边自愈、稳态 10 分钟无闪",
+    "version": "1.08.77",
+    "version_num": 1008077,
+    "version_desc": "- 修复：**部分直播间开 RTX VSR 后仍残留一条窄黑边**（1.08.76 遗留）——1.08.76 按「超分后即 16:9」折算面板比例，遇到实际输出比例不是 16:9 的源（如 960x544 带补边源，实测 1.7647）就会\n- 保持：不改变画面本身、不改变解码/超分行为，只修面板几何；关 VSR 仍严格按源比例，与 1.08.76 行为一致\n- 请复测：房B（960x544 类源）开 VSR 后有无黑边、房内开/关切换、开着/不开进房、进房后立刻关 VSR、换线路后再开 VSR",
     "prerelease": true,
     "download_url": "https://github.com/Howezzzzz/dart_simple_live/releases",
     "download_urls": {
-        "android": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.78/app-arm64-v8a-release.apk",
-        "windows": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.78/Slive-1.08.78+1008078-windows-setup.exe",
-        "macos": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.78/simple_live_app-1.08.78+1008078-macos.dmg",
-        "linux": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.78/Slive-x86_64-linux.deb",
-        "linux_flatpak": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.78/Slive-x86_64.flatpak"
+        "android": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.77/app-arm64-v8a-release.apk",
+        "windows": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.77/Slive-1.08.77+1008077-windows-setup.exe",
+        "macos": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.77/simple_live_app-1.08.77+1008077-macos.dmg",
+        "linux": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.77/Slive-x86_64-linux.deb",
+        "linux_flatpak": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.77/Slive-x86_64.flatpak"
     },
     "mirror_prefixes": [
         "https://gh-proxy.com/",
@@ -17,10 +17,10 @@
         "https://ghproxy.cc/"
     ],
     "download_sha256": {
-        "android": "待构建后回填",
-        "windows": "待构建后回填",
-        "macos": "待构建后回填",
-        "linux": "待构建后回填",
-        "linux_flatpak": "待构建后回填"
+        "android": "63d3321adaf7d6e8551c29e3fa4b41adbe1c73d6fdf3227b980c65255bcb37f7",
+        "windows": "bc4fdae2d777c99dc59951781f81bbabe92c642dd91693e3a6da7a46478e506f",
+        "macos": "4b3784737e5a93745d4a660ba10201c26bb64bf1bc2236639ebd5871bf9513cf",
+        "linux": "19fac1ab16bb59fa6fd4c7096e60b5d018dc136bbd21671f30f890a57322a284",
+        "linux_flatpak": "5ef52a6f26bd3b8090329603803baac6d02cb248652d7b283802ea30ffd04d92"
     }
 }
