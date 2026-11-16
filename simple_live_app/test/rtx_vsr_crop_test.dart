@@ -187,6 +187,81 @@ void main() {
     });
   });
 
+  group('rtxVsrAdaptiveScale 滞回（v3.3 ISS-294 P1-1，非对称：降档且 |Δ|<0.5 才保持）', () {
+    test('降档相邻档（3.75→3.50, Δ=0.25<0.5）保持当前倍数（防房B 慢振荡）', () {
+      expect(
+          rtxVsrAdaptiveScale(
+              areaW: 3337, areaH: 1891, srcW: 960, srcH: 544, curS: 3.75),
+          3.75);
+    });
+
+    test('升档相邻档（3.75→4.0, Δ=0.25<0.5）放行（对称版缺陷：4K 被钳位=画质损失）', () {
+      expect(
+          rtxVsrAdaptiveScale(
+              areaW: 3840, areaH: 2160, srcW: 960, srcH: 544, curS: 3.75),
+          4.0);
+    });
+
+    test('降档跨档（3.75→3.00, Δ=0.75≥0.5）放行', () {
+      expect(
+          rtxVsrAdaptiveScale(
+              areaW: 2880, areaH: 1620, srcW: 960, srcH: 544, curS: 3.75),
+          3.0);
+    });
+
+    test('curS 为 null（未挂链）不参与滞回', () {
+      expect(
+          rtxVsrAdaptiveScale(
+              areaW: 3337, areaH: 1891, srcW: 960, srcH: 544),
+          3.5);
+    });
+
+    test('滞回不污染 VSR 无意义路径：r≤1.05 仍返回 null（即使 curS 非空）', () {
+      expect(
+          rtxVsrAdaptiveScale(
+              areaW: 1920, areaH: 1080, srcW: 1920, srcH: 1080, curS: 3.75),
+          isNull);
+    });
+  });
+
+  group('rtxVsrPlan 透传 curS（P1-6：pc:966 与 pipeline:271 两调用点镜像一致）', () {
+    test('降档相邻档保持 curS', () {
+      final p = rtxVsrPlan(
+        enabled: true,
+        areaW: 3337,
+        areaH: 1891,
+        srcW: 960,
+        srcH: 544,
+        curS: 3.75,
+      );
+      expect(p.scale, 3.75);
+      expect(p.applied, isTrue);
+    });
+
+    test('升档相邻档放行（curS 不挡升档）', () {
+      final p = rtxVsrPlan(
+        enabled: true,
+        areaW: 3840,
+        areaH: 2160,
+        srcW: 960,
+        srcH: 544,
+        curS: 3.75,
+      );
+      expect(p.scale, 4.0);
+    });
+
+    test('curS 缺省时行为与 v3.2 一致', () {
+      final p = rtxVsrPlan(
+        enabled: true,
+        areaW: 3337,
+        areaH: 1891,
+        srcW: 960,
+        srcH: 544,
+      );
+      expect(p.scale, 3.5);
+    });
+  });
+
   // 方案 20261111（进房「出画面又重载」）的回归防线：只有 Windows + VSR 开启才允许
   // 延迟起播；其余必须保持自动起播，否则全平台都会推迟起播。
   group('vsrShouldDeferPlay（起播门控边界）', () {

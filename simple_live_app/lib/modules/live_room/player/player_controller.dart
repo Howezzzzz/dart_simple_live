@@ -750,17 +750,30 @@ mixin PlayerMixin {
   /// 仅「VSR 已生效」时非空；进房重置/退房时清空。
   double? _vsrDisplayAspect;
 
-  /// v3.2：最近一次 VO 输出尺寸（`video-out-params` 的 dw/dh）——面板几何跟随 VO 实测的主源。
+  /// v3.2→v3.3：最近一次 VO 输出尺寸（`video-out-params` 的 dw/dh）——v3.2 面板跟随 VO 的主源
+  /// （ISS-294 自激闭环主犯，v3.3 已拆回灌边）；现退化为**纯诊断缓存**（[GEOM] 日志用），
+  /// 唯一消费方 = 房B 稳态校正器 `_maybeApplyVsrCorrector`（四门一次性）。
   /// 代际（门禁 g1）：`initializePlayer` / `disposeStream` / `openSourceGated` 三点置空。
-  /// 注：**不设时间戳字段**——可行性验证 W1-a「时间戳仅诊断、禁做新鲜度阈值」；直接无字段
-  /// 从根上杜绝阈值误用，且避免 unused_field 告警。
   (int, int)? _lastVoutDwh;
 
-  /// v3.2：VO 实测比例应用去抖 timer（120ms，按值变化重置）。
-  Timer? _voutApplierTimer;
+  /// v3.3（ISS-294）：最近一次写/摘 VSR 滤镜链的时刻（校正器静默门①「距最后链写 ≥2s」），
+  /// 在全部四处 `++_vsrChainWriteCount` 处同步刷新。
+  DateTime? _lastVsrChainWriteAt;
 
-  /// v3.2：去抖应用延迟。
-  static const Duration _voutApplierDelay = Duration(milliseconds: 120);
+  /// v3.3（ISS-294）：当前 dw/dh 值**首次出现**的时刻；值变化即重置（稳定门②「dw/dh 连续
+  /// ≥2s 不变」的计时起点，P1-3 语义：首现起算/值变重置/零 timer）。
+  DateTime? _voutStableSince;
+
+  /// v3.3（ISS-294）：校正器本轮代际是否已写过（一次性标记，防自激）；
+  /// 随 `_resetLastVoutDwh` 三点代际重置（P1-5：连同全部时间状态一起清）。
+  bool _vsrCorrectorFired = false;
+
+  /// v3.3 校正器时限（ISS-294 终轮验证定）：静默/稳定 2s（过渡态实测 ≤0.6s，裕度 1.5~3×）。
+  static const Duration vsrCorrectorQuietAfterWrite = Duration(seconds: 2);
+  static const Duration vsrCorrectorStableDuration = Duration(seconds: 2);
+
+  /// v3.3 校正器比值容差（滤 967↔968 量化噪声；也作门④比例比较容差，P1-4 禁裸等值）。
+  static const double vsrCorrectorRatioTolerance = 0.005;
 
   /// ② P2：crop 延迟重写的代际（新进房/重置/换源时自增，旧回调自动作废）。
   int _vsrCropRetryToken = 0;
@@ -866,35 +879,94 @@ mixin PlayerMixin {
       }
       final prev = _lastVoutDwh;
       _lastVoutDwh = (dw, dh);
-      // 值变化才重置 timer（P0 去抖语义）——稳态（值不变）零重置零应用。
+      // v3.3（ISS-294）：v3.2 的 120ms 去抖回灌已拆除（自激闭环主犯）。退化为纯缓存 + 稳定门计时。
+      // P1-3 语义：值变化才重置首现时刻；稳态（值不变）保持原时刻、零 timer 零重置。
       if (prev == null || prev.$1 != dw || prev.$2 != dh) {
-        _voutApplierTimer?.cancel();
-        _voutApplierTimer = Timer(_voutApplierDelay, _applyLastVoutDwh);
+        _voutStableSince = DateTime.now();
       }
+      _maybeApplyVsrCorrector();
     } catch (_) {
       // 解析失败：跳过该条、缓存保持旧值（g4）。
     }
   }
 
-  /// v3.2：去抖到期应用 VO 实测比例（门禁 g3/g5）。
-  /// 只调宽度：高度基准 = `videoHeightRx` 现值（页面只消费比例），绝不写绝对 dw/dh。
-  void _applyLastVoutDwh() {
-    _voutApplierTimer = null;
-    if (_playerDisposed || !Platform.isWindows || !_rtxVsrChainApplied) {
-      return; // g3：四门 + dispose 复查
-    }
+  /// v3.3（ISS-294）：房B 稳态校正器——唯一允许的 VO→Rx 回灌，四门串联 + 代际一次性。
+  ///
+  /// 目的：房B（crop 回读匹配但 VO 未应用，dw/dh 滞留源比 3600x2040=1.7647）在开向稳态下
+  /// 按实测比例修正面板宽（Rx = curH×dw/dh），消除 13px 黑边（Howe 定不可退让）。
+  /// 房A（crop 生效，dw/dh==crop 目标）被门④关死，永不写。
+  ///
+  /// 四门（全部通过才写一次；外门 = Windows ∧ 链已挂 ∧ 未 dispose，同旧 applier g3）：
+  /// ① 静默门：距最后一次滤镜链写 ≥2s（过渡态最长实测 ~0.6s，裕度 1.5~3×）
+  /// ② 稳定门：dw/dh 连续 ≥2s 不变（pre-crop 过渡态与房B 病理态同值不可分辨、
+  ///    只能靠时间区分——此门是唯一分辨手段）
+  /// ③ 容差门：|dw/dh 比 − 当前 Rx 比| > 0.5%（滤 967↔968 量化噪声；校正后自身比值归零
+  ///    → 门自关，天然防自激）
+  /// ④ crop 指纹门：dw/dh 比 ≠ crop 目标比（**比例比较带容差，禁裸等值**，P1-4）——
+  ///    房A dw/dh==crop 目标 → 关死；房B dw/dh=源比 ≠ 目标 → 开
+  ///
+  /// P1-2：写入 Rx 时同步改写 `_vsrDisplayAspect`=实测比（W3/W4/W5 同值幂等；配合
+  /// `_syncRtxVsrCrop` 的代际内守卫，不被后续假说重置冲回）。
+  void _maybeApplyVsrCorrector() {
+    if (_vsrCorrectorFired) return; // 代际一次性（防自激）
+    if (_playerDisposed || !Platform.isWindows || !_rtxVsrChainApplied) return;
     final v = _lastVoutDwh;
+    final curW = videoWidthRx.value;
     final curH = videoHeightRx.value;
-    if (v == null || v.$1 <= 0 || v.$2 <= 0 || curH <= 0) return;
-    videoWidthRx.value = (curH * v.$1 / v.$2).round();
+    if (v == null || v.$1 <= 0 || v.$2 <= 0 || curW <= 0 || curH <= 0) return;
+    final now = DateTime.now();
+    final lastWrite = _lastVsrChainWriteAt;
+    // ① 静默门（链写未知/距今 <2s：过渡态内不校正）。
+    if (lastWrite == null ||
+        now.difference(lastWrite) < vsrCorrectorQuietAfterWrite) {
+      return;
+    }
+    final stableSince = _voutStableSince;
+    // ② 稳定门（dw/dh 未连续 2s 不变）。
+    if (stableSince == null ||
+        now.difference(stableSince) < vsrCorrectorStableDuration) {
+      return;
+    }
+    final voRatio = v.$1 / v.$2;
+    final curRatio = curW / curH;
+    // ③ 容差门（比值差 ≤0.5%：967↔968 量化噪声 / 已校正 → 不写）。
+    if ((voRatio - curRatio).abs() <= vsrCorrectorRatioTolerance) {
+      return;
+    }
+    // ④ crop 指纹门：dw/dh 比 == crop 目标比（房A）→ 关死，永不写。
+    final target = _vsrDesiredCropRatio();
+    if (target != null &&
+        (voRatio - target).abs() <= vsrCorrectorRatioTolerance) {
+      return;
+    }
+    _vsrCorrectorFired = true;
+    _vsrDisplayAspect = voRatio; // P1-2：同步实测比（W3/W4/W5 同值幂等）
+    videoWidthRx.value = (curH * voRatio).round();
+    Log.d('[VSR] 房B 稳态校正器：Rx=${curW}x$curH → ${videoWidthRx.value}x$curH'
+        '（dw/dh 比=$voRatio 假说比=${_vsrDesiredCropRatio() ?? (curW / curH)}）');
   }
 
-  /// v3.2：代际重置 VO 尺寸缓存（门禁 g1，三点：`initializePlayer` / `disposeStream` /
-  /// `openSourceGated`）——防换线路/退房/重试把上一线路的 dw/dh 当新线路初值。
+  /// 解析 `_vsrDesiredCrop`（格式 "WxH+X+Y"，如 "3600x2024+0+0"）为宽高比；
+  /// 未设置/格式异常返回 null（门④对无裁切源不设防，靠门③即可）。
+  double? _vsrDesiredCropRatio() {
+    final s = _vsrDesiredCrop;
+    if (s.isEmpty) return null;
+    final x = s.indexOf('x');
+    final plus = s.indexOf('+');
+    if (x <= 0 || plus <= x) return null;
+    final w = double.tryParse(s.substring(0, x));
+    final h = double.tryParse(s.substring(x + 1, plus));
+    if (w == null || h == null || w <= 0 || h <= 0) return null;
+    return w / h;
+  }
+
+  /// v3.2→v3.3：代际重置 VO 尺寸缓存 + 校正器全部时间状态（门禁 g1，三点：`initializePlayer` /
+  /// `disposeStream` / `openSourceGated`）——防换线路/退房/重试把上一线路的 dw/dh 当新线路
+  /// 初值；P1-5：连同静默/稳定计时起点与一次性标记全部清空（v3.2 的 timer 已随回灌拆除）。
   void _resetLastVoutDwh() {
     _lastVoutDwh = null;
-    _voutApplierTimer?.cancel();
-    _voutApplierTimer = null;
+    _voutStableSince = null;
+    _vsrCorrectorFired = false;
   }
 
   /// ② P2：crop 回读失败后的**专用单笔重写**（不走 `_syncRtxVsrCrop`，避免按当时 area
@@ -969,6 +1041,7 @@ mixin PlayerMixin {
       areaH: area?.$2,
       srcW: rawW,
       srcH: rawH,
+      curS: _lastRtxVsrScale, // v3.3（P1-6）：滞回需要当前已挂倍数
     );
     final s = plan.scale; // 捕获为 final，便于闭包里做空值提升
     final enable = plan.applied;
@@ -977,7 +1050,12 @@ mixin PlayerMixin {
     final aspectValue = plan.aspect;
     final renderSize = plan.renderSize;
     // ② P3/C5：缓存终态显示比例（VSR 生效时），供面板宽一次到位。
-    _vsrDisplayAspect = _rtxVsrChainApplied ? aspectValue : null;
+    // v3.3（ISS-294 P1-2 守卫）：校正器已按实测比写过 `_vsrDisplayAspect` 时不再重置回
+    // 假说比（否则下一次尺寸/布局事件 W3/W4/W5 会用假说比把刚校正的面板宽冲回 → 房B 黑边
+    // 复现）；保持实测比直到代际重置（`_resetLastVoutDwh`）。VSR 关（链未挂）时仍正常置 null。
+    if (!(_vsrCorrectorFired && _rtxVsrChainApplied)) {
+      _vsrDisplayAspect = _rtxVsrChainApplied ? aspectValue : null;
+    }
     // 去重签名：倍数 + 裁切值 + 源尺寸 + 链状态（**不能只用裁切值当键**，见字段注释）。
     final signature = '${s ?? -1}|$desired|${rawW}x$rawH|$_rtxVsrChainApplied';
     // 起播门控（P1-1 起播前单次写链）：门控期内**吞中间写**——不立即写链，只把最新目标
@@ -1059,11 +1137,13 @@ mixin PlayerMixin {
           await pp.setProperty('hwdec', 'd3d11va');
           await pp.setProperty('vf', vfValue);
           _lastRtxVsrScale = t.scale;
+          _lastVsrChainWriteAt = DateTime.now(); // v3.3：校正器静默门计时点
           Log.d('[VSR] 写入滤镜链 #${++_vsrChainWriteCount}'
               ' scale=${t.scale?.toStringAsFixed(2)}');
         } else {
           await pp.setProperty('vf', '');
           _lastRtxVsrScale = null;
+          _lastVsrChainWriteAt = DateTime.now(); // v3.3：校正器静默门计时点（摘链也计）
           Log.d('[VSR] 摘除滤镜链 #${++_vsrChainWriteCount}');
         }
       } finally {
@@ -1103,15 +1183,12 @@ mixin PlayerMixin {
     // null，且它是全局态、队列在途时可能已被后续 sync 更新）。锁内同步赋值、页面 Obx
     // 只读 Rx → 无死锁；不碰 busy/readyGate/pipeline/留痕（零外溢门禁）。
     if (Platform.isWindows && t.rawH > 0) {
-      // v3.2：VO 实测比例优先（_lastVoutDwh = 最近 video-out-params dw/dh），假说 t.aspect 兜底。
-      // 开向读缓存（t.enable）；关向禁读（关向 write-done 时缓存=放大值，恒用 srcW/srcH）。
-      // 防御性再判 dw/dh > 0（dh=0 → NaN/Infinity.round() 会在写锁内抛异常中断写链——门禁 g2）。
-      final v = _lastVoutDwh;
-      final voAspect = (t.enable && v != null && v.$1 > 0 && v.$2 > 0)
-          ? v.$1 / v.$2
-          : null;
-      final aspect = voAspect ?? t.aspect;
-      videoWidthRx.value = (t.rawH * aspect).round();
+      // v3.3（ISS-294）：恢复单一权威源 = t.aspect（crop 目标比例，源尺寸派生、与链输出
+      // 无关）——v3.2 的「VO 实测优先」在 write-done 时刻读到的是**上一条链**的输出（时序性
+      // 陈旧，真机日志 video=960/967/968 交替的源头之一），是自激闭环主犯；拆除该回灌边。
+      // 关向恒 t.aspect=srcW/srcH（与 v3.1 一致，Y2 表 W2 关向本就禁读缓存）。
+      // VO→Rx 的唯一入口改为校正器 `_maybeApplyVsrCorrector`（四门一次性，见其注释）。
+      videoWidthRx.value = (t.rawH * t.aspect).round();
       videoHeightRx.value = t.rawH;
     }
     if (t.crop.isEmpty) return;
@@ -1260,6 +1337,7 @@ mixin PlayerMixin {
           if (pp is NativePlayer) {
             await pp.setProperty('vf', '');
             _lastRtxVsrScale = null;
+            _lastVsrChainWriteAt = DateTime.now(); // v3.3：校正器静默门计时点（兜底摘链也计）
             // 1.08.76 几何修复（次点）：此路径不经 `_applyVsrTargetUnlocked`、摘链不产
             // 尺寸事件（日志「无尺寸事件，sync 未写」）→ 门控期热关（T6-③）摘链后同样
             // 刷新面板几何回**源比例**（VSR 已关；经 `_panelAspectSize`，此时
@@ -1331,6 +1409,7 @@ mixin PlayerMixin {
       await pp.setProperty('hwdec', 'd3d11va');
       await pp.setProperty('vf', rtxVsrVfChain(rtxVsrScale));
       _lastRtxVsrScale = rtxVsrScale;
+      _lastVsrChainWriteAt = DateTime.now(); // v3.3：校正器静默门计时点（预挂兜底也计）
       Log.d('[VSR] 预挂兜底链 #${++_vsrChainWriteCount}'
           ' scale=${rtxVsrScale.toStringAsFixed(2)}（门控超时降级）');
     } finally {

@@ -162,6 +162,7 @@ RtxVsrPlan rtxVsrPlan({
   int? areaH,
   required int srcW,
   required int srcH,
+  double? curS,
 }) {
   if (srcW <= 0 || srcH <= 0) {
     return const RtxVsrPlan(applied: false, crop: '', aspect: 1.0);
@@ -171,7 +172,7 @@ RtxVsrPlan rtxVsrPlan({
     scale = (areaW == null || areaH == null)
         ? rtxVsrScale
         : rtxVsrAdaptiveScale(
-            areaW: areaW, areaH: areaH, srcW: srcW, srcH: srcH);
+            areaW: areaW, areaH: areaH, srcW: srcW, srcH: srcH, curS: curS);
   }
   final s = scale;
   final applied = enabled && s != null;
@@ -196,11 +197,19 @@ RtxVsrPlan rtxVsrPlan({
 /// 避免二次上采样；**向上**取到 0.25 步长，夹取 [1, rtxVsrMaxScale]。
 /// `r ≤ 1.05`（源已 ≥ 播放区，VSR 无意义）或参数非法或未裁切输出过大（>8192）
 /// → 返回 null（调用方不挂 VSR）。
+///
+/// [curS]：当前已挂上的倍数（null = 未挂链，不参与滞回）。v3.3（ISS-294 P1-1）非对称
+/// 滞回——**降档且 |newS−curS|<0.5 才保持 curS**：挡住「房B 校正 → area 翻 → 档位回落 →
+/// 写链 → 再校正」的 ~2~3s 慢振荡；升档一律放行（对称版会把 4K 升档 3.75→4.0 也挡住 =
+/// 画质损失，终轮验证裁定为方案级缺陷）。滞回判断在 `r ≤ 1.05` 的 null 检查**之后**：
+/// VSR 无意义/关闭路径不被滞回污染。curS 是已挂倍数（曾通过 sanity 才能挂上），保持它
+/// 不会新越 8192。
 double? rtxVsrAdaptiveScale({
   required int areaW,
   required int areaH,
   required int srcW,
   required int srcH,
+  double? curS,
 }) {
   if (areaW <= 0 || areaH <= 0 || srcW <= 0 || srcH <= 0) return null;
   final pad = rtxVsrBottomPadRows(srcW, srcH);
@@ -213,5 +222,7 @@ double? rtxVsrAdaptiveScale({
   if (s > rtxVsrMaxScale) s = rtxVsrMaxScale;
   // sanity：未裁切输出任一边过大（显存/驱动上限）→ 不挂。
   if (srcW * s > 8192 || srcH * s > 8192) return null;
+  // v3.3 非对称滞回（P1-1）：降档且 |Δ|<0.5 才保持当前倍数。
+  if (curS != null && s < curS && (curS - s) < 0.5) return curS;
   return s;
 }

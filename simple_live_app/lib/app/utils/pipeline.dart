@@ -274,6 +274,9 @@ PipelineChange pipelineDiff(PipelineDesired desired, PipelineApplied applied) {
         areaH: desired.areaH,
         srcW: desired.srcW,
         srcH: desired.srcH,
+        // v3.3（P1-6）：镜像点同步传 curS，与 `_syncRtxVsrCrop` 同输入同公式
+        // （否则 diff 会漏报滞回保持档位的场景）。
+        curS: applied.lastRtxVsrScale,
       );
       vsrIntent = _vsrIntentFrom(
         isWindows: desired.isWindows,
