@@ -919,17 +919,8 @@ mixin PlayerMixin {
       final dhNum = m['dh'];
       final dw = dwNum is num ? dwNum.toInt() : null;
       final dh = dhNum is num ? dhNum.toInt() : null;
-      if (dw == null || dh == null || dw <= 0 || dh <= 0) {
-        return; // g4：>0 才入库
-      }
-      final prev = _lastVoutDwh;
-      _lastVoutDwh = (dw, dh);
-      // v3.3（ISS-294）：v3.2 的 120ms 去抖回灌已拆除（自激闭环主犯）。退化为纯缓存 + 稳定门计时。
-      // P1-3 语义：值变化才重置首现时刻；稳态（值不变）保持原时刻、零 timer 零重置。
-      if (prev == null || prev.$1 != dw || prev.$2 != dh) {
-        _voutStableSince = DateTime.now();
-      }
-      // v3.5h：同一条事件里也解析**帧真实尺寸** w/h（crop 不影响）——供 C2 落定 / C1 landed 判据。
+      // v3.5h：先解析**帧真实尺寸** w/h（crop 不影响）——供 C2 落定 / C1 landed 判据。
+      // 与 dw/dh 解耦：任一字段缺失/非法时各自退化（w/h 有值仍可入库）。
       final wNum = m['w'];
       final hNum = m['h'];
       final wv = wNum is num ? wNum.toInt() : null;
@@ -940,6 +931,16 @@ mixin PlayerMixin {
         if (prevWH == null || prevWH.$1 != wv || prevWH.$2 != hv) {
           _voutWHStableSince = DateTime.now();
         }
+      }
+      if (dw == null || dh == null || dw <= 0 || dh <= 0) {
+        return; // g4：>0 才入库
+      }
+      final prev = _lastVoutDwh;
+      _lastVoutDwh = (dw, dh);
+      // v3.3（ISS-294）：v3.2 的 120ms 去抖回灌已拆除（自激闭环主犯）。退化为纯缓存 + 稳定门计时。
+      // P1-3 语义：值变化才重置首现时刻；稳态（值不变）保持原时刻、零 timer 零重置。
+      if (prev == null || prev.$1 != dw || prev.$2 != dh) {
+        _voutStableSince = DateTime.now();
       }
       _maybeCompleteVsrSettle(); // v3.5 C2：唤醒写链定序等待器
       _maybeApplyVsrCorrector();
@@ -1132,8 +1133,8 @@ mixin PlayerMixin {
   }
 
   /// v3.5 C1（应用级修因 · **条件式**）：链已挂 + 有 crop 目标，且观测到**新 scale 帧已落定**
-  /// （dw/dh ∈ 期望候选对）并稳定，但 dw/dh 比 ≠ crop 目标比 ⇒ crop 未被 VO 应用（写链竞态/
-  /// 被丢弃）→ **立即**重放自救（写在与新 scale 匹配的帧上，不会被 mpv 丢弃）。
+  /// （w/h ∈ 期望候选对，v3.5h 由 dw/dh 改 w/h）并稳定，但 dw/dh 比 ≠ crop 目标比 ⇒ crop
+  /// 未被 VO 应用（写链竞态/被丢弃）→ **立即**重放自救（写在与新 scale 匹配的帧上，不会被丢弃）。
   /// 条件式取代原「静默≥2s + 稳定≥2s + 固定延迟 250/600/1200ms」——不再猜时机（A-2/F-1 复核项）。
   /// 有界（`_vsrRepairBudget`）；命中目标即清 `_vsrCorrectorFallbackPending`；耗尽/超时落 v3.3 兜底。
   void _maybeRepairVsrCrop() {
@@ -1180,9 +1181,9 @@ mixin PlayerMixin {
     if (!_scheduleVsrCropReplay(_vsrDesiredCrop)) return;
     _vsrRepairBudget--;
     _vsrLastRepairAt = now; // v3.5c 复核 B-3：冷却锚点在**发起时**置位（写异常也不失效）
-    Log.d('[VSR] 应用级修因：新 scale 已落定（dw/dh=${v.$1}x${v.$2}'
-        ' 比 ${(v.$1 / v.$2).toStringAsFixed(6)}）但 crop 未应用'
-        '（目标 ${_vsrDesiredCropRatio()?.toStringAsFixed(6)}）→ 重放'
+    Log.d('[VSR] 应用级修因：新 scale 已落定（w/h=${vWH.$1}x${vWH.$2}）但 crop 未应用'
+        '（dw/dh=${v.$1}x${v.$2} 比 ${(v.$1 / v.$2).toStringAsFixed(6)}'
+        ' 目标 ${_vsrDesiredCropRatio()?.toStringAsFixed(6)}）→ 重放'
         '（本代际剩 $_vsrRepairBudget）');
   }
 
