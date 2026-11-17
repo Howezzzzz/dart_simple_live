@@ -1766,7 +1766,9 @@ mixin PlayerMixin {
       _pipelineBusy--;
       _maybeFinishReadyGate();
       // v3.5i：toggle 自有遮罩到此才撤（盖住「play + 单次写链」的过渡）。
-      if (toggleMaskOwned) {
+      // 实现复核 6c8bc6e C-R2：await 期间若已被换线路重武装（epoch 变）→ 新门控/就绪门接管
+      // 遮罩，不得用旧快照提前掀掉（否则一次可见闪烁）。
+      if (toggleMaskOwned && !_playerDisposed && epoch == _vsrGateEpoch) {
         _vsrToggleMaskTimer?.cancel();
         _vsrToggleMaskTimer = null;
         _vsrToggleMaskOn = false;
@@ -3250,7 +3252,9 @@ class PlayerController extends BaseController
     // hwdec 与错误抑制由 `_syncRtxVsrCrop` 内部统一处理。
     if (armToggleGate) {
       _armVsrDeferPlay(); // 重置 _vsrGatePlayOnRelease=true / _vsrGateIsToggle=false
-      _vsrGatePlayOnRelease = player.state.playing; // 仅「武装时在播」才恢复 play()
+      // 仅「武装时在播」才恢复 play()（防强制恢复暂停）；但**进房/换源在途**（就绪门武装中，
+      // 宿主可能正以 open(play:false) 待起播）必须 play，否则无人起播（实现复核 6c8bc6e B-R1）。
+      _vsrGatePlayOnRelease = player.state.playing || _readyPending;
       _vsrGateIsToggle = true;
       _armVsrToggleMask(); // (c) 遮罩（_readyPending 时自动跳过）
       Log.d('[VSR] toggle 武装短门控（武装时在播=$_vsrGatePlayOnRelease）');
