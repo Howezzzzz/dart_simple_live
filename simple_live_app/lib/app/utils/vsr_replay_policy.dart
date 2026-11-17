@@ -129,3 +129,27 @@ bool vsrMatchesPair(
   }
   return false;
 }
+
+/// v3.5i（1.08.83 / ISS-311）：兜底「进度锚点」——距最近一次**进度**的时长。
+///
+/// 进度 = 链写 / 重放 / **校正器开始等待那一刻**（`pendingAt`）。
+///
+/// 为何必须含 `pendingAt`：`_lastVsrChainWriteAt` 在 v3.5 设计上**跨代际保留**
+/// （摘链 vsr-off 也会刷新它）。若锚点只取「链写 / 重放」，则「上次摘链距本次
+/// toggle-on ≥8s」时，校正器**刚请求修因的同一帧**即被判「8s 无进展」→ 瞬间
+/// Rx 迁就 → 面板重排 → **二次写链**（真机 `log-1117-1520` 实证 6 处）。
+/// 加上 `pendingAt` 后，8s 窗口自「校正器开始等待」起算，跨代际陈旧锚点被兜住。
+///
+/// 无任何锚点 → null（调用方据此**不**兜底）。
+Duration? vsrSinceProgressAt({
+  DateTime? chainWriteAt,
+  DateTime? lastRepairAt,
+  DateTime? pendingAt,
+  required DateTime now,
+}) {
+  DateTime? at = chainWriteAt;
+  for (final t in [lastRepairAt, pendingAt]) {
+    if (t != null && (at == null || t.isAfter(at))) at = t;
+  }
+  return at == null ? null : now.difference(at);
+}

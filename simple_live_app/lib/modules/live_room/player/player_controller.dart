@@ -822,6 +822,9 @@ mixin PlayerMixin {
   DateTime? _vsrLastRepairAt;
   /// 校正器四门已通过、等修因结果：修因成功 → 清；耗尽/超时 → 落「Rx=960 迁就」兜底。
   bool _vsrCorrectorFallbackPending = false;
+  /// v3.5i（1.08.83 / ISS-311）：校正器**开始等待**兜底的时刻——兜底「进度锚点」的一元。
+  /// 与 `_vsrCorrectorFallbackPending` 同源生命周期（置位同处、`_clearVsrCorrectorFallback` 清）。
+  DateTime? _vsrCorrectorPendingAt;
   /// 代际序号（`_resetLastVoutDwh` 自增）：settle await 前后比对，防写入被换源作废的旧目标。
   int _vsrRepairEpoch = 0;
   /// 修因冷却（两次重放写的最小间隔）。
@@ -1080,6 +1083,9 @@ mixin PlayerMixin {
       // 修因不可用（无预算 / 链未挂 / 无目标）时直接兜底，防 pending 永挂（B-3 复核项）。
       if (_vsrRepairBudget > 0 && _rtxVsrChainApplied && _vsrDesiredCrop.isNotEmpty) {
         _vsrCorrectorFallbackPending = true;
+        // v3.5i（ISS-311）：必须**先于** `_armVsrFallbackTimer()` 赋值——`vsrFallbackDue`
+        // 用严格 `<`，晚赋值会让首次回调只剩毫秒余量（当场可邈）。
+        _vsrCorrectorPendingAt = DateTime.now();
         _vsrFallbackRearmsLeft = 3;
         // v3.5c/d 复核：挂独立安全网定时器（事件断流也能兜底；回调复核进度，不无条件抢跑）。
         _armVsrFallbackTimer();
@@ -1169,7 +1175,7 @@ mixin PlayerMixin {
       sinceProgress: _vsrSinceProgress(),
       maxWait: vsrCorrectorFallbackMaxWait,
     )) {
-      Log.d('[VSR] 修因绝对兜底（${vsrCorrectorFallbackMaxWait.inSeconds}s 无进展）→ Rx 迁就');
+      Log.d('[VSR] 修因绝对兜底（≥${vsrCorrectorFallbackMaxWait.inSeconds}s 无进展）→ Rx 迁就');
       _finishVsrCorrectorFallback();
       return;
     }
@@ -1218,6 +1224,7 @@ mixin PlayerMixin {
   /// 清「校正器等兜底」标记（含撤销安全网定时器）。
   void _clearVsrCorrectorFallback() {
     _vsrCorrectorFallbackPending = false;
+    _vsrCorrectorPendingAt = null; // v3.5i（ISS-311）：与 pending 同源生命周期
     _vsrFallbackRearmsLeft = 3;
     _vsrFallbackTimer?.cancel();
     _vsrFallbackTimer = null;
@@ -1233,21 +1240,21 @@ mixin PlayerMixin {
   }
 
   /// 距最近一次「修因进度」（链写 / 重放）的时长；无锚点 → null。
-  Duration? _vsrSinceProgress() {
-    DateTime? progressAt = _lastVsrChainWriteAt;
-    final lastRepair = _vsrLastRepairAt;
-    if (lastRepair != null &&
-        (progressAt == null || lastRepair.isAfter(progressAt))) {
-      progressAt = lastRepair;
-    }
-    return progressAt == null ? null : DateTime.now().difference(progressAt);
-  }
+  Duration? _vsrSinceProgress() => vsrSinceProgressAt(
+        chainWriteAt: _lastVsrChainWriteAt,
+        lastRepairAt: _vsrLastRepairAt,
+        pendingAt: _vsrCorrectorPendingAt, // v3.5i（ISS-311）：兜住跨代际陈旧锚点
+        now: DateTime.now(),
+      );
 
   /// 挂「兜底安全网」定时器（v3.5d 复核 P1：回调**复核**是否已应用/是否仍有进展，
   /// 未达则续挂——消除「固定 8s 无条件抢跑」把黑边换成画面变形的风险；写入失败也续挂）。
   void _armVsrFallbackTimer() {
     _vsrFallbackTimer?.cancel();
-    _vsrFallbackTimer = Timer(vsrCorrectorFallbackMaxWait, () {
+    // v3.5i（ISS-311）：挂表须**略大于** `maxWait`——`vsrFallbackDue` 用严格 `<`，
+    // 恰挂 maxWait 会让首次回调只剩毫秒余量（pendingAt 入 max 后尤甚）→ 永不兜底。
+    _vsrFallbackTimer = Timer(
+        vsrCorrectorFallbackMaxWait + const Duration(milliseconds: 250), () {
       _vsrFallbackTimer = null;
       if (_playerDisposed || !_vsrCorrectorFallbackPending) return;
       if (vsrFallbackDue(

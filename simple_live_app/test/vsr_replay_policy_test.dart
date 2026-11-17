@@ -182,4 +182,51 @@ void main() {
       expect(call(crop: ''), isFalse);
     });
   });
+
+  // v3.5i（1.08.83 / ISS-311）：兜底「进度锚点」——防「瞬间误兜底」导致二次写链。
+  group('vsrSinceProgressAt（兜底进度锚点，ISS-311）', () {
+    final now = DateTime(2026, 11, 17, 15, 20, 56);
+    test('无任何锚点 → null（调用方不兜底）', () {
+      expect(vsrSinceProgressAt(now: now), isNull);
+    });
+    test('只有链写 → now − 链写', () {
+      expect(
+        vsrSinceProgressAt(
+            chainWriteAt: now.subtract(const Duration(seconds: 3)), now: now),
+        const Duration(seconds: 3),
+      );
+    });
+    test('★ pendingAt 晚于陈旧链写 → 取 pendingAt（跨代际锚点被兜住）', () {
+      expect(
+        vsrSinceProgressAt(
+          chainWriteAt: now.subtract(const Duration(seconds: 47)), // 上一代际摘链
+          pendingAt: now.subtract(const Duration(milliseconds: 40)), // 刚请求修因
+          now: now,
+        ),
+        const Duration(milliseconds: 40),
+      );
+    });
+    test('重放晚于另两者 → 取重放（任一路径有进展即前移锚点）', () {
+      expect(
+        vsrSinceProgressAt(
+          chainWriteAt: now.subtract(const Duration(seconds: 47)),
+          pendingAt: now.subtract(const Duration(seconds: 5)),
+          lastRepairAt: now.subtract(const Duration(seconds: 2)),
+          now: now,
+        ),
+        const Duration(seconds: 2),
+      );
+    });
+    test('★ ISS-311 回归：旧逻辑（不含 pendingAt）判 ≥8s → 新逻辑否', () {
+      final legacy = vsrSinceProgressAt(
+          chainWriteAt: now.subtract(const Duration(seconds: 47)), now: now);
+      expect(legacy! >= const Duration(seconds: 8), isTrue); // 旧：会瞬间兜底（错）
+      final fixed = vsrSinceProgressAt(
+        chainWriteAt: now.subtract(const Duration(seconds: 47)),
+        pendingAt: now.subtract(const Duration(milliseconds: 40)),
+        now: now,
+      );
+      expect(fixed! < const Duration(seconds: 8), isTrue); // 新：不兜底（对）
+    });
+  });
 }
