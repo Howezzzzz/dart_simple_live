@@ -1094,6 +1094,7 @@ mixin PlayerMixin {
     _vsrRepairBudget = 3;
     _clearVsrCorrectorFallback();
     _vsrRepairPairs = null;
+    _vsrDesiredCrop = ''; // v3.5g 复核 P2：代际重置清期望目标，防旧 crop 比污染校正器门③/④
     _vsrLastRepairAt = null;
     // v3.5 C1（C-2/C-3 复核项）：代际自增 → 作废在飞的 settle 等待（其 await 后比对 epoch），
     // 并主动唤醒 + 撤销超时定时器（不再只能等事件或超时）。
@@ -1248,12 +1249,13 @@ mixin PlayerMixin {
     if (crop.isEmpty || !_rtxVsrChainApplied || _playerDisposed) return false;
     if (player.platform is! NativePlayer) return false;
     final token = ++_vsrCropRetryToken;
+    final epoch = _vsrRepairEpoch; // v3.5g 复核 P2：闭包内复查代际（防落后回写）
     // 必须在**写锁 Zone 之外**调度：本方法可能在 `_applyVsrTargetUnlocked` 锁体内被调用，
     // 直接 await 会命中 `_withWriteMutex` 的重入短路（不排队）。用 `Zone.root.bindCallback`
     // 转义（与 `_scheduleSuppressRelease` 同款，阶段4 定向复验）。
     Zone.root.bindCallback(() async {
       // 守卫①：代际 + 目标未变（比代际更强，防旧目标被新流覆盖后又重写）。
-      if (_playerDisposed || token != _vsrCropRetryToken) return;
+      if (_playerDisposed || epoch != _vsrRepairEpoch || token != _vsrCropRetryToken) return;
       if (!_rtxVsrChainApplied || _vsrDesiredCrop != crop) return;
       final pp = player.platform;
       if (pp is! NativePlayer) return;
@@ -1418,11 +1420,13 @@ mixin PlayerMixin {
           // 振荡期链恒已挂（scale 非 null）→ 不重臂，防自激一次性语义不破坏。
           if (_lastRtxVsrScale == null) {
             _vsrCorrectorFired = false;
-            // v3.5 C1（P2-1/A-3）：链无→有（同代际 off→on）重臂时，修因预算/兜底标记/布防
+            // v3.5 C1（P2-1/A-3）：链无→有（同代际 off→on）重臂时，修因预算/兜底标记/冷却锚点
             // 同步重置，否则校正器/修因重放哑火。
+            // v3.5g 复核 P1：**不得清 `_vsrRepairPairs`**——它由 `_syncRtxVsrCrop` 与
+            // `_vsrDesiredCrop` 同源维护；此处清空会盖在「首挂链→settle→写 crop」窗口前，
+            // 致冷启动直进房B 时修因永不触发。
             _vsrRepairBudget = 3;
             _clearVsrCorrectorFallback();
-            _vsrRepairPairs = null;
             _vsrLastRepairAt = null;
           }
           _lastRtxVsrScale = t.scale;
@@ -1725,10 +1729,10 @@ mixin PlayerMixin {
       // 同主写链分支（实现复核 R8 P1）：链从无到有 → 重臂校正器（门控超时兜底等价 off→on）。
       if (_lastRtxVsrScale == null) {
         _vsrCorrectorFired = false;
-        // v3.5 C1（A-3 复核项）：预挂兜底是 R8 等价重臂点，预算/兜底标记/布防同步重置。
+        // v3.5 C1（A-3 复核项）：预挂兜底是 R8 等价重臂点，预算/兜底标记/冷却锚点同步重置。
+        // v3.5g：不清 `_vsrRepairPairs`（由 sync 同源维护，见主写链同处注释）。
         _vsrRepairBudget = 3;
         _clearVsrCorrectorFallback();
-        _vsrRepairPairs = null;
         _vsrLastRepairAt = null;
       }
       _lastRtxVsrScale = rtxVsrScale;
