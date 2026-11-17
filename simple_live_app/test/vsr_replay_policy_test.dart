@@ -19,7 +19,7 @@ void main() {
       expect(vsrCropRatio('3600'), isNull); // 无 x
       expect(vsrCropRatio('x2024+0+0'), isNull); // x 在首
       expect(vsrCropRatio('3600x2024'), isNull); // 无 +
-      expect(vsrCropRatio('3600x2024+0'), isNull); // 只有一个 +（缺 y 仍可解析宽高）
+      expect(vsrCropRatio('3600x2024+0'), closeTo(1.77866, 1e-4)); // 缺 y 仍可解析宽高
     });
     test('非正数 → null', () {
       expect(vsrCropRatio('0x2024+0+0'), isNull);
