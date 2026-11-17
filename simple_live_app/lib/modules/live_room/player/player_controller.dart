@@ -952,7 +952,7 @@ mixin PlayerMixin {
     final exp = _vsrExpectedOutPairs(t);
     if (exp == null) return;
     final cur = _lastVoutDwh;
-    if (cur != null && exp.contains(cur)) {
+    if (cur != null && vsrMatchesPair(exp, cur, tolPx: vsrRepairPairTolerancePx)) {
       return; // 已在新 scale 态，无需等待
     }
     final c = Completer<void>();
@@ -991,7 +991,7 @@ mixin PlayerMixin {
     final v = _lastVoutDwh;
     final pairs = _vsrSettlePairs;
     if (v == null || pairs == null) return;
-    if (pairs.contains(v)) {
+    if (vsrMatchesPair(pairs, v, tolPx: vsrRepairPairTolerancePx)) {
       c.complete();
     }
   }
@@ -1055,11 +1055,8 @@ mixin PlayerMixin {
       // 修因不可用（无预算 / 链未挂 / 无目标）时直接兜底，防 pending 永挂（B-3 复核项）。
       if (_vsrRepairBudget > 0 && _rtxVsrChainApplied && _vsrDesiredCrop.isNotEmpty) {
         _vsrCorrectorFallbackPending = true;
-        // v3.5c 复核 C-2：挂独立安全网定时器——事件断流（暂停/卡流）时仍能兜底。
-        _vsrFallbackTimer?.cancel();
-        _vsrFallbackTimer = Timer(vsrCorrectorFallbackMaxWait, () {
-          _finishVsrCorrectorFallback();
-        });
+        // v3.5c/d 复核：挂独立安全网定时器（事件断流也能兜底；回调复核进度，不无条件抢跑）。
+        _armVsrFallbackTimer();
         Log.d('[VSR] 房B 校正器：四门通过 → 请求 crop 修因重放'
             '（Rx=${curW}x$curH 暂不迁就，dw/dh 比=$voRatio 目标=$cTarget）');
       } else {
@@ -1132,14 +1129,6 @@ mixin PlayerMixin {
       return;
     }
     final now = DateTime.now();
-    // 「修因进度」锚点 = 最近一次链写/重放（任一路径推进即重置）——供绝对兜底判超时。
-    DateTime? progressAt = _lastVsrChainWriteAt;
-    final lastRepair = _vsrLastRepairAt;
-    if (lastRepair != null &&
-        (progressAt == null || lastRepair.isAfter(progressAt))) {
-      progressAt = lastRepair;
-    }
-    final sinceProgress = progressAt == null ? null : now.difference(progressAt);
     // 绝对兜底（v3.5c 复核 C-1/C-3）：**不以预算耗尽为前提**；校正器在等、任一路径超时
     // 无进展且仍未应用 → 落 v3.3「Rx 迁就」。写入成功才清 pending（失败留待下次）。
     if (vsrFallbackDue(
@@ -1147,7 +1136,7 @@ mixin PlayerMixin {
       crop: _vsrDesiredCrop,
       applied: false,
       correctorPending: _vsrCorrectorFallbackPending,
-      sinceProgress: sinceProgress,
+      sinceProgress: _vsrSinceProgress(),
       maxWait: vsrCorrectorFallbackMaxWait,
     )) {
       Log.d('[VSR] 修因绝对兜底（${vsrCorrectorFallbackMaxWait.inSeconds}s 无进展）→ Rx 迁就');
@@ -1159,7 +1148,7 @@ mixin PlayerMixin {
       chainApplied: _rtxVsrChainApplied,
       crop: _vsrDesiredCrop,
       applied: false,
-      landed: vsrMatchesPair(pairs, v, vsrRepairPairTolerancePx),
+      landed: vsrMatchesPair(pairs, v, tolPx: vsrRepairPairTolerancePx),
       stableFor:
           _voutStableSince == null ? null : now.difference(_voutStableSince!),
       sinceRepair:
@@ -1169,13 +1158,14 @@ mixin PlayerMixin {
       budgetLeft: _vsrRepairBudget,
     );
     if (!go) return;
+    // v3.5d 复核 P2：先确认「真能调度」再扣预算/推进冷却锚点（否则守卫静默 return 时空转）。
+    if (!_scheduleVsrCropReplay(_vsrDesiredCrop)) return;
     _vsrRepairBudget--;
     _vsrLastRepairAt = now; // v3.5c 复核 B-3：冷却锚点在**发起时**置位（写异常也不失效）
     Log.d('[VSR] 应用级修因：新 scale 已落定（dw/dh=${v.$1}x${v.$2}'
         ' 比 ${(v.$1 / v.$2).toStringAsFixed(6)}）但 crop 未应用'
         '（目标 ${_vsrDesiredCropRatio()?.toStringAsFixed(6)}）→ 重放'
         '（本代际剩 $_vsrRepairBudget）');
-    _scheduleVsrCropReplay(_vsrDesiredCrop);
   }
 
   /// v3.5 C1（C3 降级）：重放耗尽/超时的兜底——v3.3 的「Rx=960 迁就」语义。
@@ -1211,12 +1201,45 @@ mixin PlayerMixin {
     }
   }
 
+  /// 距最近一次「修因进度」（链写 / 重放）的时长；无锚点 → null。
+  Duration? _vsrSinceProgress() {
+    DateTime? progressAt = _lastVsrChainWriteAt;
+    final lastRepair = _vsrLastRepairAt;
+    if (lastRepair != null &&
+        (progressAt == null || lastRepair.isAfter(progressAt))) {
+      progressAt = lastRepair;
+    }
+    return progressAt == null ? null : DateTime.now().difference(progressAt);
+  }
+
+  /// 挂「兜底安全网」定时器（v3.5d 复核 P1：回调**复核**是否已应用/是否仍有进展，
+  /// 未达则续挂——消除「固定 8s 无条件抢跑」把黑边换成画面变形的风险；写入失败也续挂）。
+  void _armVsrFallbackTimer() {
+    _vsrFallbackTimer?.cancel();
+    _vsrFallbackTimer = Timer(vsrCorrectorFallbackMaxWait, () {
+      _vsrFallbackTimer = null;
+      if (_playerDisposed || !_vsrCorrectorFallbackPending) return;
+      if (vsrFallbackDue(
+        chainApplied: _rtxVsrChainApplied,
+        crop: _vsrDesiredCrop,
+        applied: _voutAppliedCropTarget(),
+        correctorPending: true,
+        sinceProgress: _vsrSinceProgress(),
+        maxWait: vsrCorrectorFallbackMaxWait,
+      )) {
+        _finishVsrCorrectorFallback();
+      }
+      if (_vsrCorrectorFallbackPending) _armVsrFallbackTimer(); // 未解决 → 续挂
+    });
+  }
+
   /// v3.5 C1（统一重放调度器）：crop 未被 VO 应用时的**专用单笔重写**（不走 `_syncRtxVsrCrop`，
   /// 避免按当时 area 重算而连带改写 vf 触发链重建）。**条件式**调度——调用方已确认「新 scale
   /// 帧落定」，此处**立即**写（不再固定延迟猜时机）；成功/失败由 out-params 事件流再判（应用级）。
   /// 有界（预算由调用方递减）；单 token 互斥（修因 / 校正器 / 回读失败三源共用）。
-  void _scheduleVsrCropReplay(String crop) {
-    if (crop.isEmpty || !_rtxVsrChainApplied) return;
+  bool _scheduleVsrCropReplay(String crop) {
+    if (crop.isEmpty || !_rtxVsrChainApplied || _playerDisposed) return false;
+    if (player.platform is! NativePlayer) return false;
     final token = ++_vsrCropRetryToken;
     // 必须在**写锁 Zone 之外**调度：本方法可能在 `_applyVsrTargetUnlocked` 锁体内被调用，
     // 直接 await 会命中 `_withWriteMutex` 的重入短路（不排队）。用 `Zone.root.bindCallback`
@@ -1244,6 +1267,7 @@ mixin PlayerMixin {
         Log.d('[VSR] crop 修因重放异常: $e');
       }
     })();
+    return true;
   }
 
   Future<void> _syncRtxVsrCrop({String trigger = 'sync'}) async {
@@ -1276,6 +1300,8 @@ mixin PlayerMixin {
     final enable = plan.applied;
     final desired = plan.crop;
     _vsrDesiredCrop = desired; // ② P2：供重试回调做「目标未变」守卫
+    // v3.5d 复核 P1：修因布防与目标**原子绑定**（同处赋值）——避免「新 crop + 旧 pairs」窗口
+    // 把新 crop 写到旧 scale 帧（根因复现，可 2s 内烧光预算）。crop 空 → 不布防。
     final aspectValue = plan.aspect;
     final renderSize = plan.renderSize;
     // ② P3/C5：缓存终态显示比例（VSR 生效时），供面板宽一次到位。
@@ -1374,7 +1400,7 @@ mixin PlayerMixin {
             // v3.5 C1（P2-1/A-3）：链无→有（同代际 off→on）重臂时，修因预算/兜底标记/布防
             // 同步重置，否则校正器/修因重放哑火。
             _vsrRepairBudget = 3;
-            _vsrCorrectorFallbackPending = false;
+            _clearVsrCorrectorFallback();
             _vsrRepairPairs = null;
             _vsrLastRepairAt = null;
           }
@@ -1413,9 +1439,7 @@ mixin PlayerMixin {
       Log.d('[VSR] crop 写后：代际已变（epoch $epochAtStart→$_vsrRepairEpoch）→ 跳过剩余下发');
       return;
     }
-    // v3.5c 复核 B-2：**所有写 crop 的路径**都布防修因期望对（含 vfAction=='none' 同倍数只改
-    // crop / 预挂后首写）；crop 空则清布防。旧实现只在 vf=='set' 分支布防 → 修因哑火。
-    _vsrRepairPairs = t.crop.isEmpty ? null : _vsrExpectedOutPairs(t);
+    // v3.5d 复核 P1：修因布防已与目标原子绑定（见 `_syncRtxVsrCrop`），此处不再重复布防。
     // v3.5 C1（C-1 复核项）：crop 写后刷新静默门锚点——原锚点在 vf 写处，crop 写入后不刷新
     // 会让校正器静默门在 crop 刚写完即满足（超时路径下）。
     _lastVsrChainWriteAt = DateTime.now();
@@ -1682,7 +1706,7 @@ mixin PlayerMixin {
         _vsrCorrectorFired = false;
         // v3.5 C1（A-3 复核项）：预挂兜底是 R8 等价重臂点，预算/兜底标记/布防同步重置。
         _vsrRepairBudget = 3;
-        _vsrCorrectorFallbackPending = false;
+        _clearVsrCorrectorFallback();
         _vsrRepairPairs = null;
         _vsrLastRepairAt = null;
       }

@@ -92,22 +92,29 @@ void main() {
     });
   });
 
-  group('vsrMatchesPair（像素容差匹配，v3.5c B-1）', () {
+  group('vsrMatchesPair（像素 + 比值容差匹配，v3.5c/d B-1）', () {
     final pairs = vsrExpectedOutPairs(
         rawW: 960, rawH: 544, scale: 3.75, renderW: 3600, renderH: 2024);
     test('精确命中 → true', () {
-      expect(vsrMatchesPair(pairs, (3600, 2040), 3), isTrue);
-      expect(vsrMatchesPair(pairs, (3600, 2024), 3), isTrue);
+      expect(vsrMatchesPair(pairs, (3600, 2040), tolPx: 3), isTrue);
+      expect(vsrMatchesPair(pairs, (3600, 2024), tolPx: 3), isTrue);
     });
-    test('±1px / ±3px 偏差 → 仍在容差内 true', () {
-      expect(vsrMatchesPair(pairs, (3599, 2039), 3), isTrue);
-      expect(vsrMatchesPair(pairs, (3603, 2043), 3), isTrue);
+    test('小偏差（±1~3px）→ true', () {
+      expect(vsrMatchesPair(pairs, (3599, 2039), tolPx: 3), isTrue);
+      expect(vsrMatchesPair(pairs, (3603, 2043), tolPx: 3), isTrue);
     });
-    test('超容差 → false', () {
-      expect(vsrMatchesPair(pairs, (3604, 2040), 3), isFalse);
-      expect(vsrMatchesPair(pairs, (3600, 2036), 3), isFalse);
+    test('比值容差放行 16 对齐偏差（2400,1344 vs 期望 2400,1350）', () {
+      final p = vsrExpectedOutPairs(rawW: 640, rawH: 360, scale: 3.75);
+      // 期望 (2400,1350)；ty=max(3,round(1350*0.005)=7)=7 → 1344 差 6 ≤ 7 → true
+      expect(vsrMatchesPair(p, (2400, 1344), tolPx: 3), isTrue);
     });
-    test('pairs 为 null → false', () => expect(vsrMatchesPair(null, (3600, 2040), 3), isFalse));
+    test('超比值容差 → false', () {
+      expect(vsrMatchesPair(pairs, (3619, 2040), tolPx: 3), isFalse); // dx 19 > tx 18
+      expect(vsrMatchesPair(pairs, (3600, 2013), tolPx: 3), isFalse); // dy 11 > ty 10
+    });
+    test('pairs 为 null → false', () {
+      expect(vsrMatchesPair(null, (3600, 2040), tolPx: 3), isFalse);
+    });
   });
 
   group('vsrShouldRepair（条件式：落定 + 稳定 + 冷却 + 预算）', () {

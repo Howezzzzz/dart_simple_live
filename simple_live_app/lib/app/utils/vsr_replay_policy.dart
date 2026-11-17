@@ -108,13 +108,25 @@ bool vsrFallbackDue({
   return true;
 }
 
-/// 观测 `(dw,dh)` 是否落在期望候选对之一的 **[tolPx] 像素容差**内（v3.5c 复核 B-1 修复）。
-/// 原判据用整数精确相等，mpv 侧 scale/对齐的一像素偏差即让「已落定」永不为真 → 修因哑火；
-/// 改为像素容差匹配（与全链路 0.005 比值容差同精神）。
-bool vsrMatchesPair(Set<(int, int)>? pairs, (int, int) v, int tolPx) {
+/// 观测 `(dw,dh)` 是否落在期望候选对之一的容差内（v3.5c 复核 B-1；v3.5d 复核 P2 放宽）。
+/// 容差取 **`max(tolPx, round(tolRatio×维度))`**——原 tolPx=3 对 d3d11vpp 的 16 对齐输出可能
+/// 偏紧（如期望 (2400,1350) 实出 (2400,1344)，差 6），按 0.5% 比值容差放行；仍未超出相邻
+/// 自适应倍数档位差（≥数十 px）的量级。
+bool vsrMatchesPair(
+  Set<(int, int)>? pairs,
+  (int, int) v, {
+  required int tolPx,
+  double tolRatio = 0.005,
+}) {
   if (pairs == null) return false;
   for (final p in pairs) {
-    if ((v.$1 - p.$1).abs() <= tolPx && (v.$2 - p.$2).abs() <= tolPx) {
+    final tx = tolPx > (p.$1 * tolRatio).round()
+        ? tolPx
+        : (p.$1 * tolRatio).round();
+    final ty = tolPx > (p.$2 * tolRatio).round()
+        ? tolPx
+        : (p.$2 * tolRatio).round();
+    if ((v.$1 - p.$1).abs() <= tx && (v.$2 - p.$2).abs() <= ty) {
       return true;
     }
   }
