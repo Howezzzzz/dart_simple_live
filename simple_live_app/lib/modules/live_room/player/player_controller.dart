@@ -1084,7 +1084,7 @@ mixin PlayerMixin {
       if (_vsrRepairBudget > 0 && _rtxVsrChainApplied && _vsrDesiredCrop.isNotEmpty) {
         _vsrCorrectorFallbackPending = true;
         // v3.5i（ISS-311）：必须**先于** `_armVsrFallbackTimer()` 赋值——`vsrFallbackDue`
-        // 用严格 `<`，晚赋值会让首次回调只剩毫秒余量（当场可邈）。
+        // 用严格 `<`，晚赋值会让首次回调只剩毫秒余量（当场可复现）。
         _vsrCorrectorPendingAt = DateTime.now();
         _vsrFallbackRearmsLeft = 3;
         // v3.5c/d 复核：挂独立安全网定时器（事件断流也能兜底；回调复核进度，不无条件抢跑）。
