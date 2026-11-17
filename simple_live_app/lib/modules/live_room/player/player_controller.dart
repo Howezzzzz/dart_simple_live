@@ -819,6 +819,8 @@ mixin PlayerMixin {
   static const int vsrRepairPairTolerancePx = 3;
   /// 「校正器等兜底」的安全网定时器（事件断流时仍能兜底，v3.5c 复核 C-2）。
   Timer? _vsrFallbackTimer;
+  /// 安全网续挂剩余次数（v3.5e 复核：防「兜底写入恒失败」时无界轮询）。
+  int _vsrFallbackRearmsLeft = 3;
 
   /// ② P3/C4：当前「真源」尺寸 = 解码器输出（mpv `video-params/w,h`），
   /// **不受 `video-aspect-override` 影响**（`state.width/height` 是 dw/dh，会被它污染）。
@@ -1055,6 +1057,7 @@ mixin PlayerMixin {
       // 修因不可用（无预算 / 链未挂 / 无目标）时直接兜底，防 pending 永挂（B-3 复核项）。
       if (_vsrRepairBudget > 0 && _rtxVsrChainApplied && _vsrDesiredCrop.isNotEmpty) {
         _vsrCorrectorFallbackPending = true;
+        _vsrFallbackRearmsLeft = 3;
         // v3.5c/d 复核：挂独立安全网定时器（事件断流也能兜底；回调复核进度，不无条件抢跑）。
         _armVsrFallbackTimer();
         Log.d('[VSR] 房B 校正器：四门通过 → 请求 crop 修因重放'
@@ -1188,6 +1191,7 @@ mixin PlayerMixin {
   /// 清「校正器等兜底」标记（含撤销安全网定时器）。
   void _clearVsrCorrectorFallback() {
     _vsrCorrectorFallbackPending = false;
+    _vsrFallbackRearmsLeft = 3;
     _vsrFallbackTimer?.cancel();
     _vsrFallbackTimer = null;
   }
@@ -1229,7 +1233,10 @@ mixin PlayerMixin {
       )) {
         _finishVsrCorrectorFallback();
       }
-      if (_vsrCorrectorFallbackPending) _armVsrFallbackTimer(); // 未解决 → 续挂
+      if (_vsrCorrectorFallbackPending && _vsrFallbackRearmsLeft > 0) {
+        _vsrFallbackRearmsLeft--;
+        _armVsrFallbackTimer(); // 未解决 → 续挂（有上限，防无界轮询）
+      }
     });
   }
 
@@ -1304,6 +1311,20 @@ mixin PlayerMixin {
     // 把新 crop 写到旧 scale 帧（根因复现，可 2s 内烧光预算）。crop 空 → 不布防。
     final aspectValue = plan.aspect;
     final renderSize = plan.renderSize;
+    // v3.5e 复核 P0：修因布防与目标**同处赋值**（与 `_vsrDesiredCrop` 同函数、同 plan 派生）——
+    // 避免「新 crop + 旧 pairs」窗口把新 crop 写到旧 scale 帧（根因复现 + 烧光预算）。
+    // crop 空（VSR 关/无补边）→ 不布防。assert 锁住「非空 crop 必有布防」不变量。
+    _vsrRepairPairs = desired.isEmpty
+        ? null
+        : vsrExpectedOutPairs(
+            rawW: rawW,
+            rawH: rawH,
+            scale: s,
+            renderW: renderSize?.$1,
+            renderH: renderSize?.$2,
+          );
+    assert(_vsrRepairPairs != null || desired.isEmpty,
+        'v3.5：非空 crop 必须有修因布防（pairs）');
     // ② P3/C5：缓存终态显示比例（VSR 生效时），供面板宽一次到位。
     // v3.3（ISS-294 P1-2 守卫）：校正器已按实测比写过 `_vsrDisplayAspect` 时不再重置回
     // 假说比（否则下一次尺寸/布局事件 W3/W4/W5 会用假说比把刚校正的面板宽冲回 → 房B 黑边

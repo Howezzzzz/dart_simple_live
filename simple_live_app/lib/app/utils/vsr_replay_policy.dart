@@ -108,10 +108,13 @@ bool vsrFallbackDue({
   return true;
 }
 
-/// 观测 `(dw,dh)` 是否落在期望候选对之一的容差内（v3.5c 复核 B-1；v3.5d 复核 P2 放宽）。
-/// 容差取 **`max(tolPx, round(tolRatio×维度))`**——原 tolPx=3 对 d3d11vpp 的 16 对齐输出可能
-/// 偏紧（如期望 (2400,1350) 实出 (2400,1344)，差 6），按 0.5% 比值容差放行；仍未超出相邻
-/// 自适应倍数档位差（≥数十 px）的量级。
+/// 期望对匹配的最小容差（px）：覆盖 d3d11vpp / mpv 输出可能的 **16 对齐**偏差。
+/// ⚠️ 前提：源高/宽 ≥ 64（相邻自适应倍数档位差 = 0.25×维度 ≥ 16px）；直播源远大于此。
+const int vsrAlignTolerancePx = 16;
+
+/// 观测 `(dw,dh)` 是否落在期望候选对之一的容差内（v3.5c B-1；v3.5d/e 复核放宽）。
+/// 容差取 **`max(tolPx, vsrAlignTolerancePx, round(tolRatio×维度))`**——覆盖 16 对齐偏差
+/// （如期望 (2400,1350) 实出 (2400,1344)）与 0.5% 量化误差；仍小于相邻倍数档位差。
 bool vsrMatchesPair(
   Set<(int, int)>? pairs,
   (int, int) v, {
@@ -120,12 +123,14 @@ bool vsrMatchesPair(
 }) {
   if (pairs == null) return false;
   for (final p in pairs) {
-    final tx = tolPx > (p.$1 * tolRatio).round()
-        ? tolPx
-        : (p.$1 * tolRatio).round();
-    final ty = tolPx > (p.$2 * tolRatio).round()
-        ? tolPx
-        : (p.$2 * tolRatio).round();
+    var tx = tolPx;
+    if (vsrAlignTolerancePx > tx) tx = vsrAlignTolerancePx;
+    final rx = (p.$1 * tolRatio).round();
+    if (rx > tx) tx = rx;
+    var ty = tolPx;
+    if (vsrAlignTolerancePx > ty) ty = vsrAlignTolerancePx;
+    final ry = (p.$2 * tolRatio).round();
+    if (ry > ty) ty = ry;
     if ((v.$1 - p.$1).abs() <= tx && (v.$2 - p.$2).abs() <= ty) {
       return true;
     }
