@@ -790,8 +790,12 @@ mixin PlayerMixin {
   Completer<void>? _vsrSettleWaiter;
   /// 等待超时定时器（可取消——命中/abort/代际重置时撤销，防残留）。v3.5a 复核 C-3。
   Timer? _vsrSettleTimer;
-  /// 期望的**新 scale** out `(dw,dh)` 候选**对**（成对，避免交叉积误判；crop 生效与否两态都算落定）。
+  /// 期望的**新 scale 帧真实尺寸** `(w,h)` 候选对（v3.5h：判据由 dw/dh 改为 w/h）。
   Set<(int, int)>? _vsrSettlePairs;
+  /// 帧**真实尺寸**（`video-params/w,h`，crop 不影响）——「新 scale 是否落定」的判据。
+  (int, int)? _lastVoutWH;
+  /// `w/h` 稳定计时起点（与 dw/dh 的 `_voutStableSince` 分开：前者判落定、后者供校正器）。
+  DateTime? _voutWHStableSince;
   /// 等待期间的目标 crop（与 `_vsrDesiredCrop` 比对做 abort）。
   String _vsrSettleCrop = '';
   /// 等待上限（轮4 定值）：双链连写实测 vf 落定 ≈2s。
@@ -925,6 +929,18 @@ mixin PlayerMixin {
       if (prev == null || prev.$1 != dw || prev.$2 != dh) {
         _voutStableSince = DateTime.now();
       }
+      // v3.5h：同一条事件里也解析**帧真实尺寸** w/h（crop 不影响）——供 C2 落定 / C1 landed 判据。
+      final wNum = m['w'];
+      final hNum = m['h'];
+      final wv = wNum is num ? wNum.toInt() : null;
+      final hv = hNum is num ? hNum.toInt() : null;
+      if (wv != null && hv != null && wv > 0 && hv > 0) {
+        final prevWH = _lastVoutWH;
+        _lastVoutWH = (wv, hv);
+        if (prevWH == null || prevWH.$1 != wv || prevWH.$2 != hv) {
+          _voutWHStableSince = DateTime.now();
+        }
+      }
       _maybeCompleteVsrSettle(); // v3.5 C2：唤醒写链定序等待器
       _maybeApplyVsrCorrector();
       _maybeRepairVsrCrop(); // v3.5 C1：应用级修因（条件式；crop 未被 VO 应用 → 重放自救）
@@ -933,27 +949,22 @@ mixin PlayerMixin {
     }
   }
 
-  /// v3.5 C2（写链定序）：计算 vf 重建后新 scale 帧在 VO 落定时的期望 out **(dw,dh) 候选对**。
-  /// 成对集合（候选：`(rawW×scale, rawH×scale)` 未裁满帧、`(renderSize.w, renderSize.h)` 裁后帧），
-  /// crop 生效与否两态都算「已落定」（本步只等**新 scale 帧**到位，crop 应用由 C1 修因兜底）。
-  /// 纯逻辑抽在 `vsrExpectedOutPairs`（可单测）；**成对匹配**消除交叉积误判（A-1 复核项）。
-  Set<(int, int)>? _vsrExpectedOutPairs(_VsrTarget t) {
-    final rs = t.renderSize;
-    return vsrExpectedOutPairs(
-      rawW: t.rawW,
-      rawH: t.rawH,
-      scale: t.scale,
-      renderW: rs?.$1,
-      renderH: rs?.$2,
-    );
-  }
+  /// v3.5 C2/C1（写链定序 + 修因）：计算 vf 重建后新 scale 帧的期望**真实尺寸** `(w,h)`。
+  /// v3.5h：判据由显示尺寸 dw/dh 改为帧真实尺寸 w/h（crop 不影响 w/h）——旧判据会被仍生效的
+  /// 旧 crop 卡住 → 恒等不到 → 每次死等 2s（开 VSR「等几秒」根因）。纯逻辑抽在
+  /// `vsrExpectedFramePairs`（可单测）。
+  Set<(int, int)>? _vsrExpectedFramePairs(_VsrTarget t) => vsrExpectedFramePairs(
+        rawW: t.rawW,
+        rawH: t.rawH,
+        scale: t.scale,
+      );
 
   /// v3.5 C2：写链定序等待——vf 重建后等新 scale 帧在 VO 落定，或超时（2s），或被新目标 abort。
   /// 事件驱动（`_updateLastVoutDwh` 唤醒）；锁内 await 期间 obs 回调不取写锁 → 无死锁。
   Future<void> _awaitVsrChainSettle(_VsrTarget t) async {
-    final exp = _vsrExpectedOutPairs(t);
+    final exp = _vsrExpectedFramePairs(t);
     if (exp == null) return;
-    final cur = _lastVoutDwh;
+    final cur = _lastVoutWH; // v3.5h：用帧真实尺寸 w/h 判落定（dw/dh 会被旧 crop 卡住）
     if (cur != null && vsrMatchesPair(exp, cur, tolPx: vsrRepairPairTolerancePx)) {
       return; // 已在新 scale 态，无需等待
     }
@@ -990,7 +1001,7 @@ mixin PlayerMixin {
       c.complete(); // abort：等待期间目标已被新写链替换（新链排在写锁之后）
       return;
     }
-    final v = _lastVoutDwh;
+    final v = _lastVoutWH; // v3.5h：帧真实尺寸判落定
     final pairs = _vsrSettlePairs;
     if (v == null || pairs == null) return;
     if (vsrMatchesPair(pairs, v, tolPx: vsrRepairPairTolerancePx)) {
@@ -1088,7 +1099,9 @@ mixin PlayerMixin {
   /// 在 ≥2s 后可再次评估（行为方向更优，取舍依据已补记方案文档）。
   void _resetLastVoutDwh() {
     _lastVoutDwh = null;
+    _lastVoutWH = null;
     _voutStableSince = null;
+    _voutWHStableSince = null;
     _vsrCorrectorFired = false;
     // v3.5 C1：修因状态随代际重置（预算 / 兜底标记 / 布防 / 冷却锚点）。
     _vsrRepairBudget = 3;
@@ -1127,7 +1140,8 @@ mixin PlayerMixin {
     if (_playerDisposed || !Platform.isWindows) return;
     if (!_rtxVsrChainApplied || _vsrDesiredCrop.isEmpty) return;
     final v = _lastVoutDwh;
-    if (v == null) return;
+    final vWH = _lastVoutWH; // v3.5h：落定判据用帧真实尺寸 w/h
+    if (v == null || vWH == null) return;
     if (_voutAppliedCropTarget()) {
       _clearVsrCorrectorFallback(); // 已应用 → 无需兜底
       return;
@@ -1152,9 +1166,9 @@ mixin PlayerMixin {
       chainApplied: _rtxVsrChainApplied,
       crop: _vsrDesiredCrop,
       applied: false,
-      landed: vsrMatchesPair(pairs, v, tolPx: vsrRepairPairTolerancePx),
+      landed: vsrMatchesPair(pairs, vWH, tolPx: vsrRepairPairTolerancePx),
       stableFor:
-          _voutStableSince == null ? null : now.difference(_voutStableSince!),
+          _voutWHStableSince == null ? null : now.difference(_voutWHStableSince!),
       sinceRepair:
           _vsrLastRepairAt == null ? null : now.difference(_vsrLastRepairAt!),
       stable: vsrRepairStableDuration,
@@ -1318,13 +1332,7 @@ mixin PlayerMixin {
     // crop 空（VSR 关/无补边）→ 不布防。assert 锁住「非空 crop 必有布防」不变量。
     _vsrRepairPairs = desired.isEmpty
         ? null
-        : vsrExpectedOutPairs(
-            rawW: rawW,
-            rawH: rawH,
-            scale: s,
-            renderW: renderSize?.$1,
-            renderH: renderSize?.$2,
-          );
+        : vsrExpectedFramePairs(rawW: rawW, rawH: rawH, scale: s);
     assert(_vsrRepairPairs != null || desired.isEmpty,
         'v3.5：非空 crop 必须有修因布防（pairs）');
     // ② P3/C5：缓存终态显示比例（VSR 生效时），供面板宽一次到位。

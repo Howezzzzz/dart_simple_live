@@ -57,62 +57,42 @@ void main() {
     });
   });
 
-  group('vsrExpectedOutPairs（新 scale 落定候选对，成对去交叉积）', () {
-    test('960x544@3.75 + render 3600x2024 → 含两对', () {
-      final pairs = vsrExpectedOutPairs(
-          rawW: 960, rawH: 544, scale: 3.75, renderW: 3600, renderH: 2024);
-      expect(pairs, isNotNull);
-      expect(pairs!, contains((3600, 2040))); // 未裁满帧
-      expect(pairs.contains((3600, 2024)), isTrue); // 裁后帧
-    });
-    test('无 renderSize → 只含未裁满帧对', () {
-      final pairs = vsrExpectedOutPairs(rawW: 960, rawH: 544, scale: 3.75);
+  group('vsrExpectedFramePairs（新 scale 帧真实尺寸 w/h）', () {
+    test('960x544@3.75 → 仅 (3600,2040)', () {
+      final pairs = vsrExpectedFramePairs(rawW: 960, rawH: 544, scale: 3.75);
       expect(pairs, equals(<(int, int)>{(3600, 2040)}));
     });
-    test('renderSize == 未裁满帧 → 去重为 1 对', () {
-      final pairs = vsrExpectedOutPairs(
-          rawW: 960, rawH: 544, scale: 2.0, renderW: 1920, renderH: 1088);
-      expect(pairs!.length, 1);
-      expect(pairs.contains((1920, 1088)), isTrue);
+    test('960x544@3.50 → (3360,1904)', () {
+      expect(vsrExpectedFramePairs(rawW: 960, rawH: 544, scale: 3.50),
+          equals(<(int, int)>{(3360, 1904)}));
     });
     test('scale 为空 → null（不布防）', () {
-      expect(vsrExpectedOutPairs(rawW: 960, rawH: 544, scale: null), isNull);
+      expect(vsrExpectedFramePairs(rawW: 960, rawH: 544, scale: null), isNull);
     });
     test('尺寸非法 → null', () {
-      expect(vsrExpectedOutPairs(rawW: 0, rawH: 544, scale: 2.0), isNull);
-      expect(vsrExpectedOutPairs(rawW: 960, rawH: -1, scale: 2.0), isNull);
-    });
-    test('交叉积不再误命中：dw 取未裁态、dh 取裁后态 → 不在集合', () {
-      final pairs = vsrExpectedOutPairs(
-          rawW: 960, rawH: 544, scale: 3.75, renderW: 3600, renderH: 2024);
-      expect(pairs!.contains((3600, 2024)), isTrue);
-      expect(pairs.contains((3600, 2040)), isTrue);
-      expect(pairs.contains((3600, 9999)), isFalse);
-      expect(pairs.contains((9999, 2024)), isFalse);
+      expect(vsrExpectedFramePairs(rawW: 0, rawH: 544, scale: 2.0), isNull);
+      expect(vsrExpectedFramePairs(rawW: 960, rawH: -1, scale: 2.0), isNull);
     });
   });
 
   group('vsrMatchesPair（像素 + 0.5% + 16 对齐容差，v3.5c/d/e B-1）', () {
-    final pairs = vsrExpectedOutPairs(
-        rawW: 960, rawH: 544, scale: 3.75, renderW: 3600, renderH: 2024);
+    final pairs = vsrExpectedFramePairs(rawW: 960, rawH: 544, scale: 3.75);
     test('精确命中 → true', () {
       expect(vsrMatchesPair(pairs, (3600, 2040), tolPx: 3), isTrue);
-      expect(vsrMatchesPair(pairs, (3600, 2024), tolPx: 3), isTrue);
     });
     test('小偏差（±1~3px）→ true', () {
       expect(vsrMatchesPair(pairs, (3599, 2039), tolPx: 3), isTrue);
       expect(vsrMatchesPair(pairs, (3603, 2043), tolPx: 3), isTrue);
     });
-    test('16 对齐偏差放行（1350→1344；2160→2144，ty=16 边界）', () {
-      final p = vsrExpectedOutPairs(rawW: 640, rawH: 360, scale: 3.75);
+    test('16 对齐偏差放行（1350→1344；2176→2160，差 16）', () {
+      final p = vsrExpectedFramePairs(rawW: 640, rawH: 360, scale: 3.75);
       expect(vsrMatchesPair(p, (2400, 1344), tolPx: 3), isTrue); // 差 6
-      final p4k = vsrExpectedOutPairs(
-          rawW: 960, rawH: 544, scale: 4.0, renderW: 3840, renderH: 2160);
-      expect(vsrMatchesPair(p4k, (3840, 2144), tolPx: 3), isTrue); // 差 16
+      final p4k = vsrExpectedFramePairs(rawW: 960, rawH: 544, scale: 4.0);
+      expect(vsrMatchesPair(p4k, (3840, 2160), tolPx: 3), isTrue); // 差 16
     });
     test('超容差 → false', () {
       expect(vsrMatchesPair(pairs, (3620, 2040), tolPx: 3), isFalse); // dx 20 > 18
-      expect(vsrMatchesPair(pairs, (3600, 2007), tolPx: 3), isFalse); // dy 17 > 16
+      expect(vsrMatchesPair(pairs, (3600, 2007), tolPx: 3), isFalse); // dy 33 > 16
     });
     test('pairs 为 null → false', () {
       expect(vsrMatchesPair(null, (3600, 2040), tolPx: 3), isFalse);

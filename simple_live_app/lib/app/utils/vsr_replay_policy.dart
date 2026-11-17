@@ -38,27 +38,19 @@ bool vsrOutAppliedCrop({
   return ((dw / dh) - targetRatio).abs() <= tolerance;
 }
 
-/// 期望的**新 scale** out `(dw, dh)` 候选**对**集合（成对，避免「宽取一态、高取另一态」的
-/// 交叉积误判——A-1 复核项）。
+/// 期望的**新 scale 帧真实尺寸** `(w,h)` 候选对（v3.5h：判据由 dw/dh 改为 w/h）。
 ///
-/// - `(rawW*s, rawH*s)`：crop **未**生效的新 scale 满帧；
-/// - `(renderW, renderH)`：crop **已**生效态（若提供 renderSize）。
-///
-/// 两者都算「新 scale 已落定」——本判据只用于回答「VO 是否已切到新 scale」，crop 是否应用
-/// 另由 [vsrOutAppliedCrop] 判。`scale` 为空 / 尺寸非法 → null（不布防）。
-Set<(int, int)>? vsrExpectedOutPairs({
+/// mpv `video-params/w,h` = 滤镜放大**后**的帧尺寸，**不受 `video-crop` 影响**——用它判
+/// 「新 scale 是否已在 VO 落定」才准。旧判据用显示尺寸 `dw/dh`，会被**仍在生效的旧 crop**
+/// 卡住（真机 1.08.79：`w/h` 已切到 3600x2040、`dw/dh` 滞留 3360x1890）→ 恒等不到 → 每次
+/// 死等 2s 超时（开 VSR 的「等几秒」根因）。`scale` 为空 / 尺寸非法 → null。
+Set<(int, int)>? vsrExpectedFramePairs({
   required int rawW,
   required int rawH,
   required double? scale,
-  int? renderW,
-  int? renderH,
 }) {
   if (scale == null || rawW <= 0 || rawH <= 0) return null;
-  final pairs = <(int, int)>{((rawW * scale).round(), (rawH * scale).round())};
-  if (renderW != null && renderH != null && renderW > 0 && renderH > 0) {
-    pairs.add((renderW, renderH));
-  }
-  return pairs;
+  return <(int, int)>{((rawW * scale).round(), (rawH * scale).round())};
 }
 
 /// v3.5 C1 应用级修因是否应触发**重放**（**条件式**，取代原「静默门 + 固定延迟」）。
