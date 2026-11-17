@@ -1,15 +1,15 @@
 {
-    "version": "1.08.79",
-    "version_num": 1008079,
-    "version_desc": "- 修复：**开 RTX VSR 后画面四周出现一圈细黑边**（部分带补边的源，如 960x544 类，黑边会长期存在）——根因是超分滤镜链重建与新尺寸帧到达的时序：裁剪指令若投给引擎时落在旧尺寸帧上，会被静默忽略且不再重试，输出就一直带着\n- 保持：不改画面内容、不改解码/超分行为；关 VSR 与 1.08.78 一致\n- 请复测：房B（960x544 类）开 VSR 四周黑边、房内开/关、开着/不开进房、进房后立刻开/关、换线路后再开、稳态 10 分钟无黑边无变形",
+    "version": "1.08.80",
+    "version_num": 1008080,
+    "version_desc": "- 修复：**进房时 VSR 是关的，进去后再打开 VSR，要黑着等好几秒才出画面**——上一版把「等新尺寸画面到位再下发裁切」的判据看错了尺寸：看的是「显示尺寸」，而这个值会被上一笔裁切卡住不动，于是每次都白等到超时才继续；本版改用「画面\n- 保持：不改变画面内容、不改变解码/超分行为；关 VSR 行为与 1.08.79 一致\n- 已知：开关 VSR 的瞬间画面仍可能短暂黑闪（面板宽度二次重排所致，下个版本处理）\n- 请复测：关 VSR 进房 → 再开 VSR（应很快出画面）、房B（960x544 类）开 VSR 四周黑边、房内开/关 VSR、换线路后再开",
     "prerelease": true,
     "download_url": "https://github.com/Howezzzzz/dart_simple_live/releases",
     "download_urls": {
-        "android": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.79/app-arm64-v8a-release.apk",
-        "windows": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.79/Slive-1.08.79+1008079-windows-setup.exe",
-        "macos": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.79/simple_live_app-1.08.79+1008079-macos.dmg",
-        "linux": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.79/Slive-x86_64-linux.deb",
-        "linux_flatpak": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.79/Slive-x86_64.flatpak"
+        "android": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.80/app-arm64-v8a-release.apk",
+        "windows": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.80/Slive-1.08.80+1008080-windows-setup.exe",
+        "macos": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.80/simple_live_app-1.08.80+1008080-macos.dmg",
+        "linux": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.80/Slive-x86_64-linux.deb",
+        "linux_flatpak": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.80/Slive-x86_64.flatpak"
     },
     "mirror_prefixes": [
         "https://gh-proxy.com/",
@@ -17,10 +17,10 @@
         "https://ghproxy.cc/"
     ],
     "download_sha256": {
-        "android": "c8d8cc7ba6d723ba122e585495948f294c5c7793c4d4f34896b5f9588e4f6521",
-        "windows": "12253ff0a7c41c6bfe66823e1be48c58ec6fc0ed2f93ce7d6d169bc2d44149d7",
-        "macos": "89d4c578eb05ff6871864579abdb48f031827256a27de6161154410fa455c824",
-        "linux": "9785e44e195e266e2750fda291cbf3c05e59d9e9ac73083b76d67fcbb3071ca4",
-        "linux_flatpak": "94b3a38a8938767897240893bc2f9c077a14f9c7a80af5ecd9e7018a8824ecd8"
+        "android": "5e1243421cb9fc3f2b4f8bd9049d52014080f58faabdb10dc3384fcd909983f1",
+        "windows": "3448f7d81cbe9090ce4721e2bb6450c144a33a974a95a0f0dbffe817b7fa5f91",
+        "macos": "2253db6460749be0dbc658dbb9c7d66156c9b1563fecb78343347283082ceefb",
+        "linux": "a044129c81fe9098509fad56adf4b08e372ab5382fcc9f55ba1ac845eebcabed",
+        "linux_flatpak": "cc86d6fe86556fb1458cb0e9eb371a717cce25046fadf481ae72cbf59f2cb10c"
     }
 }
