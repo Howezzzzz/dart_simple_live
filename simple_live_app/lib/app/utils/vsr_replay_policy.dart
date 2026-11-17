@@ -88,20 +88,35 @@ bool vsrShouldRepair({
   return true;
 }
 
-/// 应用级修因**耗尽**时的兜底判定：链已挂 ∧ 有 crop 目标 ∧ 仍未被应用 ∧ 预算已耗尽
-/// ∧ 校正器在等兜底（[correctorPending]）∧ 距链写已超 [maxWait]（绝对安全网，防「等不到
-/// 落定 → 永不重放 → pending 永挂」）。
+/// 应用级修因的**绝对兜底**判定：链已挂 ∧ 有 crop 目标 ∧ 仍未被应用 ∧ 校正器在等兜底
+/// （[correctorPending]）∧ 距最近一次「修因进度」已超 [maxWait]。
+///
+/// 注意（v3.5c 复核 C-1 修复）：**不以「预算耗尽」为前提**——预算只在「已落定」时递减，
+/// 若因落定判据失配而永不重放，预算恒 >0，旧实现会短路掉兜底 → pending 永挂。
+/// 故改锚「进度时长」（调用方传 `now - max(最后链写, 最后重放)`），任一路径 8s 无进展即兜底。
 bool vsrFallbackDue({
   required bool chainApplied,
   required String crop,
   required bool applied,
   required bool correctorPending,
-  required Duration? sinceChainWrite,
-  required int budgetLeft,
+  required Duration? sinceProgress,
   required Duration maxWait,
 }) {
   if (!chainApplied || crop.isEmpty) return false;
-  if (applied || !correctorPending || budgetLeft > 0) return false;
-  if (sinceChainWrite == null || sinceChainWrite < maxWait) return false;
+  if (applied || !correctorPending) return false;
+  if (sinceProgress == null || sinceProgress < maxWait) return false;
   return true;
+}
+
+/// 观测 `(dw,dh)` 是否落在期望候选对之一的 **[tolPx] 像素容差**内（v3.5c 复核 B-1 修复）。
+/// 原判据用整数精确相等，mpv 侧 scale/对齐的一像素偏差即让「已落定」永不为真 → 修因哑火；
+/// 改为像素容差匹配（与全链路 0.005 比值容差同精神）。
+bool vsrMatchesPair(Set<(int, int)>? pairs, (int, int) v, int tolPx) {
+  if (pairs == null) return false;
+  for (final p in pairs) {
+    if ((v.$1 - p.$1).abs() <= tolPx && (v.$2 - p.$2).abs() <= tolPx) {
+      return true;
+    }
+  }
+  return false;
 }

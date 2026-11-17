@@ -19,12 +19,14 @@ void main() {
       expect(vsrCropRatio('3600'), isNull); // 无 x
       expect(vsrCropRatio('x2024+0+0'), isNull); // x 在首
       expect(vsrCropRatio('3600x2024'), isNull); // 无 +
-      expect(vsrCropRatio('3600x2024+0'), closeTo(1.77866, 1e-4)); // 缺 y 仍可解析宽高
+    });
+    test('缺 y 仍可解析宽高（3600x2024+0）', () {
+      expect(vsrCropRatio('3600x2024+0'), closeTo(1.77866, 1e-4));
     });
     test('非正数 → null', () {
       expect(vsrCropRatio('0x2024+0+0'), isNull);
       expect(vsrCropRatio('3600x0+0+0'), isNull);
-      expect(vsrCropRatio('-100x200+0+0'), isNull); // 负宽（D-3）
+      expect(vsrCropRatio('-100x200+0+0'), isNull); // 负宽
     });
   });
 
@@ -48,7 +50,6 @@ void main() {
       expect(vsrOutAppliedCrop(dw: 3600, dh: 0, targetRatio: target, tolerance: tol), isFalse);
     });
     test('刚好等于容差边界 → true（<=）', () {
-      // 构造比值差恰为 tol 的目标：dw/dh - target == tol（数值近似）
       expect(
         vsrOutAppliedCrop(dw: 1005, dh: 1000, targetRatio: 1.0, tolerance: 0.005),
         isTrue,
@@ -68,6 +69,12 @@ void main() {
       final pairs = vsrExpectedOutPairs(rawW: 960, rawH: 544, scale: 3.75);
       expect(pairs, equals(<(int, int)>{(3600, 2040)}));
     });
+    test('renderSize == 未裁满帧 → 去重为 1 对', () {
+      final pairs = vsrExpectedOutPairs(
+          rawW: 960, rawH: 544, scale: 2.0, renderW: 1920, renderH: 1088);
+      expect(pairs!.length, 1);
+      expect(pairs.contains((1920, 1088)), isTrue);
+    });
     test('scale 为空 → null（不布防）', () {
       expect(vsrExpectedOutPairs(rawW: 960, rawH: 544, scale: null), isNull);
     });
@@ -78,13 +85,29 @@ void main() {
     test('交叉积不再误命中：dw 取未裁态、dh 取裁后态 → 不在集合', () {
       final pairs = vsrExpectedOutPairs(
           rawW: 960, rawH: 544, scale: 3.75, renderW: 3600, renderH: 2024);
-      // (3600,2024) 是合法对、(3600,2040) 是合法对，但成对集合不含混合态
       expect(pairs!.contains((3600, 2024)), isTrue);
       expect(pairs.contains((3600, 2040)), isTrue);
-      // 若集合是「宽集×高集」就会误含 (3600,9999)/(9999,2040) 之类混合态——成对集合不会：
       expect(pairs.contains((3600, 9999)), isFalse);
       expect(pairs.contains((9999, 2024)), isFalse);
     });
+  });
+
+  group('vsrMatchesPair（像素容差匹配，v3.5c B-1）', () {
+    final pairs = vsrExpectedOutPairs(
+        rawW: 960, rawH: 544, scale: 3.75, renderW: 3600, renderH: 2024);
+    test('精确命中 → true', () {
+      expect(vsrMatchesPair(pairs, (3600, 2040), 3), isTrue);
+      expect(vsrMatchesPair(pairs, (3600, 2024), 3), isTrue);
+    });
+    test('±1px / ±3px 偏差 → 仍在容差内 true', () {
+      expect(vsrMatchesPair(pairs, (3599, 2039), 3), isTrue);
+      expect(vsrMatchesPair(pairs, (3603, 2043), 3), isTrue);
+    });
+    test('超容差 → false', () {
+      expect(vsrMatchesPair(pairs, (3604, 2040), 3), isFalse);
+      expect(vsrMatchesPair(pairs, (3600, 2036), 3), isFalse);
+    });
+    test('pairs 为 null → false', () => expect(vsrMatchesPair(null, (3600, 2040), 3), isFalse));
   });
 
   group('vsrShouldRepair（条件式：落定 + 稳定 + 冷却 + 预算）', () {
@@ -121,39 +144,50 @@ void main() {
       expect(call(stableFor: const Duration(milliseconds: 100)), isFalse);
     });
     test('稳定未知 → false', () => expect(call(stableFor: null), isFalse));
+    test('稳定恰等于门限 → true（边界：< 判否）', () {
+      expect(call(stableFor: stable), isTrue);
+    });
     test('冷却未过 → false', () {
       expect(call(sinceRepair: const Duration(milliseconds: 100)), isFalse);
+    });
+    test('冷却恰等于门限 → true（边界）', () {
+      expect(call(sinceRepair: cooldown), isTrue);
     });
     test('冷却未知（首次重放）→ 放行', () => expect(call(sinceRepair: null), isTrue));
   });
 
-  group('vsrFallbackDue（兜底安全网）', () {
+  group('vsrFallbackDue（绝对兜底，v3.5c C-1：不以预算为前提）', () {
     const maxWait = Duration(seconds: 8);
     bool call({
       bool chain = true,
       String crop = '3600x2024+0+0',
       bool applied = false,
       bool pending = true,
-      Duration? since = const Duration(seconds: 9),
-      int budget = 0,
+      Duration? sinceProgress = const Duration(seconds: 9),
     }) =>
         vsrFallbackDue(
           chainApplied: chain,
           crop: crop,
           applied: applied,
           correctorPending: pending,
-          sinceChainWrite: since,
-          budgetLeft: budget,
+          sinceProgress: sinceProgress,
           maxWait: maxWait,
         );
 
-    test('预算耗尽 + 校正器在等 + 久等 + 未应用 → true', () => expect(call(), isTrue));
-    test('仍有预算 → false', () => expect(call(budget: 1), isFalse));
+    test('未应用 + 校正器在等 + 超 8s 无进展 → true', () => expect(call(), isTrue));
+    test('关键修正：即使预算未耗尽（无预算参数）也应兜底', () {
+      // 旧实现以 budgetLeft<=0 为前提，落定判据失配时预算恒 >0 → 永挂；新实现无此前提。
+      expect(call(sinceProgress: const Duration(seconds: 9)), isTrue);
+    });
     test('已应用 → false', () => expect(call(applied: true), isFalse));
     test('校正器未在等 → false', () => expect(call(pending: false), isFalse));
     test('未届 maxWait → false', () {
-      expect(call(since: const Duration(seconds: 3)), isFalse);
+      expect(call(sinceProgress: const Duration(seconds: 3)), isFalse);
     });
+    test('恰等于 maxWait → true（边界：< 判否）', () {
+      expect(call(sinceProgress: maxWait), isTrue);
+    });
+    test('进度未知 → false', () => expect(call(sinceProgress: null), isFalse));
     test('链未挂 / 无目标 → false', () {
       expect(call(chain: false), isFalse);
       expect(call(crop: ''), isFalse);
