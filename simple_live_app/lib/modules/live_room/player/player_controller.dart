@@ -286,6 +286,17 @@ mixin PlayerMixin {
   /// （settle 尾沿 / 超时放行时一次消费）。null = 暂无目标（超时路径走预挂兜底 2.0）。
   _VsrTarget? _vsrDeferPlayTarget;
 
+  // ===== v3.5i（1.08.81 A⁗）：toggle 复用起播门控消「双重建」=====
+  /// release 时是否 `play()`——默认 true（进房语义：必起播）；toggle 武装时改为「武装时是否在播」
+  /// （防把用户窗口内的暂停强制恢复）。每次 `_armVsrDeferPlay` 重置为 true。
+  bool _vsrGatePlayOnRelease = true;
+  /// toggle 自己的遮罩所有权（成对显式开关，**禁止**复用 `_armReadyGate`——会连带静音且
+  /// finish 条件在 toggle 期永不满足）。`_readyPending` 为真时**不抢所有权**（就绪门遮罩本就在）。
+  bool _vsrToggleMaskOn = false;
+  Timer? _vsrToggleMaskTimer;
+  /// v3.5i：本次门控是 toggle 还是进房（release 的抑制窗是否解除按此区分）。
+  bool _vsrGateIsToggle = false;
+
   /// 供宿主（LiveRoomController）在 `player.open` 时读取：本次是否应延迟起播。
   bool get vsrDeferPlayPending => _vsrDeferPlay;
 
@@ -1582,7 +1593,8 @@ mixin PlayerMixin {
     });
   }
 
-  /// 武装「起播门控」（Windows + VSR 开启时，由 initializePlayer 末尾调用）。
+  /// 武装「起播门控」（Windows + VSR 开启时，由 initializePlayer 末尾调用；
+  /// v3.5i 起 toggle-on 亦复用）。
   void _armVsrDeferPlay() {
     _vsrDeferPlayTimer?.cancel();
     _vsrDeferPlaySettleTimer?.cancel();
@@ -1591,10 +1603,33 @@ mixin PlayerMixin {
     _vsrDeferPlayTarget = null;
     _vsrDeferPlayArmedAt = DateTime.now();
     _vsrDeferPlay = true;
+    // v3.5i：重置 toggle 相关态（防「toggle-on 后换线路重武装」时旧标志泄漏 → release 误跳 play）。
+    _vsrGatePlayOnRelease = true;
+    _vsrToggleMaskOn = false;
+    _vsrToggleMaskTimer?.cancel();
+    _vsrToggleMaskTimer = null;
+    _vsrGateIsToggle = false;
     Log.d('[VSR] 门控: 武装 timeout=${vsrDeferPlayTimeout.inMilliseconds}ms');
     _vsrDeferPlayTimer = Timer(vsrDeferPlayTimeout, () {
       // 兜底：拿不到源分辨率（异常流）时不卡住，直接起播（此时可能仍有一次重启，属降级）。
       _releaseVsrDeferPlay('timeout');
+    });
+  }
+
+  /// v3.5i：toggle 专用遮罩（成对显式开关 + 3s 兜底；不动声音门/就绪门状态机）。
+  void _armVsrToggleMask() {
+    if (_readyPending) {
+      return; // 就绪门遮罩本就在 → 不抢所有权（否则 finish('restart') 会提前掀掉）
+    }
+    _vsrToggleMaskOn = true;
+    showReadyMaskRx.value = true;
+    _vsrToggleMaskTimer?.cancel();
+    _vsrToggleMaskTimer = Timer(vsrDeferPlayTimeout, () {
+      _vsrToggleMaskTimer = null;
+      if (_vsrToggleMaskOn) {
+        _vsrToggleMaskOn = false;
+        showReadyMaskRx.value = false;
+      }
     });
   }
 
@@ -1625,6 +1660,9 @@ mixin PlayerMixin {
     _vsrDeferPlayArmedAt = null;
     _vsrDeferPlayTarget = null;
     _vsrDeferPlay = false;
+    // v3.5i：遮罩兜底 timer 同步撤销（不改 `_vsrToggleMaskOn`——release 需据其收遮罩）。
+    _vsrToggleMaskTimer?.cancel();
+    _vsrToggleMaskTimer = null;
   }
 
   /// 放开起播门控（② B1 重设计 v3，2026-11-12）：**先 play()（非暂停态）再写链**。
@@ -1642,13 +1680,20 @@ mixin PlayerMixin {
     final armedAt = _vsrDeferPlayArmedAt;
     // 先取出暂存目标（_disarmVsrDeferPlay 会清空它），play 之后单次写链。
     final target = _vsrDeferPlayTarget;
+    // v3.5i：与 epoch/armedAt/target **同处快照**（disarm 后无法再读）。
+    final playOnRelease = _vsrGatePlayOnRelease;
+    final toggleMaskOwned = _vsrToggleMaskOn;
+    final isToggle = _vsrGateIsToggle;
     _disarmVsrDeferPlay();
     if (_playerDisposed) {
       return;
     }
     // 门控武装期间的错误抑制窗必与「首次起播」重合，窗口内真错误（403/超时/流下线）会被直接
     // 吞掉。起播这一刻解除抑制，让真错误走正常 mediaError 路径（写链自身会给短窗抑制）。
-    _suppressErrorRetry = false;
+    // v3.5i：仅**进房语义**解除；toggle 代际不动（防提前解除 toggle 前一笔写链的抑制窗）。
+    if (!isToggle) {
+      _suppressErrorRetry = false;
+    }
     // 守卫①（await 之前）：挡掉「已被 disarm、又被新换源取代」的过期 release。
     if (epoch != _vsrGateEpoch) {
       Log.d('[VSR] 起播门控 release 作废（已有新换源）: $reason');
@@ -1694,11 +1739,14 @@ mixin PlayerMixin {
     _pipelineBusy++;
     try {
       _tlMark('play()');
-      Log.d('[VSR] 门控放开（$reason）等待=${armedAt == null ? "?" : "${DateTime.now().difference(armedAt).inMilliseconds}ms"} → play()（先播后写链）');
-      try {
-        await player.play();
-      } catch (e) {
-        Log.d('[VSR] 起播门控 play() 失败: $e');
+      Log.d('[VSR] 门控放开（$reason）等待=${armedAt == null ? "?" : "${DateTime.now().difference(armedAt).inMilliseconds}ms"}'
+          ' → ${playOnRelease ? "play()" : "跳过 play（武装时停）"}（先播后写链）');
+      if (playOnRelease) {
+        try {
+          await player.play();
+        } catch (e) {
+          Log.d('[VSR] 起播门控 play() 失败: $e');
+        }
       }
       if (!_playerDisposed && epoch == _vsrGateEpoch) {
         if (target != null) {
@@ -1717,6 +1765,14 @@ mixin PlayerMixin {
     } finally {
       _pipelineBusy--;
       _maybeFinishReadyGate();
+      // v3.5i：toggle 自有遮罩到此才撤（盖住「play + 单次写链」的过渡）。
+      if (toggleMaskOwned) {
+        _vsrToggleMaskTimer?.cancel();
+        _vsrToggleMaskTimer = null;
+        _vsrToggleMaskOn = false;
+        showReadyMaskRx.value = false;
+        Log.d('[VSR] toggle 遮罩撤下');
+      }
     }
   }
 
@@ -3156,6 +3212,34 @@ class PlayerController extends BaseController
     _rtxVsrChainApplied = enabled;
     // 强制重算（开关变化必须重挂/摘链）。
     _lastRtxVsrSignature = null;
+    // v3.5i（1.08.81 A⁗）：toggle-on 复用起播门控吞写 → 面板重排后单笔写链（消「双重建」）。
+    // 三动作：(a) Rx 预写（面板一步到位）(b) 短 defer 门控 (c) 自有遮罩。
+    // 前置 `!_vsrDeferPlay`（轮3 必修）：进房门控在途时不重武装（否则进房 release 被 epoch 作废 +
+    // 下方 play 守卫被误跳 → 起播死锁）；门控本已吞写存目标，进房 release 照常 play + 补写。
+    // 守 `enabled`（轮4 必修）：本函数是开关共用入口，漏 enabled 会让 toggle-**off** 也武装门控。
+    final armToggleGate = enabled && Platform.isWindows && !_vsrDeferPlay;
+    if (armToggleGate) {
+      // (a) Rx 预写：终态显示比纯源尺寸派生（与播放区无关）；尊重校正器守卫（同写链处）。
+      if (!(_vsrCorrectorFired && _rtxVsrChainApplied)) {
+        final (srcW, srcH) = _trueSourceSize();
+        final aspect = rtxVsrDisplayAspect(srcW, srcH);
+        if (aspect != null) {
+          _vsrDisplayAspect = aspect;
+          final (pw, ph) =
+              _panelAspectSize(player.state.width, player.state.height);
+          if (pw > 0 && ph > 0) {
+            videoWidthRx.value = pw;
+            videoHeightRx.value = ph;
+            Log.d('[VSR] toggle 预写面板几何: Rx=${pw}x$ph'
+                ' aspect=${aspect.toStringAsFixed(6)}');
+          }
+        } else {
+          Log.d('[VSR] toggle 预写跳过（无终态比）');
+        }
+      } else {
+        Log.d('[VSR] toggle 预写跳过（校正器已按实测比写过）');
+      }
+    }
     // 复核（复验 P3）：门控正武装着（等尺寸事件挂链）时热关 VSR → 没有链可等，别白等超时兜底
     // （最长 3s 黑屏）；但必须**先摘链、后放行**——media_kit 的 play/setProperty 同走一把锁 FIFO，
     // 若先 play()，摘链就落在播放态 → mpv 又一次 playback restart（正是门控要避免的「出画面又重载」）。
@@ -3164,6 +3248,13 @@ class PlayerController extends BaseController
     // 注：**不清 `_lastRtxVsrScale`**——它是「mpv 实际已挂链」的唯一记录，摘链判断依赖它非空；
     // 在决定动作前清空会导致关闭时永不摘链→绿条复现（阶段4 复核 P0）。
     // hwdec 与错误抑制由 `_syncRtxVsrCrop` 内部统一处理。
+    if (armToggleGate) {
+      _armVsrDeferPlay(); // 重置 _vsrGatePlayOnRelease=true / _vsrGateIsToggle=false
+      _vsrGatePlayOnRelease = player.state.playing; // 仅「武装时在播」才恢复 play()
+      _vsrGateIsToggle = true;
+      _armVsrToggleMask(); // (c) 遮罩（_readyPending 时自动跳过）
+      Log.d('[VSR] toggle 武装短门控（武装时在播=$_vsrGatePlayOnRelease）');
+    }
     try {
       // C3·R2：写链委派中枢（原直调 `_syncRtxVsrCrop(trigger: 'toggle')`）。
       // trigger 仅用于日志、无分支判定（RV-6 实证）→ source='toggle-vsr' 行为等价。
