@@ -1335,6 +1335,13 @@ mixin PlayerMixin {
         }
         // 先清后写，强制走「属性变更」路径（mpv 对同值 set 是否重求值未证实）。
         await _withWriteMutex(() async {
+          // ④ 批次 B（G10 / ISS-300，N5 收敛为单点）：把上方入口守卫（基线 L1291）拷入
+          // 写锁闭包**首行**——`_withWriteMutex` 会 await 排队，排队期间可能已换代
+          // （新源 open / 新目标重写）；stale 时**连「清写 video-crop=''」一并跳过**
+          // （否则旧代际回调会把新目标先清掉 → 黑边复现）。
+          if (_playerDisposed ||
+              epoch != _vsrRepairEpoch ||
+              token != _vsrCropRetryToken) return;
           await pp.setProperty('video-crop', '');
           await pp.setProperty('video-crop', crop);
         });
