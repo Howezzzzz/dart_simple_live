@@ -249,6 +249,28 @@ void main() {
       }
     });
 
+    test('P1（实现复核轮1）：刷新失败必须回写 index/lineInfo（getPlayUrl 置 index=-1 不恢复 ⇒ 回落会以 -1 执行 = 静默死端变体）',
+        () {
+      for (final sig
+          in ['void mediaEnd() async {', 'void mediaError(String error) async {']) {
+        final b = body(lrc, sig);
+        final iConsume = b.indexOf('_playUrlRefreshBudget -= 1;');
+        final iSnap = b.indexOf('final prevLineIndex = currentLineIndex;');
+        final iTry = b.indexOf('try {', iConsume);
+        final iRefreshed = b.indexOf('if (refreshed) {');
+        final iRestore = b.indexOf('currentLineIndex = prevLineIndex;');
+        final iCount = b.indexOf('if (mediaErrorRetryCount < 2) {');
+        expect(iSnap, greaterThan(iConsume), reason: '$sig：快照须在消耗后、await 前');
+        expect(iTry, greaterThan(iSnap));
+        expect(iRestore, greaterThan(iRefreshed),
+            reason: '$sig：回写须在「成功即 return」之后（**仅失败才回写**）');
+        expect(iCount, greaterThan(iRestore),
+            reason: '$sig：回写必须早于回落重试/末线判据（getPlayUrl 置 index=-1 不恢复）');
+        expect(b.contains('currentLineInfo.value = prevLineInfo;'), isTrue,
+            reason: '$sig：lineInfo 同步回写（否则 UI 停在线路字串）');
+      }
+    });
+
     test('S5-4 diff 断言：lrc mediaError 的 super.mediaEnd() 笔误行不动（pc 方法体为空 ⇒ 零行为差）',
         () {
       final b = body(lrc, 'void mediaError(String error) async {');
