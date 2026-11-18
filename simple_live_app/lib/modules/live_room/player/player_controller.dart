@@ -1408,6 +1408,18 @@ mixin PlayerMixin {
           enable: enable, scale: s, currentScale: _lastRtxVsrScale);
       if (vfAction0 == 'none' && await _rtxCropMatches(desired)) {
         Log.d('[VSR] 门控: 链路无需改动 → 立即放行（chain-unchanged）');
+        // ③ 批次 B（1.08.84 / ISS-289）：放行前**显式作废**暂存 target（双向作废、含关向；
+        // **禁开向重建**、禁加签名回填——R4-3：签名回填恰会触发 L1397/L1400/L1427 短路，
+        // 且 L1370-1372 注释明记签名会被 open 清链弄陈旧）。
+        // 必需性：`_releaseVsrDeferPlay` 先在 **L1689 快照** `_vsrDeferPlayTarget`，
+        // `_disarmVsrDeferPlay` 的置 null 在 **L1668**（由 L1694 调用，**晚于快照**）——
+        // 即 disarm 那次置 null 清不掉已快照的旧目标 ⇒ 不在此显式置 null，门控期内早先
+        // 暂存的**陈旧目标**会在这条「链路已一致」的 0 等待放行里被取出写链（N4：release
+        // 是无条件写链路径，且 `vfAction=='none'` 仍跑 crop/aspect/setSize）。
+        // 置 null 后 release 走 L1759 `if (target != null)` 假分支 → L1765
+        // `else if (reason == 'timeout')`：本分支 reason 恒 'chain-unchanged' ⇒ 不误触
+        // `_preHangFallbackChain` 兕底（R3-4 正面证据）。
+        _vsrDeferPlayTarget = null;
         _releaseVsrDeferPlay('chain-unchanged');
         return;
       }
