@@ -271,6 +271,19 @@ void main() {
       }
     });
 
+    test('P3（复核轮2/轮3）：回写带 `currentLineIndex < 0` 守卫（勿覆盖并发用户换线/切清晰度）',
+        () {
+      for (final sig
+          in ['void mediaEnd() async {', 'void mediaError(String error) async {']) {
+        final b = body(lrc, sig);
+        final iConsume = b.indexOf('_playUrlRefreshBudget -= 1;');
+        final iGuard = b.indexOf('if (currentLineIndex < 0) {', iConsume);
+        final iRestore = b.indexOf('currentLineIndex = prevLineIndex;');
+        expect(iGuard, greaterThanOrEqualTo(0), reason: '$sig 缺 P3 守卫（轮3 建议）');
+        expect(iRestore, greaterThan(iGuard), reason: '$sig：回写必须在守卫体内');
+      }
+    });
+
     test('S5-4 diff 断言：lrc mediaError 的 super.mediaEnd() 笔误行不动（pc 方法体为空 ⇒ 零行为差）',
         () {
       final b = body(lrc, 'void mediaError(String error) async {');
