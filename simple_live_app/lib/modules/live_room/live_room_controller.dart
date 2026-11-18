@@ -872,8 +872,12 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
         return;
       }
       // P1 修复：失败回落前**回写** index/lineInfo，令既有重试与末线判据回到刷新前状态。
-      currentLineIndex = prevLineIndex;
-      currentLineInfo.value = prevLineInfo;
+      // P3（复核轮2）：`await` 窗口内用户若**并发**换线/切清晰度，其写入的 index 已被改变
+      // （≥0）——此时**不得**回写覆盖用户意图；仅当仍为本函数置下的 -1 时回写。
+      if (currentLineIndex < 0) {
+        currentLineIndex = prevLineIndex;
+        currentLineInfo.value = prevLineInfo;
+      }
       Log.w("播放结束：刷新播放地址失败 → 回落既有重试/换线（S5-1）");
     }
     if (mediaErrorRetryCount < 2) {
@@ -922,8 +926,11 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
         Log.d("播放失败：已刷新播放地址（每源预算）");
         return;
       }
-      currentLineIndex = prevLineIndex;
-      currentLineInfo.value = prevLineInfo;
+      // P3（复核轮2）：仅当 index 仍为本函数置下的 -1 时回写（勿覆盖并发用户换线/切清晰度）。
+      if (currentLineIndex < 0) {
+        currentLineIndex = prevLineIndex;
+        currentLineInfo.value = prevLineInfo;
+      }
       Log.w("播放失败：刷新播放地址失败 → 回落既有重试/换线（S5-1）");
     }
     if (mediaErrorRetryCount < 2) {
