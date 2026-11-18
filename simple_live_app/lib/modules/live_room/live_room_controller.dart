@@ -850,6 +850,12 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     // 做一次真刷新——位置写死在 `count < 2` 分支**之前**（写进分支内 = 刷新永不生效的 no-op）。
     if (_playUrlRefreshBudget > 0) {
       _playUrlRefreshBudget -= 1;
+      // 复核 P1（批次 B ②，实现复核轮1）：`getPlayUrl` 开头会把 `currentLineIndex` 置 -1
+      // （既有行为，≈L756），**失败路径不恢复** ⇒ 若在此直接回落，`setPlayer()` 与**末线判据**
+      // 都会以 index=-1 执行（Playlist(index:-1) → jump(-1) 抛 → 「换线路失败」；末线判据失配
+      // ⇒ 单线路源错过 `liveStatus=false`）= 静默死端变体。故**消耗块内先快照、失败即回写**。
+      final prevLineIndex = currentLineIndex;
+      final prevLineInfo = currentLineInfo.value;
       bool refreshed = false;
       try {
         refreshed = await getPlayUrl();
@@ -865,6 +871,9 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
         Log.d("播放结束：已刷新播放地址（每源预算）");
         return;
       }
+      // P1 修复：失败回落前**回写** index/lineInfo，令既有重试与末线判据回到刷新前状态。
+      currentLineIndex = prevLineIndex;
+      currentLineInfo.value = prevLineInfo;
       Log.w("播放结束：刷新播放地址失败 → 回落既有重试/换线（S5-1）");
     }
     if (mediaErrorRetryCount < 2) {
@@ -899,6 +908,9 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     // 台账注：抑制窗内错误不进 mediaError ⇒ 不消耗预算（G12 × ② 交互，§11.6 S5-4）。
     if (_playUrlRefreshBudget > 0) {
       _playUrlRefreshBudget -= 1;
+      // 复核 P1（同一修复，详见 mediaEnd 处注释）：失败回落前先快照、后回写 index/lineInfo。
+      final prevLineIndex = currentLineIndex;
+      final prevLineInfo = currentLineInfo.value;
       bool refreshed = false;
       try {
         refreshed = await getPlayUrl();
@@ -910,6 +922,8 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
         Log.d("播放失败：已刷新播放地址（每源预算）");
         return;
       }
+      currentLineIndex = prevLineIndex;
+      currentLineInfo.value = prevLineInfo;
       Log.w("播放失败：刷新播放地址失败 → 回落既有重试/换线（S5-1）");
     }
     if (mediaErrorRetryCount < 2) {
