@@ -111,6 +111,18 @@ mixin PlayerMixin {
     ),
   );
 
+  /// ① 批次 B（1.08.84 / C3 R3）：进房预挂的**统一中枢留痕钩子**（留痕 only，零播放器 I/O）。
+  ///
+  /// 为何是钩子而非直呼：`initializePlayer` 在 `mixin PlayerMixin`（**无 `on` 约束**）内，
+  /// 而统一中枢 `applyPipelineChange` 实现在 `class PlayerController` —— Dart 不允许 mixin
+  /// 直呼「使用它的类」的成员（analyzer: undefined_method；同 L404-406「被引用的状态必须
+  /// 自持」复核 P0-1 的同一类问题）⇒ 采「**可覆写钩子**」形（§11.3 N2 同款），
+  /// 以保住 R4-2 钉死的插入点（旧 `[APPLY]` 行之后、写点之前）与日志时序。
+  /// 默认空实现 = 零行为（不碰播放器、不碰队列）；`PlayerController` 覆写为
+  /// `applyPipelineChange(source, norm: false, vsr: false)`（委派条件 `if (norm)` /
+  /// `if (vsr && Platform.isWindows)` 均跳过 ⇒ 只跑聚合留痕）。
+  Future<void> _tracePipelinePreApply(String source) async {}
+
   /// 初始化播放器并设置 ao 参数
   Future<void> initializePlayer() async {
     var pp = player.platform as NativePlayer;
@@ -219,6 +231,28 @@ mixin PlayerMixin {
       // 实际会预挂才留痕（避免「什么都没做」也打 [APPLY]，阶段4 复核）
       Log.d('[APPLY] source=room-enter/reinit 均衡预挂（已挂=$_volumeNormApplied'
           ' 能力=${PlayerMixin.afLoudnormSupported}）');
+      // ① 批次 B（1.08.84）R3：进房预挂改走统一中枢的**留痕 only**。
+      // - **写点（下一行 `_enqueueVolumeNorm(() => _preApplyVolumeNorm())`）一字不动**，
+      //   中枢也不接管落地：M1/N3 —— 整段委派会在 cap==null 时走 probe ⇒ 起流期开抑制窗
+      //   （违 L609-611 铁律）+ `set af` 缺 `waitForInitialization:false` ⇒ 复发 ISS-269。
+      // - `norm:false, vsr:false` ⇒ 中枢体内**零播放器 I/O、零真 await**（委派条件
+      //   `if (norm)` L2947 / `if (vsr && Platform.isWindows)` L2950 均跳过，
+      //   `_buildDesired` L2899 与 `_aggregateApplied` 全同步读）⇒ 日志**同步落序**
+      //   （R3-2 乱序担忧消解）、仅微任务级 yield、不吃 P6 就绪门预算（§11.6 ① 正面新证）。
+      // - 上面旧 `[APPLY] source=room-enter/reinit` 行**保留不删**（N3：删了即丢「均衡预挂」
+      //   动作词 = 留痕字段口径实质「减」，违「可增不可减」）。
+      // - 注：cap==null 时中枢 `[APPLY-diff]` 行的 `norm=probe`（pipeline.dart L242-243）
+      //   **仅为期望描述**（「能力未知应探测」），本点并不真探测——探测仍由首帧钩子
+      //   （`_verifyVolumeNormFirstFrame` / `_scheduleVolumeNormAdjudication`）负责，零改动。
+      // - R4-2：try-catch **只包留痕、不包写点**——否则中枢留痕异常会静默丢掉预挂。
+      // - 经 `_tracePipelinePreApply` 钩子委派（声明处注释：mixin 无 on 约束，不能直呼
+      //   PlayerController 的 `applyPipelineChange`）；实现在 PlayerController，参数固定
+      //   `norm: false, vsr: false`。
+      try {
+        await _tracePipelinePreApply('room-enter/reinit-preapply');
+      } catch (e) {
+        Log.d('[APPLY] source=room-enter/reinit-preapply 留痕异常（不影响预挂）: $e');
+      }
       await _enqueueVolumeNorm(() => _preApplyVolumeNorm());
     }
     // 同步底部补边裁切（VSR 开启才裁；关闭时显式清空，避免切线路等场景残留上次的裁切）。
@@ -2955,6 +2989,14 @@ class PlayerController extends BaseController
           ' 链=$_rtxVsrChainApplied scale=${_lastRtxVsrScale?.toStringAsFixed(2) ?? "-"}');
     }
   }
+
+  /// ① 批次 B（1.08.84 / C3 R3）：`PlayerMixin._tracePipelinePreApply` 的实现——
+  /// 将进房预挂的留痕委派给统一中枢，**固定 `norm: false, vsr: false`**（留痕 only）：
+  /// 下方两个委派条件均不成立 ⇒ 体内**零播放器 I/O、零真 await**（不碰 probe / 不碰抑制窗 /
+  /// 不碰 `set af`，M1/N3）；预挂写点仍由 `initializePlayer` 原位执行（一字不动）。
+  @override
+  Future<void> _tracePipelinePreApply(String source) =>
+      applyPipelineChange(source, norm: false, vsr: false);
 
   /// 音量均衡：同步入口（**队列外**调用，如热切换 worker）。内部入队执行 [_syncVolumeNormLocked]。
   Future<void> _syncVolumeNorm() => _enqueueVolumeNorm(_syncVolumeNormLocked);
