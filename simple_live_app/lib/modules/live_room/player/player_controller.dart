@@ -28,6 +28,7 @@ import 'package:simple_live_app/app/utils/ready_gate.dart';
 import 'package:simple_live_app/app/utils/pipeline.dart';
 import 'package:simple_live_app/app/utils/rtx_vsr_crop.dart';
 import 'package:simple_live_app/app/utils/vsr_replay_policy.dart';
+import 'package:simple_live_app/app/utils/vsr_display_aspect_guard.dart';
 import 'package:simple_live_app/app/utils/serial_queue.dart';
 import 'package:simple_live_app/app/utils/volume_norm.dart';
 import 'package:simple_live_app/services/local_storage_service.dart';
@@ -1399,7 +1400,11 @@ mixin PlayerMixin {
     // v3.3（ISS-294 P1-2 守卫）：校正器已按实测比写过 `_vsrDisplayAspect` 时不再重置回
     // 假说比（否则下一次尺寸/布局事件 W3/W4/W5 会用假说比把刚校正的面板宽冲回 → 房B 黑边
     // 复现）；保持实测比直到代际重置（`_resetLastVoutDwh`）。VSR 关（链未挂）时仍正常置 null。
-    if (!(_vsrCorrectorFired && _rtxVsrChainApplied)) {
+    // ⑤ 批次 B：守卫合取式抽纯函数 `vsrDisplayAspectWritable`（语义等价、零行为变，C-5）。
+    if (vsrDisplayAspectWritable(
+      correctorFired: _vsrCorrectorFired,
+      chainApplied: _rtxVsrChainApplied,
+    )) {
       _vsrDisplayAspect = _rtxVsrChainApplied ? aspectValue : null;
     }
     // 去重签名：倍数 + 裁切值 + 源尺寸 + 链状态（**不能只用裁切值当键**，见字段注释）。
@@ -3290,7 +3295,11 @@ class PlayerController extends BaseController
     final armToggleGate = enabled && Platform.isWindows && !_vsrDeferPlay;
     if (armToggleGate) {
       // (a) Rx 预写：终态显示比纯源尺寸派生（与播放区无关）；尊重校正器守卫（同写链处）。
-      if (!(_vsrCorrectorFired && _rtxVsrChainApplied)) {
+      // ⑤ 批次 B：守卫合取式抽纯函数 `vsrDisplayAspectWritable`（语义等价、零行为变，C-5）。
+      if (vsrDisplayAspectWritable(
+        correctorFired: _vsrCorrectorFired,
+        chainApplied: _rtxVsrChainApplied,
+      )) {
         final (srcW, srcH) = _trueSourceSize();
         final aspect = rtxVsrDisplayAspect(srcW, srcH);
         if (aspect != null) {
