@@ -738,7 +738,8 @@ void showLinesInfo(LiveRoomController controller) {
             Utils.hideRightDialog();
             //controller.currentLineIndex = i;
             //controller.setPlayer();
-            controller.changePlayLine(i);
+            // ② 批次 B（ISS-291 / R4-1）：用户主动换线路 ⇒ 传 userInitiated 复位每源刷新预算。
+            controller.changePlayLine(i, userInitiated: true);
           },
         );
       },
@@ -768,8 +769,9 @@ void showQualitesInfo(LiveRoomController controller) {
           minLeadingWidth: 16,
           onTap: () {
             Utils.hideRightDialog();
-            controller.currentQuality = i;
-            controller.getPlayUrl();
+            // ② 批次 B（ISS-291 / R4-1）：第二个切清晰度入口（不经 lrc 的 showQualitySheet），
+            // 统一走 switchQuality —— 漏它则桌面端切清晰度无法复位每源刷新预算。
+            controller.switchQuality(i);
           },
         );
       },

@@ -41,6 +41,10 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
+/// ② 批次 B（1.08.84 / ISS-291）：每源「自动刷新播放地址」预算初值（=1）。
+/// 语义见 `LiveRoomController._playUrlRefreshBudget` 字段注释（初值必须在声明处，§11.6 A-1）。
+const int kPlayUrlRefreshBudgetPerSource = 1;
+
 class LiveRoomController extends PlayerController with WidgetsBindingObserver {
   StreamSubscription<dynamic>? subscription;
 
@@ -400,6 +404,8 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     //messages.clear();
     superChats.clear();
     liveDanmaku.stop();
+    // ② 批次 B（ISS-291 / R3-1）：手动刷新房间 = 新错误周期起点，复位每源刷新预算。
+    _playUrlRefreshBudget = kPlayUrlRefreshBudgetPerSource;
 
     loadData();
   }
@@ -719,14 +725,39 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     return qualityLevel;
   }
 
-  Future<void> getPlayUrl() async {
+  /// ② 批次 B（1.08.84 / ISS-291）：错误周期内「自动刷新播放地址」的**每源预算**。
+  ///
+  /// 缺陷：`mediaEnd` / `mediaError` 的重试只 `setPlayer()` **复用旧地址**——源站换址
+  /// （token 过期 / 调度变化）时会一直重试死链，直到遍历完线路才判「播放失败」。
+  /// 修复：每个源在错误周期内**至多一次**真刷新 `getPlayUrl()`。
+  ///
+  /// 为何「每源预算 = 1」而非 flag + playing 复位（N1）：`playing` 在 `play()` 发出即真
+  /// （pc L2697-2698），叠加 `getPlayUrl` 内 `mediaErrorRetryCount = 0` ⇒ flag 形会无限
+  /// 刷新循环；预算形天然有界。
+  /// 初值必须写在**声明处**（§11.6 A-1）：冷启动走 `getPlayQualities → getPlayUrl`（L702），
+  /// 不经任何复位点；**禁**在 `initializePlayer` / `getPlayUrl` / `initPlaylist` 内复位
+  /// （自复位 = 无界，C-1 有 grep 反例断言钉住）。
+  /// 复位点仅 4 类（R3-1 / R4-1）：用户主动换线路（`changePlayLine(userInitiated: true)`）、
+  /// `refreshRoom`、切清晰度（`switchQuality`，两 UI 入口共用）、`onClose`。
+  int _playUrlRefreshBudget = kPlayUrlRefreshBudgetPerSource;
+
+  /// 拉取当前清晰度的播放地址并走既有起播路径（进房 / 切清晰度 / ② ISS-291 错误周期刷新共用）。
+  ///
+  /// 返回 `true` = 已拿到地址并已走既有 open 路径（`initPlaylist`）；
+  /// 返回 `false` = 失败（含**空址早退**——原实现只 toast 不抛，S5-1 要求可判失败，
+  /// 便于调用方回落既有重试/换线，不得静默死端）。
+  /// ⚠️ 本函数**仍会抛**（`qualities[currentQuality]` 越界——`currentQuality=-1` 可达
+  /// L680/L685-688、`detail.value!`、站点网络异常）：抛出语义保持基线不变
+  /// （`getPlayQualities` L703 的 catch 依赖它弹「无法读取播放清晰度」），
+  /// 故 ② 的新调用点（mediaEnd / mediaError）必须自带 try-catch（S5-2 强制项）。
+  Future<bool> getPlayUrl() async {
     currentQualityInfo.value = qualities[currentQuality].quality;
     currentLineInfo.value = "";
     currentLineIndex = -1;
     var playUrl = await site.liveSite.getPlayUrls(detail: detail.value!, quality: qualities[currentQuality]);
     if (playUrl.urls.isEmpty) {
       SmartDialog.showToast("无法读取播放地址");
-      return;
+      return false;
     }
     playUrls.assignAll(playUrl.urls); // 深拷贝
     playHeaders = playUrl.headers;
@@ -735,12 +766,24 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     //重置错误次数
     mediaErrorRetryCount = 0;
     initPlaylist();
+    return true;
   }
 
-  void changePlayLine(int index) {
+  /// 换线路（自动 / 用户共用入口）。
+  ///
+  /// [userInitiated]：② 批次 B（ISS-291 / R3-1）——**仅用户主动换线路**才复位每源刷新预算。
+  /// 自动换线（`mediaEnd` / `mediaError` 遍历线路）**必须不传**：`getPlayUrl` 会把
+  /// `currentLineIndex = 0`（L733），若自动换线也复位，≥3 线路全失败的源会在
+  /// 「刷新 → 2 次重试 → 自动换线(复位预算) → 刷新…」间摆动，**永不触末线判据
+  /// （L820/L846）= 无界循环**（R3-1 P0）；不复位时 index 单调递增 ⇒ 有界（§11.5 A）。
+  void changePlayLine(int index, {bool userInitiated = false}) {
     currentLineIndex = index;
     //重置错误次数
     mediaErrorRetryCount = 0;
+    if (userInitiated) {
+      // 用户换了线路 = 新错误周期起点，重新给一次真刷新机会。
+      _playUrlRefreshBudget = kPlayUrlRefreshBudgetPerSource;
+    }
     setPlayer();
   }
 
@@ -803,6 +846,27 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
   @override
   void mediaEnd() async {
     super.mediaEnd();
+    // ② 批次 B（ISS-291 / R4-4）：既有「setPlayer 复用旧地址」重试**之前**，先花每源预算
+    // 做一次真刷新——位置写死在 `count < 2` 分支**之前**（写进分支内 = 刷新永不生效的 no-op）。
+    if (_playUrlRefreshBudget > 0) {
+      _playUrlRefreshBudget -= 1;
+      bool refreshed = false;
+      try {
+        refreshed = await getPlayUrl();
+      } catch (e) {
+        // S5-2：call-site try-catch **强制**——`getPlayUrl` 内 `qualities[currentQuality]`
+        // （currentQuality=-1 可达 → RangeError）与 `detail.value!` 都会抛；本方法是
+        // `void … async`，未捕获即成**未捕获异步异常**，且后续重试/换线全丢。
+        Log.w("播放结束：刷新播放地址异常 → 回落既有重试: $e");
+      }
+      if (refreshed) {
+        // 成功 → return（getPlayUrl 自带 initPlaylist→open，**不得**再 setPlayer，
+        // M2：否则双 open）；预算已耗 ⇒ 本周期后续不再刷新。
+        Log.d("播放结束：已刷新播放地址（每源预算）");
+        return;
+      }
+      Log.w("播放结束：刷新播放地址失败 → 回落既有重试/换线（S5-1）");
+    }
     if (mediaErrorRetryCount < 2) {
       Log.d("播放结束，尝试第${mediaErrorRetryCount + 1}次刷新");
       if (mediaErrorRetryCount == 1) {
@@ -831,6 +895,23 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
   @override
   void mediaError(String error) async {
     super.mediaEnd();
+    // ② 批次 B（ISS-291 / R4-4）：同 mediaEnd——消耗点写死在 `count < 2` 分支**之前**。
+    // 台账注：抑制窗内错误不进 mediaError ⇒ 不消耗预算（G12 × ② 交互，§11.6 S5-4）。
+    if (_playUrlRefreshBudget > 0) {
+      _playUrlRefreshBudget -= 1;
+      bool refreshed = false;
+      try {
+        refreshed = await getPlayUrl();
+      } catch (e) {
+        // S5-2：call-site try-catch 强制项（范围同 mediaEnd 的注释）。
+        Log.w("播放失败：刷新播放地址异常 → 回落既有重试: $e");
+      }
+      if (refreshed) {
+        Log.d("播放失败：已刷新播放地址（每源预算）");
+        return;
+      }
+      Log.w("播放失败：刷新播放地址失败 → 回落既有重试/换线（S5-1）");
+    }
     if (mediaErrorRetryCount < 2) {
       Log.d("播放失败，尝试第${mediaErrorRetryCount + 1}次刷新");
       if (mediaErrorRetryCount == 1) {
@@ -1004,6 +1085,18 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     );
   }
 
+  /// 切清晰度（两个 UI 入口共用：`showQualitySheet`（竖屏，L1012-1015）与
+  /// `player_controls.showQualitesInfo`（横屏右侧栏——R4-1 新发现的第二入口 L770-772，
+  /// 不经本类 sheet））。
+  ///
+  /// ② 批次 B（ISS-291）：切清晰度 = 新源 ⇒ 复位每源刷新预算；两入口共用本方法，
+  /// 既堵住桌面端漏复位（R4-1），又让「预算写点」保持 7 处（声明 + 2 消耗 + 4 复位）。
+  Future<void> switchQuality(int index) async {
+    currentQuality = index;
+    _playUrlRefreshBudget = kPlayUrlRefreshBudgetPerSource;
+    await getPlayUrl();
+  }
+
   void showQualitySheet() {
     Utils.showBottomSheet(
       title: "切换清晰度",
@@ -1011,8 +1104,8 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
         groupValue: currentQuality,
         onChanged: (e) async {
           Get.back();
-          currentQuality = e ?? 0;
-          await getPlayUrl();
+          // ② 批次 B：切清晰度入口统一走 switchQuality（内含每源预算复位，R4-1）。
+          await switchQuality(e ?? 0);
         },
         child: ListView.builder(
           itemCount: qualities.length,
@@ -1037,7 +1130,8 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
           Get.back();
           //currentLineIndex = i;
           //setPlayer();
-          changePlayLine(e ?? 0);
+          // ② 批次 B（R3-1）：用户主动换线路 ⇒ 传 userInitiated 复位每源刷新预算。
+          changePlayLine(e ?? 0, userInitiated: true);
         },
         child: ListView.builder(
           itemCount: playUrls.length,
@@ -1539,6 +1633,8 @@ ${error?.stackTrace}''');
   @override
   void onClose() {
     WidgetsBinding.instance.removeObserver(this);
+    // ② 批次 B（ISS-291 / R3-1）：退房复位每源刷新预算（兜底复位——防实例态残留/复用）。
+    _playUrlRefreshBudget = kPlayUrlRefreshBudgetPerSource;
     scrollController.removeListener(scrollListener);
     _refreshSubscription?.cancel();
     autoExitTimer?.cancel();
