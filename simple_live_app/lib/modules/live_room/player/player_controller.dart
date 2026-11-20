@@ -1621,6 +1621,17 @@ mixin PlayerMixin {
         ' renderSize=${t.renderSize?.$1}x${t.renderSize?.$2}'
         '（源 ${player.state.width}x${player.state.height}）',
       );
+      // 1.08.85 必修1：几何一致性验收日志（Δ≤2‱ 的唯一计数锚点）。
+      // surface 取写链 renderSize（与 plan 同源、settle 后恒定可判；勿用过渡期 dw/dh，
+      // 否则起播过渡期会打 ~79‱ 瞬时大值干扰计数）。Δ 公式 = |panel−surface|/surface×10000。
+      final rsD = t.renderSize;
+      if (rsD != null && rsD.$1 > 0 && rsD.$2 > 0) {
+        final surfRatio = rsD.$1 / rsD.$2;
+        final deltaBps = ((t.aspect - surfRatio).abs() / surfRatio) * 10000;
+        Log.d('[VSR] 几何一致性 surface=${rsD.$1}x${rsD.$2}'
+            ' panel=${t.aspect.toStringAsFixed(6)}'
+            ' Δ=${deltaBps.toStringAsFixed(2)}‱');
+      }
     } else {
       Log.w(
         '[VSR] video-crop 未生效：期望 ${t.crop}，回读 "$readback"'
@@ -1918,7 +1929,11 @@ mixin PlayerMixin {
   (int, int)? _rtxPredictedVsrArea(int srcW, int srcH) {
     final areaRaw = _playerAreaPhysicalSize();
     if (areaRaw == null) return null;
-    final intendedAspect = rtxVsrDisplayAspect(srcW, srcH) ?? (srcW / srcH);
+    // 1.08.85 ②：intendedAspect 随档位走（当前已挂/缺省 2x）——与写链 plan 同源，
+    // 预测宽 3362(2x)/3363(3.75) 首笔均 3.75（轮5-B：对预测宽不敏感）。
+    final intendedAspect = rtxVsrDisplayAspect(srcW, srcH,
+            scale: _lastRtxVsrScale ?? rtxVsrScale) ??
+        (srcW / srcH);
     return ((areaRaw.$2 * intendedAspect).round(), areaRaw.$2);
   }
 
@@ -3321,14 +3336,26 @@ class PlayerController extends BaseController
     // 守 `enabled`（轮4 必修）：本函数是开关共用入口，漏 enabled 会让 toggle-**off** 也武装门控。
     final armToggleGate = enabled && Platform.isWindows && !_vsrDeferPlay;
     if (armToggleGate) {
-      // (a) Rx 预写：终态显示比纯源尺寸派生（与播放区无关）；尊重校正器守卫（同写链处）。
+      // (a) Rx 预写：终态显示比 = 预测终态面积喍同一 plan 派生（1.08.85 ②，与写链同源）；尊重校正器守卫（同写链处）。
       // ⑤ 批次 B：守卫合取式抽纯函数 `vsrDisplayAspectWritable`（语义等价、零行为变，C-5）。
       if (vsrDisplayAspectWritable(
         correctorFired: _vsrCorrectorFired,
         chainApplied: _rtxVsrChainApplied,
       )) {
         final (srcW, srcH) = _trueSourceSize();
-        final aspect = rtxVsrDisplayAspect(srcW, srcH);
+        // 1.08.85 ②：预写与写链同源——同 ① 的「预测终态」面积喂同一 plan（否则此刻实测区
+        // 还是源比布局（如 3337），会算出 3.5 档/967，与写链终值（3.75/968）不一致 →
+        // Rx 二次重排；轮5-C：无 mpv 写、纯面板微排，同源为善）。
+        final areaP = _rtxPredictedVsrArea(srcW, srcH);
+        final planP = rtxVsrPlan(
+          enabled: true,
+          areaW: areaP?.$1,
+          areaH: areaP?.$2,
+          srcW: srcW,
+          srcH: srcH,
+          curS: _lastRtxVsrScale,
+        );
+        final aspect = planP.applied ? planP.aspect : null;
         if (aspect != null) {
           _vsrDisplayAspect = aspect;
           final (pw, ph) =

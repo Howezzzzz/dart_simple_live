@@ -302,10 +302,12 @@ String serializeApplied(PipelineDesired desired, PipelineApplied a) {
     ..write(' vsr.scale=${a.lastRtxVsrScale?.toStringAsFixed(2) ?? "-"}')
     ..write(' vsr.cropEncoder=${a.vsrDesiredCrop}')
     ..write(' gate.armed=${a.gateArmed}');
-  // aspect：原值 + 组件重算（rtxVsrDisplayAspect(源) @ VSR 生效时）。
+  // aspect：原值 + 组件重算（rtxVsrDisplayAspect(源, scale: 已挂/缺省) @ VSR 生效时；
+  // 1.08.85 ②：同源化后重算必须带 scale，否则 PARITY 行长期输出 aspect≠recompute 失配）。
   if (a.vsrDisplayAspect != null) {
     final recomputed = (a.rtxVsrChainApplied && desired.srcW > 0 && desired.srcH > 0)
-        ? rtxVsrDisplayAspect(desired.srcW, desired.srcH)
+        ? rtxVsrDisplayAspect(desired.srcW, desired.srcH,
+            scale: a.lastRtxVsrScale ?? rtxVsrScale)
         : null;
     buf
       ..write(' vsr.aspect=${a.vsrDisplayAspect!.toStringAsFixed(4)}')
