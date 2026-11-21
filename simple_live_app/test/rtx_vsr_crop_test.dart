@@ -98,6 +98,27 @@ void main() {
       expect(rtxVsrDisplayAspect(1920, 1088), closeTo(16 / 9, 1e-9));
     });
 
+    test('1.08.85 ②：与渲染面同源——随档位返回 renderW/renderH（含 _evenFloor）', () {
+      // 960x544 @3.75 → (3600, 2024)（_evenFloor((544-4)*3.75=2025)=2024），
+      // 修前理想裁切比 960/540=1.777778 → Δ=4.94‱；修后 = render 比，Δ=0。
+      expect(rtxVsrDisplayAspect(960, 544, scale: 3.75),
+          closeTo(3600 / 2024, 1e-9));
+      // 1440x816 @2.5 → 同值（810*2.5=2025 奇数被 _evenFloor 削 1）。
+      expect(rtxVsrDisplayAspect(1440, 816, scale: 2.5),
+          closeTo(3600 / 2024, 1e-9));
+      // 640x368 @4 → (2560,1440) 精确 16:9，修前后同值。
+      expect(
+          rtxVsrDisplayAspect(640, 368, scale: 4.0), closeTo(16 / 9, 1e-9));
+      // 缺省 2x 与旧行为等值（1920x1080 精确 16:9）。
+      expect(rtxVsrDisplayAspect(960, 544), closeTo(16 / 9, 1e-9));
+      // plan 同源：plan.aspect == renderSize 比值（同 plan 派生，恒一致）。
+      final p = rtxVsrPlan(
+          enabled: true, areaW: 3364, areaH: 1891, srcW: 960, srcH: 544);
+      expect(p.scale, 3.75);
+      expect(p.aspect, closeTo(3600 / 2024, 1e-9));
+      expect(p.renderSize, (3600, 2024));
+    });
+
     test('无补边时返回 null（调用方按源比例）', () {
       expect(rtxVsrDisplayAspect(1280, 720), isNull);
       expect(rtxVsrDisplayAspect(640, 480), isNull);

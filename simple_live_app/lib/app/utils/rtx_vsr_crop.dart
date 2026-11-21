@@ -62,17 +62,25 @@ String rtxVsrVideoCrop(int width, int height, {double scale = rtxVsrScale}) {
 /// 向下取偶（4:2:0 帧尺寸要求）。
 int _evenFloor(num v) => (v / 2).floor() * 2;
 
-/// VSR 裁切生效时画面真实的显示比例（宽/高），如 960x544 → 960/540（16:9）。
+/// VSR 裁切生效时画面真实的显示比例（宽/高）。
+///
+/// 1.08.85 ②：与渲染面**同源**——返回经 `_evenFloor` 的实际渲染比 `renderW/renderH`
+/// （与 [rtxVsrRenderSize] 同一函数对），消「理想裁切比 960/540 vs 取偶渲染比
+/// 3600/2024」的 4.94‱ 残差（= 960x544 上下细黑线的面板/surface 比例错配根因）。
+/// [scale] 缺省 2x：与旧行为（16:9 精确比）等值，未传 scale 的调用方行为不变。
 ///
 /// ⚠️ 该值**仅供 app 侧面板宽折算**（`_vsrDisplayAspect` → `_panelAspectSize`），
 /// **不再写入 mpv**（② P4/D0，复验-b 裁定 T2）：把 16:9 写 `video-aspect-override` 会被
 /// mpv 折算成未裁切帧的 PAR=1.0074 → 裁切区显示尺寸膨胀 3868x2160 → contain-fit x 卡
 /// → 上下各 8px 黑边——它正是黑边制造者；mpv 侧改恒写 "no"（PAR=1:1，满窗无黑边）。
 /// 无裁切时返回 null（调用方按源比例处理）。
-double? rtxVsrDisplayAspect(int width, int height) {
+double? rtxVsrDisplayAspect(int width, int height, {double scale = rtxVsrScale}) {
   final pad = rtxVsrBottomPadRows(width, height);
   if (pad <= 0) return null;
-  return width / (height - pad);
+  // 1.08.85 ②：同源渲染比。sanity（>8192 等）不可得时退回理想裁切比（不应发生）。
+  final rs = rtxVsrRenderSize(width, height, scale: scale);
+  if (rs == null || rs.$1 <= 0 || rs.$2 <= 0) return width / (height - pad);
+  return rs.$1 / rs.$2;
 }
 
 /// VSR 放大后的渲染尺寸（放大后、已裁掉底部补边），如 960x544@2 → 1920x1080。
@@ -177,8 +185,10 @@ RtxVsrPlan rtxVsrPlan({
   final s = scale;
   final applied = enabled && s != null;
   final crop = applied ? rtxVsrVideoCrop(srcW, srcH, scale: s ?? rtxVsrScale) : '';
-  final aspect =
-      (applied ? rtxVsrDisplayAspect(srcW, srcH) : null) ?? (srcW / srcH);
+  final aspect = (applied
+          ? rtxVsrDisplayAspect(srcW, srcH, scale: s ?? rtxVsrScale)
+          : null) ??
+      (srcW / srcH);
   final renderSize = applied
       ? rtxVsrRenderSize(srcW, srcH, scale: s ?? rtxVsrScale)
       : null;
