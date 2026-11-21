@@ -1381,7 +1381,11 @@ mixin PlayerMixin {
     // 纯逻辑决策（自适应倍数 / 裁切 / 显示比例 / 画布），便于单测（见 rtx_vsr_crop.dart）。
     // 自适应倍数：目标 ≈ 播放区物理分辨率（源低就多放大）；拿不到播放区尺寸走固定 2x 兜底；
     // S≤1.05（源≥播放区）→ 不挂 VSR。
-    final area = _rtxVsrChainApplied ? _playerAreaPhysicalSize() : null;
+    // 1.08.85 ①：area 来源由「实测面板」改为「预测终态」——高取实测、宽 = 高 ×
+    // intendedAspect（跟 plan 同源）。实测宽在 settle 前是过渡态（3337），会把首笔
+    // 写链打到 3.5 档 → 面板重排后升 3.75 再写一笔（双写闪屏）；预测宽首笔即 3.75。
+    // 不可得 → null → rtxVsrPlan 固定 2x 兔底（crop.dart:171-176），不产生「完全不挂」。
+    final area = _rtxVsrChainApplied ? _rtxPredictedVsrArea(rawW, rawH) : null;
     final plan = rtxVsrPlan(
       enabled: _rtxVsrChainApplied,
       areaW: area?.$1,
@@ -1903,6 +1907,19 @@ mixin PlayerMixin {
       Log.d('[VSR] 取播放区尺寸失败: $e');
       return null;
     }
+  }
+
+  /// 1.08.85 ①：「预测终态」播放区——高取实测、宽 = 高 × 终态显示比（与 plan 同源派生）。
+  ///
+  /// settle 完成前实测播放区还是过渡态（如 toggle 后 3337），直接喂给自适应倍数会把首笔
+  /// 写链打到 3.5 档 → 面板重排后升 3.75 再写一笔（双写闪屏）；预测宽 3362~3364 首笔即
+  /// 3.75（轮5-B：对预测宽 ±2px 不敏感，3362/3363/3364 同收敛唯一不动点 3.75）。
+  /// 播放区不可得 → 返回 null（调用方走 rtxVsrPlan 固定 2x 兔底，防「完全不挂 VSR」）。
+  (int, int)? _rtxPredictedVsrArea(int srcW, int srcH) {
+    final areaRaw = _playerAreaPhysicalSize();
+    if (areaRaw == null) return null;
+    final intendedAspect = rtxVsrDisplayAspect(srcW, srcH) ?? (srcW / srcH);
+    return ((areaRaw.$2 * intendedAspect).round(), areaRaw.$2);
   }
 
   /// 视频控制器
