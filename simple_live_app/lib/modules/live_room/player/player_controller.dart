@@ -1077,6 +1077,10 @@ mixin PlayerMixin {
   /// P1-2：写入 Rx 时同步改写 `_vsrDisplayAspect`=实测比（W3/W4/W5 同值幂等；配合
   /// `_syncRtxVsrCrop` 的代际内守卫，不被后续假说重置冲回）。
   void _maybeApplyVsrCorrector() {
+    // 1.08.85 ③（门控周期内冻结）：必须置于代际一次性标志之前——否则窗内会先烧掉
+    // `_vsrCorrectorFired` 再早退，该代际 self-heal 哑火（轮5-F4）。窗内冻结 = 消
+    // 「aspect ↔ scale」环（log-1119-1055:993 实证窗内可过四门）；窗外自愈仅延 ≤3s。
+    if (_vsrDeferPlay) return;
     if (_vsrCorrectorFired) return; // 代际一次性（防自激）
     if (_playerDisposed || !Platform.isWindows || !_rtxVsrChainApplied) return;
     final v = _lastVoutDwh;
@@ -1209,7 +1213,8 @@ mixin PlayerMixin {
       correctorPending: _vsrCorrectorFallbackPending,
       sinceProgress: _vsrSinceProgress(),
       maxWait: vsrCorrectorFallbackMaxWait,
-    )) {
+    ) &&
+    !_vsrDeferPlay) {
       Log.d('[VSR] 修因绝对兜底（≥${vsrCorrectorFallbackMaxWait.inSeconds}s 无进展）→ Rx 迁就');
       _finishVsrCorrectorFallback();
       return;
@@ -1268,6 +1273,11 @@ mixin PlayerMixin {
   /// 落 v3.3「Rx 迁就」兜底：**写入成功才清 pending**（v3.5c 复核 C-3——旧实现先清后调，
   /// 兜底静默 return 时标志已消费、Rx 未迁就）。
   void _finishVsrCorrectorFallback() {
+    // 1.08.85 必修2（轮4-F1 升必修）：兜底定时器回调与本函数的修因绝对兜底调用均**不经**
+    // `_maybeApplyVsrCorrector` 入口，③ 的入口冻结罩不住这两条旁路（toggle-off 后 5.5~8.5s
+    // 内、静置 ≥8s、再 toggle-on 的窄缝序列下可在窗内写 :1252 回灌）→ 此处一行封两路。
+    // 窗外（release 置 _vsrDeferPlay=false）两路照常，v3.3 兜底语义完整保留。
+    if (_vsrDeferPlay) return;
     if (!_vsrCorrectorFallbackPending) return;
     if (_applyVsrCorrectorFallback()) {
       _clearVsrCorrectorFallback();
