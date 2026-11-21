@@ -64,4 +64,77 @@ void main() {
       reason: '_vsrDisplayAspect 需能正常置 null / 假说比预写',
     );
   });
+
+  // ===== 1.08.86（ISS-315）：面板几何「比例载体」选择（vsrPanelGrid）=====
+  group('vsrPanelGrid（面板几何载体，ISS-315）', () {
+    test('VSR 生效（renderSize 非空）⇒ 用渲染面网格（与视频显示面同源）', () {
+      expect(
+        vsrPanelGrid(
+          windows: true,
+          renderSize: (3600, 2024),
+          w: 960,
+          h: 544,
+          aspect: 3600 / 2024,
+        ),
+        (3600, 2024),
+        reason: '960x544@3.75：渲染面比 ≡ 视频显示比 ⇒ 面板框与显示同实数、取整同向（消左右 1px）',
+      );
+    });
+
+    test('renderSize 优先于 aspect 与 (w,h)（三者都给 → 取 renderSize）', () {
+      expect(
+        vsrPanelGrid(
+          windows: true,
+          renderSize: (2880, 1620),
+          w: 1920,
+          h: 1088,
+          aspect: 1.777778,
+        ),
+        (2880, 1620),
+      );
+    });
+
+    test('无 renderSize + aspect 可得 ⇒ 回落旧「源高网格」(round(h×aspect), h)（旧行为保留）', () {
+      expect(
+        vsrPanelGrid(
+            windows: true, renderSize: null, w: 960, h: 544, aspect: 968 / 544),
+        (968, 544),
+      );
+    });
+
+    test('关向（VSR off）：renderSize null、aspect=源比 ⇒ 源网格（960/544）', () {
+      expect(
+        vsrPanelGrid(
+            windows: true, renderSize: null, w: 960, h: 544, aspect: 960 / 544),
+        (960, 544),
+      );
+    });
+
+    test('非 Windows ⇒ 原样返回 (w,h)（安卓不涉 VSR 几何）', () {
+      expect(
+        vsrPanelGrid(
+            windows: false, renderSize: (3600, 2024), w: 0, h: 544, aspect: null),
+        (0, 544),
+      );
+    });
+
+    test('VSR 未生效且 aspect/h 不可得 ⇒ 原样返回（含 null 退化）', () {
+      expect(
+        vsrPanelGrid(
+            windows: true, renderSize: null, w: null, h: null, aspect: null),
+        (0, 0),
+      );
+      expect(
+        vsrPanelGrid(
+            windows: true, renderSize: null, w: 1280, h: 720, aspect: null),
+        (1280, 720),
+      );
+      expect(
+        vsrPanelGrid(
+            windows: true, renderSize: null, w: 1280, h: 0, aspect: 1.5),
+        (1280, 0),
+        reason: 'h<=0 不参与取整（防除零/非法几何）',
+      );
+    });
+  });
 }
