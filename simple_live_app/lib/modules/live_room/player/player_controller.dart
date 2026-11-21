@@ -2995,11 +2995,16 @@ class PlayerController extends BaseController
   /// R1（C3·纯增量）：构造期望态——只读开关/能力/播放器事实，与 pc.dart 决策路径同源
   /// （镜像层，非独立期望源）。`_trueSourceSize` 取自 player.state（中枢入口已有
   /// `_playerDisposed` 早退）；area 门控同 `_syncRtxVsrCrop`（仅链已应用时取），
-  /// `_playerAreaPhysicalSize` 自带 try-catch 安全网（队列外调用有 `_diagSnapshot` 先例）。
+  /// 且同用「预测终态」`_rtxPredictedVsrArea`（1.08.85 ① 对齐，见下注）；
+  /// `_rtxPredictedVsrArea` 内层 `_playerAreaPhysicalSize` 自带 try-catch 安全网。
   PipelineDesired _buildDesired() {
     final (srcW, srcH) = _trueSourceSize();
     final chainApplied = _rtxVsrChainApplied;
-    final area = chainApplied ? _playerAreaPhysicalSize() : null;
+    // 1.08.85 ① 随批同源化（L1）：此前取实测面板，与 `_syncRtxVsrCrop` 已改的预测终态
+    // 不同源 → 过渡窗内 `[APPLY-diff]` 行的 plan 档位（实测 3337→3.5）与实际写链
+    // （预测 3362→3.75）短暂失配（仅日志失真、settle 后收敛，复核轮1/轮2 判非阻塞）。
+    // 改后与 pipeline.dart「同输入同公式」自述一致。
+    final area = chainApplied ? _rtxPredictedVsrArea(srcW, srcH) : null;
     return PipelineDesired(
       volumeNormUserOn: AppSettingsController.instance.volumeNorm.value,
       vsrUserOn: AppSettingsController.instance.enableRtxVsr.value,
