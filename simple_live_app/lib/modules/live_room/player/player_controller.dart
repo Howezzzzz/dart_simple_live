@@ -221,6 +221,8 @@ mixin PlayerMixin {
     // ② P3/P2：进房重置 VSR 面板比例缓存 + 作废旧的重试代际/目标。
     _vsrDisplayAspect = null;
     _vsrDisplaySize = null; // 1.08.86：网格对与 aspect 同点置空（逐语句镜像，禁下沉进 _resetLastVoutDwh）
+    _vsrTruthGrid = null; // 1.08.87（ISS-316）：真值网格同代际作废
+    _vsrTruthKey = null;
     _vsrCropRetryToken++;
     _vsrDesiredCrop = '';
     // v3.2 g1：代际重置 VO 尺寸缓存（本点在 initializePlayer 内，新源起流后由事件重填）。
@@ -340,9 +342,10 @@ mixin PlayerMixin {
   /// 宿主（LiveRoomController）在 `player.open` / `jump` **前一刻**调用：记时间线 + 武装就绪门。
   /// 就绪门武装点放这里（而非 initializePlayer 开头）——既避开前面若干 await 吃掉 6s 预算
   /// （复核 E），又让「换线路/出错重试」（`setPlayer`）同享遮罩/声音门（复核 G）。
-  void tlMarkOpen() {
+  void tlMarkOpen({bool switchLine = false}) {
     _tlMark('open 发起');
-    _armReadyGate();
+    // 1.08.87（ISS-317）：宿主换线路/重试路径传 true（`setPlayer`），进房（`initPlaylist`）不传。
+    _armReadyGate(fromSwitch: switchLine);
   }
 
   /// 起播门控是否适用（Windows + VSR 开启）。进房 / 换线路 / 出错重试共用同一判据，
@@ -524,6 +527,11 @@ mixin PlayerMixin {
   bool _playIssued = false; // 本次门控内 play() 是否已发出
   bool _readyRestartSeen = false; // 本次门控内「play 已发之后」是否已见 restart 完成
 
+  /// 1.08.87（ISS-317）：本次门控是否由**换线路/重试**武装（由 `tlMarkOpen(switchLine)` 透传）。
+  /// 仅它为真时，`_playIssued` 允许由「restart 完成 ∧ 在播」补位（进房路径零改动）。
+  /// ⚠ 必须在 `_armReadyGate` 内**无条件重置**（防上次换线路的 true 残留污染进房门）。
+  bool _readyGateFromSwitch = false;
+
   /// 在途管线写入计数（音量均衡队列 + VSR 裁切队列 + 放行点写链）。
   /// 注：放行点写链（② 改序后落在 play() **之后**）也计入——若不计入，就绪门会在
   /// 「play 已发 + restart 已见 + busy==0」时**提前解除**，随后写链的 VIDEO_RECONFIG 会让
@@ -552,10 +560,12 @@ mixin PlayerMixin {
         .whenComplete(gate.complete);
   }
 
-  void _armReadyGate() {
+  void _armReadyGate({bool fromSwitch = false}) {
     _readyPending = true;
     _playIssued = false;
     _readyRestartSeen = false;
+    // 1.08.87（ISS-317）：**单一赋值点 + 无条件重置**（防代际残留污染后续进房门）。
+    _readyGateFromSwitch = fromSwitch;
     showReadyMaskRx.value = true;
     // 声音门（§8.2【硬】/§三 B1）：就绪前静音（用 mpv `mute` 属性，不动用户音量值），
     // 与遮罩淡出同一刻解除。VSR 关时 `open` 即 play:true，此门是唯一保证「就绪前不出声」的机制。
@@ -809,6 +819,18 @@ mixin PlayerMixin {
   /// 会造出「aspect 非空 / size=null」不对称窗口 → 面板比错到首个尺寸事件才自愈。
   (int, int)? _vsrDisplaySize;
 
+  /// 1.08.87（ISS-316）：**真值网格**＝链生效期采纳的 mpv 真实显示尺寸 `(dw,dh)`（如 3600x2025），
+  /// 以及采纳时的**链签名** `_vsrTruthKey`（由 `vsrChainKey` 生成）。写链/镜像重写网格时按
+  /// 「真值优先」取值（`vsrTruthPriority`）；链签名变化（新目标）或校正器接管、代际重置时作废。
+  /// 背景：mpv 对奇数高度是「缓冲取偶（`out.w/h`=3600x2026）+ 显示保奇（`out.dw/dh`=3600x2025）」，
+  /// 与 `plan.renderSize`（`_evenFloor` 预测 2025→2024）在**无 crop 源**上可差 1 行 →
+  /// 面板 3363 vs 视频 3361（真机 960x540 左右各 1px 黑边，ISS-316）。
+  (int, int)? _vsrTruthGrid;
+  String? _vsrTruthKey;
+
+  /// 1.08.87（ISS-316）：最近一次写链/镜像算出的链签名（供真值采纳时快照）。
+  String? _lastChainKey;
+
   /// v3.2→v3.3：最近一次 VO 输出尺寸（`video-out-params` 的 dw/dh）——v3.2 面板跟随 VO 的主源
   /// （ISS-294 自激闭环主犯，v3.3 已拆回灌边）；现退化为**纯诊断缓存**（[GEOM] 日志用），
   /// 唯一消费方 = 房B 稳态校正器 `_maybeApplyVsrCorrector`（四门一次性）。
@@ -969,6 +991,51 @@ mixin PlayerMixin {
     );
   }
 
+  /// 1.08.87（ISS-316）：面板网格**真值跟随**——链生效时将 mpv 真实显示尺寸 `(dw,dh)` 采纳为
+  /// 面板网格（预测 `plan.renderSize` 仅作首笔过渡）。纯同步、无 await（该回调禁重活）。
+  ///
+  /// 三重门：① 静默门（链写未知→放行；距今 <2s 不跟，与校正器①门同源同参）；② 稳定门
+  ///（dw/dh 连续 ≥2s 不变，`_voutStableSince` 值变即重置 ⇒ 对 flip-flop 免疫）；③ 守卫
+  ///（`vsrDisplayAspectWritable`：校正器已接管→跳过）＋幂等（值同→零写）。
+  ///
+  /// **断环论证**（方案 §12.17.10 必修1）：写的是 mpv 真值（非 Rx 派生）⇒ 写后即不动点；
+  /// 时间闸 ⇒ 环周期 >4s 且有界；面板仅变 ≤2px（≈0.06%）落 area 量化 + scale 滞回门内 ⇒ 环不闭合。
+  void _maybeSyncVsrDisplayGrid() {
+    if (_playerDisposed || !Platform.isWindows || !_rtxVsrChainApplied) return;
+    if (!vsrDisplayAspectWritable(
+      correctorFired: _vsrCorrectorFired,
+      chainApplied: _rtxVsrChainApplied,
+    )) {
+      return;
+    }
+    final cur = _vsrDisplaySize;
+    final v = _lastVoutDwh;
+    if (cur == null || v == null || v.$1 <= 0 || v.$2 <= 0) return;
+    if (cur == v) return; // 幂等：稳态零写
+    // ① 静默门（链写时间未知→放行；与校正器①门同参）。
+    final lastWrite = _lastVsrChainWriteAt;
+    if (lastWrite != null &&
+        DateTime.now().difference(lastWrite) < vsrCorrectorQuietAfterWrite) {
+      return;
+    }
+    // ② 稳定门（dw/dh 未连续 2s 不变）。
+    final s = _voutStableSince;
+    if (s == null ||
+        DateTime.now().difference(s) < vsrCorrectorStableDuration) {
+      return;
+    }
+    _vsrTruthGrid = v;
+    _vsrTruthKey = _lastChainKey;
+    _vsrDisplaySize = v;
+    _vsrDisplayAspect = v.$1 / v.$2; // 同步比值（W3/W4/W5 同源幂等）
+    // 必修(P0)：面板 Obx 依赖 `videoWidthRx`——只改普通字段不触发重建（stream.width 带 distinct
+    // 不再发事件）⇒ 黑边不自愈。故**同笔写 Rx**（仅变时写；后续尺寸流经 `_panelAspectSize` 同值幂等）。
+    if (videoWidthRx.value != v.$1) videoWidthRx.value = v.$1;
+    if (videoHeightRx.value != v.$2) videoHeightRx.value = v.$2;
+    Log.d('[VSR] 面板网格跟随真值 dw/dh=${v.$1}x${v.$2}'
+        '（预测 renderSize 仅首笔过渡；键=$_lastChainKey）');
+  }
+
   /// v3.2：从 `video-out-params` 事件值解析 dw/dh → 更新缓存；**仅当 dw/dh 值变化时**
   /// 重置 120ms one-shot 去抖 timer（门禁 g4 + 首轮验证 P0：事件是 ~30/s 常态连续流，
   /// 按条数重置会让 timer 永不触发——只对值变化才有意义）。解析失败跳过该条、
@@ -1008,6 +1075,7 @@ mixin PlayerMixin {
       _maybeCompleteVsrSettle(); // v3.5 C2：唤醒写链定序等待器
       _maybeApplyVsrCorrector();
       _maybeRepairVsrCrop(); // v3.5 C1：应用级修因（条件式；crop 未被 VO 应用 → 重放自救）
+      _maybeSyncVsrDisplayGrid(); // 1.08.87（ISS-316）：面板网格真值跟随（稳定 ≥2s 才采纳）
     } catch (_) {
       // 解析失败：跳过该条、缓存保持旧值（g4）。
     }
@@ -1127,6 +1195,10 @@ mixin PlayerMixin {
       return;
     }
     _vsrCorrectorFired = true;
+    // 1.08.87（ISS-316）：校正器接管 → 真值网格作废（其网格由 dw/dh 比与当前面板高推算，
+    // 与本方案「真值优先」互斥；保留会让两套网格值交替）。
+    _vsrTruthGrid = null;
+    _vsrTruthKey = null;
     // v3.5 C1/C3（校正器降级为兜底）：四门通过 → **先「重放修因」**（应用级修因因 dw/dh 比
     // ≠ crop 目标而触发条件式重放），不再直接迁就 Rx。修因成功 → dw/dh 命中目标 → 门④/门③
     // 自关 → Rx 保持 967（房B 黑边由 crop 应用消除，而非靠迁就面板宽）；修因耗尽/超时 →
@@ -1176,6 +1248,9 @@ mixin PlayerMixin {
     _voutStableSince = null;
     _voutWHStableSince = null;
     _vsrCorrectorFired = false;
+    // 1.08.87（ISS-316）：真值网格随代际作废（只清真值缓存，**不碰** `_vsrDisplaySize` 置空纪律）。
+    _vsrTruthGrid = null;
+    _vsrTruthKey = null;
     // v3.5 C1：修因状态随代际重置（预算 / 兜底标记 / 布防 / 冷却锚点）。
     _vsrRepairBudget = 3;
     _clearVsrCorrectorFallback();
@@ -1439,7 +1514,23 @@ mixin PlayerMixin {
       _vsrDisplayAspect = _rtxVsrChainApplied ? aspectValue : null;
       // 1.08.86：网格对必须与 aspect **同守卫块**（校正器已 fired 时一并跳过，
       // 否则 plan 网格会覆盖校正器终值 → ISS-294 P1-2 借尸还魂）。
-      _vsrDisplaySize = _rtxVsrChainApplied ? renderSize : null;
+      // 1.08.87（ISS-316）：**真值优先**——同一链签名下用已采纳的真值网格（mpv 真实 dw/dh），
+      // 否则回落预测 renderSize；链关 → 网格与真值一并作废（防旧代际残留被复用）。
+      final chainKey =
+          vsrChainKey(scale: s, crop: desired, srcH: rawH, aspect: aspectValue);
+      _lastChainKey = chainKey;
+      _vsrDisplaySize = _rtxVsrChainApplied
+          ? vsrTruthPriority(
+              truthGrid: _vsrTruthGrid,
+              truthKey: _vsrTruthKey,
+              newKey: chainKey,
+              renderSize: renderSize,
+            )
+          : null;
+      if (!_rtxVsrChainApplied) {
+        _vsrTruthGrid = null;
+        _vsrTruthKey = null;
+      }
     }
     // 去重签名：倍数 + 裁切值 + 源尺寸 + 链状态（**不能只用裁切值当键**，见字段注释）。
     final signature = '${s ?? -1}|$desired|${rawW}x$rawH|$_rtxVsrChainApplied';
@@ -1628,7 +1719,17 @@ mixin PlayerMixin {
       // **渲染面网格**（同源 ⇒ 消「源高网格」4.25‱ 量化 ⇒ 真机左右 1px 黑边归零）；
       // 关向（renderSize null）保持源比（960/544）。守卫用 `renderSize != null`
       // （非字面「crop 非空」）；单次赋值，避免连写两笔触发两次 Obx 重建。
-      final rsGrid = t.renderSize;
+      // 1.08.87（ISS-316）：同签名（含源高/理想比）下已有采纳真值 ⇒ 写**真值网格**；否则回落
+      // `t.renderSize`（预测）。防「同签名重写把真值覆盖回预测」（字段乒乓）。
+      final chainKey =
+          vsrChainKey(scale: t.scale, crop: t.crop, srcH: t.rawH, aspect: t.aspect);
+      _lastChainKey = chainKey;
+      final rsGrid = vsrTruthPriority(
+        truthGrid: _vsrTruthGrid,
+        truthKey: _vsrTruthKey,
+        newKey: chainKey,
+        renderSize: t.renderSize,
+      );
       if (rsGrid != null) {
         videoWidthRx.value = rsGrid.$1;
         videoHeightRx.value = rsGrid.$2;
@@ -2895,6 +2996,18 @@ class PlayerController extends BaseController
         // 信号、只能干等 6s 超时）。「play 已发 + 无在途写入」仍由 readyGateCanFinish 强制，
         // 防「进房期热拨 VSR/seek 被误判就绪」的那道闸还在。
         _readyRestartSeen = true;
+        // 1.08.87（ISS-317）：换线路（jump）路径 media_kit 的 playing 流**不重发 true** ⇒
+        // `_playIssued` 恒 false ⇒ 就绪门只能等 6s 超时（真机 11:41:25→31 实证）。
+        // 「restart 完成 ∧ 在播」为「play 已生效」的等价事实 → 窄口径补位（仅换线路门；
+        // 进房路径零改动，保「防进房期热拨 VSR/seek 被误判就绪」那道闸）。
+        // `pipelineBusy<=0` 闸仍由 readyGateCanFinish 强制（防写链未落地就露画面）。
+        if (readyGateCanBackfillPlayIssued(
+          pending: _readyPending,
+          fromSwitch: _readyGateFromSwitch,
+          playing: player.state.playing,
+        )) {
+          _playIssued = true;
+        }
         _maybeFinishReadyGate();
       }
       // 音量均衡静默降级防线（复核建议）：武装期内命中滤镜错误关键字即标记失败，
@@ -2981,6 +3094,8 @@ class PlayerController extends BaseController
   void disposeStream() {
     _vsrDisplayAspect = null;
     _vsrDisplaySize = null; // 1.08.86：逐语句镜像置空（禁下沉，见字段注释）
+    _vsrTruthGrid = null; // 1.08.87（ISS-316）：真值网格同代际作废
+    _vsrTruthKey = null;
     // v3.2 g1：代际重置 VO 尺寸缓存 + 取消去抖 timer（防 dispose 后写入，g3）。
     _resetLastVoutDwh();
     _vsrCropRetryToken++;

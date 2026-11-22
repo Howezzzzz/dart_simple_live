@@ -825,7 +825,9 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     // 就绪门（阶段4 定向复验 G）：换线路/出错重试也武装遮罩/声音门——
     // 下面 openSourceGated（VSR 路径）与 jump（非 VSR 路径）都会触发一次重载；
     // _tlMark 按 key 去重，重复调用无害。
-    tlMarkOpen();
+    // 1.08.87（ISS-317）：传 `switchLine: true`——换线路路径的 jump 不重发 playing，
+    // 允许就绪门以「restart 完成 ∧ 在播」补位（进房/首开路径不传，行为零变）。
+    tlMarkOpen(switchLine: true);
     // [APPLY] 覆盖「换线路 + 出错重试」两路（openSourceGated 与非 VSR 的 jump 都走这里，
     // 阶段4 复核：原来打在 openSourceGated 内、非 VSR 路径会漏）。
     Log.d('[APPLY] source=switch-line/retry');
