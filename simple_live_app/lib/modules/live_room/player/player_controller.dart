@@ -2108,7 +2108,8 @@ mixin PlayerStateMixin on PlayerMixin {
       // mpv 侧 aspect 复位 "no" → dw/dh=1.7647（带补边源）≠ 纹理 16:9 → 用户切
       // 「画面尺寸→适应」按错误比例夹框会出现 ~0.7% 左右细条。改用面板折算比例：
       // _panelAspectSize 在非 Windows / 缓存空时原样返回（行为不变），VSR 生效时
-      // 返回与面板一致的 (h*a, h) → 夹框比例与面板宽同源、细条消除。
+      // 返回与面板一致的比例载体——1.08.86 起优先渲染面网格 `_vsrDisplaySize`（如
+      // (3600,2024)），回落才是 (h*a, h) → 夹框比例与面板宽同源、细条消除。
       final ps = _panelAspectSize(player.state.width, player.state.height);
       aspectRatio = ps.$1 / ps.$2;
     }
