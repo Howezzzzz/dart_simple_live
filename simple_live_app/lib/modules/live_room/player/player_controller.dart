@@ -220,6 +220,7 @@ mixin PlayerMixin {
     _volumeNormInitialized = false;
     // ② P3/P2：进房重置 VSR 面板比例缓存 + 作废旧的重试代际/目标。
     _vsrDisplayAspect = null;
+    _vsrDisplaySize = null; // 1.08.86：网格对与 aspect 同点置空（逐语句镜像，禁下沉进 _resetLastVoutDwh）
     _vsrCropRetryToken++;
     _vsrDesiredCrop = '';
     // v3.2 g1：代际重置 VO 尺寸缓存（本点在 initializePlayer 内，新源起流后由事件重填）。
@@ -800,6 +801,14 @@ mixin PlayerMixin {
   /// 仅「VSR 已生效」时非空；进房重置/退房时清空。
   double? _vsrDisplayAspect;
 
+  /// 1.08.86（ISS-315）：面板几何的**渲染面网格对**（= `plan.renderSize`，如 (3600, 2024)），
+  /// 与 `_vsrDisplayAspect` **同生命周期**（同点置值/置空）。`_panelAspectSize` 优先用它做
+  /// 「比例载体」——渲染面比 ≡ 视频显示比 ⇒ 面板框与视频显示同实数、取整同向 ⇒ 0 黑边。
+  /// ⚠️ 置空必须**逐语句镜像** `_vsrDisplayAspect` 的置空点（`initializePlayer` / `disposeStream`），
+  /// **不得下沉进 `_resetLastVoutDwh`**——后者被换线路路径（`openSourceGated`）调用，
+  /// 会造出「aspect 非空 / size=null」不对称窗口 → 面板比错到首个尺寸事件才自愈。
+  (int, int)? _vsrDisplaySize;
+
   /// v3.2→v3.3：最近一次 VO 输出尺寸（`video-out-params` 的 dw/dh）——v3.2 面板跟随 VO 的主源
   /// （ISS-294 自激闭环主犯，v3.3 已拆回灌边）；现退化为**纯诊断缓存**（[GEOM] 日志用），
   /// 唯一消费方 = 房B 稳态校正器 `_maybeApplyVsrCorrector`（四门一次性）。
@@ -946,13 +955,18 @@ mixin PlayerMixin {
   }
 
   /// ② P3/C5：面板用的宽高——VSR 生效时按**终态显示比例**折算（一次到位），否则原样。
-  /// 门控＝Windows ∧ `_vsrDisplayAspect` 非空（VSR 关 / 安卓天然不命中）。
+  /// 门控＝Windows ∧（`_vsrDisplaySize` 非空 ∨ `_vsrDisplayAspect` 非空）；
+  /// 1.08.86（ISS-315）：优先用**渲染面网格** `_vsrDisplaySize`（与视频显示面同源，消「源高
+  /// 网格」4.25‱ 量化 → 真机左右 1px 黑边）；取不到再回落旧网格（由 `_vsrDisplayAspect`
+  /// 与源高派生），两者都无 → 原样返回。判定逻辑抽纯函数 `vsrPanelGrid`（可单测）。
   (int, int) _panelAspectSize(int? w, int? h) {
-    final a = _vsrDisplayAspect;
-    if (Platform.isWindows && a != null && h != null && h > 0) {
-      return ((h * a).round(), h);
-    }
-    return (w ?? 0, h ?? 0);
+    return vsrPanelGrid(
+      windows: Platform.isWindows,
+      renderSize: _vsrDisplaySize,
+      w: w,
+      h: h,
+      aspect: _vsrDisplayAspect,
+    );
   }
 
   /// v3.2：从 `video-out-params` 事件值解析 dw/dh → 更新缓存；**仅当 dw/dh 值变化时**
@@ -1139,6 +1153,8 @@ mixin PlayerMixin {
     } else {
       _vsrDisplayAspect = voRatio; // P1-2：同步实测比（W3/W4/W5 同值幂等）
       videoWidthRx.value = (curH * voRatio).round();
+      // 1.08.86：网格对同步写入（否则 W3/W4/W5 会经 `_panelAspectSize` 把它冲回 plan 网格）。
+      _vsrDisplaySize = (videoWidthRx.value, curH);
       Log.d('[VSR] 房B 稳态校正器（无 crop 目标）：Rx=${curW}x$curH'
           ' → ${videoWidthRx.value}x$curH（dw/dh 比=$voRatio）');
     }
@@ -1256,6 +1272,7 @@ mixin PlayerMixin {
     final voRatio = v.$1 / v.$2;
     _vsrDisplayAspect = voRatio; // P1-2：同步实测比（W3/W4/W5 同值幂等）
     videoWidthRx.value = (curH * voRatio).round();
+    _vsrDisplaySize = (videoWidthRx.value, curH); // 1.08.86：网格对同步（防被 W3/W4/W5 冲回）
     Log.d('[VSR] 校正器兜底：Rx=${curW}x$curH'
         ' → ${videoWidthRx.value}x$curH（dw/dh 比=$voRatio）');
     return true;
@@ -1420,6 +1437,9 @@ mixin PlayerMixin {
       chainApplied: _rtxVsrChainApplied,
     )) {
       _vsrDisplayAspect = _rtxVsrChainApplied ? aspectValue : null;
+      // 1.08.86：网格对必须与 aspect **同守卫块**（校正器已 fired 时一并跳过，
+      // 否则 plan 网格会覆盖校正器终值 → ISS-294 P1-2 借尸还魂）。
+      _vsrDisplaySize = _rtxVsrChainApplied ? renderSize : null;
     }
     // 去重签名：倍数 + 裁切值 + 源尺寸 + 链状态（**不能只用裁切值当键**，见字段注释）。
     final signature = '${s ?? -1}|$desired|${rawW}x$rawH|$_rtxVsrChainApplied';
@@ -1604,8 +1624,18 @@ mixin PlayerMixin {
       // 陈旧，真机日志 video=960/967/968 交替的源头之一），是自激闭环主犯；拆除该回灌边。
       // 关向恒 t.aspect=srcW/srcH（与 v3.1 一致，Y2 表 W2 关向本就禁读缓存）。
       // VO→Rx 的唯一入口改为校正器 `_maybeApplyVsrCorrector`（四门一次性，见其注释）。
-      videoWidthRx.value = (t.rawH * t.aspect).round();
-      videoHeightRx.value = t.rawH;
+      // 1.08.86（ISS-315）：VSR 生效（crop 非空 ⇒ renderSize 非空）时，面板几何改用
+      // **渲染面网格**（同源 ⇒ 消「源高网格」4.25‱ 量化 ⇒ 真机左右 1px 黑边归零）；
+      // 关向（renderSize null）保持源比（960/544）。守卫用 `renderSize != null`
+      // （非字面「crop 非空」）；单次赋值，避免连写两笔触发两次 Obx 重建。
+      final rsGrid = t.renderSize;
+      if (rsGrid != null) {
+        videoWidthRx.value = rsGrid.$1;
+        videoHeightRx.value = rsGrid.$2;
+      } else {
+        videoWidthRx.value = (t.rawH * t.aspect).round();
+        videoHeightRx.value = t.rawH;
+      }
     }
     if (t.crop.isEmpty) return;
     // 回读校验（参考音量均衡 af 的做法）：media_kit 的 setProperty 不返回错误，
@@ -2949,6 +2979,7 @@ class PlayerController extends BaseController
 
   void disposeStream() {
     _vsrDisplayAspect = null;
+    _vsrDisplaySize = null; // 1.08.86：逐语句镜像置空（禁下沉，见字段注释）
     // v3.2 g1：代际重置 VO 尺寸缓存 + 取消去抖 timer（防 dispose 后写入，g3）。
     _resetLastVoutDwh();
     _vsrCropRetryToken++;
@@ -3363,6 +3394,9 @@ class PlayerController extends BaseController
         final aspect = planP.applied ? planP.aspect : null;
         if (aspect != null) {
           _vsrDisplayAspect = aspect;
+          // 1.08.86：网格对同点置值，且**必须先于**下面 `_panelAspectSize` 调用
+          // （否则预写仍用旧网格 → 预写 968/写链 3600 的二次重排）。
+          _vsrDisplaySize = planP.renderSize;
           final (pw, ph) =
               _panelAspectSize(player.state.width, player.state.height);
           if (pw > 0 && ph > 0) {

@@ -31,3 +31,31 @@ bool vsrDisplayAspectWritable({
   required bool chainApplied,
 }) =>
     !(correctorFired && chainApplied);
+
+/// 1.08.86（ISS-315）：面板几何「比例载体」的选择——**纯逻辑**，便于单测。
+///
+/// 背景：面板几何（`videoWidthRx/videoHeightRx`）在全仓只被当作**比值**消费
+/// （`panel_width.dart` 的 `desiredPlayerWidth = playerHeight × (w/h)`）。此前的载体是
+/// 「源高网格」`(round(h×aspect), h)`（h = 源高，如 544）→ 960x544 房 B 得 (968, 544)，
+/// 比值 1.779412 比渲染面真实比 3600/2024 = 1.778656 大 4.25‱ → 面板物理宽
+/// 1891×968/544 = 3364.42、视频显示宽 1891×3600/2024 = 3362.99 → **余量 1.43px**
+/// → 真机左右各 1px 细黑边（ISS-315）。VSR 生效时改用**渲染面网格**
+/// `(renderSize.$1, renderSize.$2)`：面板框与视频显示落在**同一实数** ⇒ 取整确定性同向
+/// ⇒ 余量归零（dart 复算；系统性 1.43px → 仅剩 x.5 边界的浮点残差 ~7e-5）。
+///
+/// - [windows]：仅 Windows 走 VSR 几何（与调用点原门控一致）；
+/// - [renderSize]：VSR 生效时的渲染面尺寸（`plan.renderSize`），非空即优先；
+/// - [aspect]/[w]/[h]：回落旧盘（源高网格）用；aspect 与 h 不可得时原样返回 `(w, h)`。
+(int, int) vsrPanelGrid({
+  required bool windows,
+  required (int, int)? renderSize,
+  required int? w,
+  required int? h,
+  required double? aspect,
+}) {
+  if (windows && renderSize != null) return renderSize;
+  if (windows && aspect != null && h != null && h > 0) {
+    return ((h * aspect).round(), h);
+  }
+  return (w ?? 0, h ?? 0);
+}
