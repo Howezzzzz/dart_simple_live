@@ -137,4 +137,91 @@ void main() {
       );
     });
   });
+
+  // ===== 1.08.87（ISS-316）：真值网格优先（vsrChainKey / vsrTruthPriority）=====
+  group('vsrTruthPriority / vsrChainKey（ISS-316）', () {
+    const keyA = '3.75|3600:2024:0:0|540|1.777778';
+    const keyB = '3.75|3600:2024:0:0|544|1.764706';
+
+    test('签名一致 + 真值存在 ⇒ 用真值网格（非预测）', () {
+      expect(
+        vsrTruthPriority(
+            truthGrid: (3600, 2025),
+            truthKey: keyA,
+            newKey: keyA,
+            renderSize: (3600, 2024)),
+        (3600, 2025),
+      );
+    });
+
+    test('签名不一致（换源/换分辨率）⇒ 回落预测 renderSize', () {
+      expect(
+        vsrTruthPriority(
+            truthGrid: (3600, 2025),
+            truthKey: keyA,
+            newKey: keyB,
+            renderSize: (3600, 2040)),
+        (3600, 2040),
+      );
+    });
+
+    test('真值为空 ⇒ 回落预测（与 1.08.86 行为等值）', () {
+      expect(
+        vsrTruthPriority(
+            truthGrid: null,
+            truthKey: null,
+            newKey: keyA,
+            renderSize: (3600, 2024)),
+        (3600, 2024),
+      );
+    });
+
+    test('真值非空但键为空 ⇒ 一律回落预测（防无签名误用）', () {
+      expect(
+        vsrTruthPriority(
+            truthGrid: (3600, 2025),
+            truthKey: null,
+            newKey: keyA,
+            renderSize: (3600, 2024)),
+        (3600, 2024),
+      );
+    });
+
+    test('预测与真值均为 null ⇒ null（链关/不可得）', () {
+      expect(
+        vsrTruthPriority(
+            truthGrid: null, truthKey: null, newKey: keyA, renderSize: null),
+        isNull,
+      );
+    });
+
+    test('vsrChainKey：任一分量变化即换键（倍数/裁切/源高/比）', () {
+      final base = vsrChainKey(
+          scale: 3.75, crop: '3600:2024:0:0', srcH: 540, aspect: 16 / 9);
+      expect(
+          base,
+          vsrChainKey(
+              scale: 3.75, crop: '3600:2024:0:0', srcH: 540, aspect: 16 / 9));
+      expect(
+          base ==
+              vsrChainKey(
+                  scale: 4.0, crop: '3600:2024:0:0', srcH: 540, aspect: 16 / 9),
+          isFalse);
+      expect(
+          base == vsrChainKey(scale: 3.75, crop: '', srcH: 540, aspect: 16 / 9),
+          isFalse);
+      expect(
+          base ==
+              vsrChainKey(
+                  scale: 3.75, crop: '3600:2024:0:0', srcH: 544, aspect: 16 / 9),
+          isFalse);
+      expect(
+          base ==
+              vsrChainKey(
+                  scale: 3.75, crop: '3600:2024:0:0', srcH: 540, aspect: 4 / 3),
+          isFalse);
+      expect(vsrChainKey(scale: null, crop: '', srcH: 540, aspect: 16 / 9),
+          '-||540|1.777778');
+    });
+  });
 }

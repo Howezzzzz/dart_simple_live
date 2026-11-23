@@ -43,4 +43,39 @@ void main() {
       );
     });
   });
+
+  // ===== 1.08.87（ISS-317）：`_playIssued` 等价补位（换线路门专用）=====
+  group('readyGateCanBackfillPlayIssued（ISS-317）', () {
+    test('换线路门 ∧ 在播 ⇒ 补位（jump 不重发 playing）', () {
+      expect(
+        readyGateCanBackfillPlayIssued(
+            pending: true, fromSwitch: true, playing: true),
+        isTrue,
+      );
+    });
+
+    test('非换线路（进房门）⇒ 永不补位（保「防进房期热拨 VSR/seek 误判」那道闸）', () {
+      expect(
+        readyGateCanBackfillPlayIssued(
+            pending: true, fromSwitch: false, playing: true),
+        isFalse,
+      );
+    });
+
+    test('不在播 ⇒ 不补位', () {
+      expect(
+        readyGateCanBackfillPlayIssued(
+            pending: true, fromSwitch: true, playing: false),
+        isFalse,
+      );
+    });
+
+    test('门未武装 ⇒ 不补位（无残留写入）', () {
+      expect(
+        readyGateCanBackfillPlayIssued(
+            pending: false, fromSwitch: true, playing: true),
+        isFalse,
+      );
+    });
+  });
 }

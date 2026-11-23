@@ -59,3 +59,32 @@ bool vsrDisplayAspectWritable({
   }
   return (w ?? 0, h ?? 0);
 }
+
+/// 1.08.87（ISS-316）：**链签名**——用于判定「面板网格真值是否过期」。
+///
+/// 字段＝倍数 + 裁切值 + 源高 + 理想比；任一分量变化（换源 / 换分辨率 / toggle /
+/// 热切清晰度）⇒ 新目标 ⇒ 真值作废、回落预测。
+String vsrChainKey({
+  required double? scale,
+  required String crop,
+  required int srcH,
+  required double aspect,
+}) =>
+    '${scale?.toStringAsFixed(2) ?? '-'}|$crop|$srcH|${aspect.toStringAsFixed(6)}';
+
+/// 1.08.87（ISS-316）：**真值优先**策略（纯逻辑，便于单测）——写链/镜像重写网格时，
+/// 若当前链签名与采纳真值时的签名一致，则用**真值网格**（mpv 真实 `dw/dh`，如 3600x2025）；
+/// 否则回落 `renderSize`（`_evenFloor` 预测，如 3600x2024，仅作首笔/新目标过渡）。
+///
+/// 读安全：真值为空或签名不匹配 ⇒ 一律回落预测（与 1.08.86 行为等值）。
+(int, int)? vsrTruthPriority({
+  required (int, int)? truthGrid,
+  required String? truthKey,
+  required String newKey,
+  required (int, int)? renderSize,
+}) {
+  if (truthGrid != null && truthKey != null && truthKey == newKey) {
+    return truthGrid;
+  }
+  return renderSize;
+}
