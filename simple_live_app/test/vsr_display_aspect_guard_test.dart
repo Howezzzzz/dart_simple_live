@@ -187,6 +187,28 @@ void main() {
       );
     });
 
+    test('真值网格有但键为空 ⇒ 回落预测（链状态翻转致键失效的保守侧）', () {
+      expect(
+        vsrTruthPriority(
+            truthGrid: (3600, 2025),
+            truthKey: null,
+            newKey: 'x',
+            renderSize: (3600, 2024)),
+        (3600, 2024),
+      );
+    });
+
+    test('真值键非空但网格为空 ⇒ 回落预测（两者必须同时在场）', () {
+      expect(
+        vsrTruthPriority(
+            truthGrid: null,
+            truthKey: keyA,
+            newKey: keyA,
+            renderSize: (3600, 2024)),
+        (3600, 2024),
+      );
+    });
+
     test('预测与真值均为 null ⇒ null（链关/不可得）', () {
       expect(
         vsrTruthPriority(

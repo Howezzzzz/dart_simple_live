@@ -829,6 +829,9 @@ mixin PlayerMixin {
   String? _vsrTruthKey;
 
   /// 1.08.87（ISS-316）：最近一次写链/镜像算出的链签名（供真值采纳时快照）。
+  /// **不变量**：仅在写链（`_writeVsrCrop` 一族）与镜像（`_syncRtxVsrCrop`）内赋值，
+  /// 且赋值发生在任何读取之前 —— `_maybeSyncVsrDisplayGrid` 读它时必定「先写过链」；
+  /// 代际重置时随 `_resetLastVoutDwh` 一并清空（防旧代际键被快照）。
   String? _lastChainKey;
 
   /// v3.2→v3.3：最近一次 VO 输出尺寸（`video-out-params` 的 dw/dh）——v3.2 面板跟随 VO 的主源
@@ -1251,6 +1254,7 @@ mixin PlayerMixin {
     // 1.08.87（ISS-316）：真值网格随代际作废（只清真值缓存，**不碰** `_vsrDisplaySize` 置空纪律）。
     _vsrTruthGrid = null;
     _vsrTruthKey = null;
+    _lastChainKey = null; // 同代际作废（防旧代际键被 sync 快照）
     // v3.5 C1：修因状态随代际重置（预算 / 兜底标记 / 布防 / 冷却锚点）。
     _vsrRepairBudget = 3;
     _clearVsrCorrectorFallback();
