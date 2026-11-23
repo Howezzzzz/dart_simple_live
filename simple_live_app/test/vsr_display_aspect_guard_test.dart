@@ -246,4 +246,43 @@ void main() {
           '-||540|1.777778');
     });
   });
+
+  group('vsrRotatedSourceSize（1.08.88 ISS-318 · 旋转口径）', () {
+    test('rotate 0：不交换（横屏常规）', () {
+      expect(vsrRotatedSourceSize(w: 1920, h: 1080, rotate: 0),
+          (1920, 1080));
+    });
+
+    test('rotate 90：交换（竖屏源）', () {
+      expect(vsrRotatedSourceSize(w: 1080, h: 1920, rotate: 90),
+          (1920, 1080));
+    });
+
+    test('rotate 270：交换（竖屏反向）', () {
+      expect(vsrRotatedSourceSize(w: 1080, h: 1920, rotate: 270),
+          (1920, 1080));
+    });
+
+    test('rotate 180：不交换（倒置）', () {
+      expect(vsrRotatedSourceSize(w: 1920, h: 1080, rotate: 180),
+          (1920, 1080));
+    });
+
+    test('rotate null（media_kit 可能缺省）：null==90 为 false ⇒ 不交换', () {
+      expect(vsrRotatedSourceSize(w: 1920, h: 1080, rotate: null),
+          (1920, 1080));
+      expect(vsrRotatedSourceSize(w: 1080, h: 1920, rotate: null),
+          (1080, 1920));
+    });
+
+    test('w/h 不可得（null）⇒ (0,0)：与 dw/dh 恒不等 ⇒ 守卫退化为放行（保守）', () {
+      expect(vsrRotatedSourceSize(w: null, h: null, rotate: 90), (0, 0));
+      expect(vsrRotatedSourceSize(w: null, h: null, rotate: 0), (0, 0));
+    });
+
+    test('单边 null 仍按口径交换/不交换（?? 0 兜底）', () {
+      expect(vsrRotatedSourceSize(w: 1080, h: null, rotate: 90), (0, 1080));
+      expect(vsrRotatedSourceSize(w: null, h: 1080, rotate: 0), (0, 1080));
+    });
+  });
 }
