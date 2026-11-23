@@ -311,15 +311,17 @@ void main() {
   });
 
   group('⑤ Rx 守卫抽纯函数 + ④ G10（C-5 配套源码断言）', () {
-    test('合取式字面量已不复存在，两处均调用 vsrDisplayAspectWritable', () {
+    test('合取式字面量已不复存在，三处均调用 vsrDisplayAspectWritable', () {
       expect(pc.contains('!(_vsrCorrectorFired && _rtxVsrChainApplied)'), isFalse,
           reason: '抽出后原式不得残留（防一处改一处漏）');
       expect(
           RegExp(r'vsrDisplayAspectWritable\(\s*correctorFired: _vsrCorrectorFired,')
               .allMatches(pc)
               .length,
-          2,
-          reason: '恰好两个调用点（_syncRtxVsrCrop 缓存路径 + _applyRtxVsrSetting toggle 预写）');
+          3,
+          reason: '恰好三个调用点：_syncRtxVsrCrop 缓存路径 + _applyRtxVsrSetting toggle 预写 '
+              '+ 1.08.87（ISS-316）_maybeSyncVsrDisplayGrid 真值跟随（同族守卫：校正器已接管'
+              '则跳过，防两套网格值交替）');
     });
 
     test('G10（④）：写锁闭包首行复查代际/token，且在 video-crop 清写之前', () {
