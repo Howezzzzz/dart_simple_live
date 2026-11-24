@@ -840,6 +840,13 @@ mixin PlayerMixin {
   /// 代际（门禁 g1）：`initializePlayer` / `disposeStream` / `openSourceGated` 三点置空。
   (int, int)? _lastVoutDwh;
 
+  /// 1.08.88（ISS-319）：最近一次喂给 `videoController.setSize` 的 surface 尺寸
+  /// （**唯一去重锚点**）——采纳点据此判断是否需要补一笔（真值落地后 setSize 与面板网格同源）。
+  /// 喂值点置所喂值、no-arg reset 置 null、采纳点去重后置值。**跨代际不清**：
+  /// videoController 按 player handle 单例、显式尺寸跨换源保持，代际重置点无需清锚
+  /// （闭环 R4 核：media_kit 内 videoParams 自动重喂时显式尺寸优先，锚点语义自洽）。
+  (int, int)? _lastFedSurface;
+
   /// v3.3（ISS-294）：最近一次写/摘 VSR 滤镜链的时刻（校正器静默门①「距最后链写 ≥2s」），
   /// 在全部四处 `++_vsrChainWriteCount` 处同步刷新。
   DateTime? _lastVsrChainWriteAt;
@@ -1027,6 +1034,14 @@ mixin PlayerMixin {
         DateTime.now().difference(s) < vsrCorrectorStableDuration) {
       return;
     }
+    // 1.08.88（ISS-318）：主防——拒绝采纳「== 源尺寸」的真值。首开/换源时链写前的旧真值
+    // （dw/dh）恒等于源尺寸且早已稳定数分钟 ⇒ 三重门拦不住，先采纳源尺寸造成上下黑边/
+    // 1px 线后才被新真值纠正。rotate 90/270 时源尺寸按旋转交换（`vsrRotatedSourceSize`）；
+    // 闭环 R4 证：`_trueSourceSize` 的 rotate 分支回退值即 dw/dh ⇒ 不交换恒拒、
+    // 旋转源真值跟随永不生效。w/h 不可得 → (0,0) ⇒ 恒不拒（放行，方向保守）。
+    final vp = player.state.videoParams;
+    final srcSize = vsrRotatedSourceSize(w: vp.w, h: vp.h, rotate: vp.rotate);
+    if (v == srcSize) return;
     _vsrTruthGrid = v;
     _vsrTruthKey = _lastChainKey;
     _vsrDisplaySize = v;
@@ -1035,6 +1050,13 @@ mixin PlayerMixin {
     // 不再发事件）⇒ 黑边不自愈。故**同笔写 Rx**（仅变时写；后续尺寸流经 `_panelAspectSize` 同值幂等）。
     if (videoWidthRx.value != v.$1) videoWidthRx.value = v.$1;
     if (videoHeightRx.value != v.$2) videoHeightRx.value = v.$2;
+    // 1.08.88（ISS-319）：采纳点**同笔下发** surface 尺寸——真值落地时 setSize 与面板网格
+    // 同源（写链喂的是预测 rsGrid，真值到达后须补一笔才消除右侧/底部 1px 黑边）。
+    // 去重锚 `_lastFedSurface` 防稳态重复写；unawaited（不阻塞 mpv 事件 drain，仓内先例 pc:977）。
+    if (_lastFedSurface != v) {
+      _lastFedSurface = v;
+      unawaited(videoController.setSize(width: v.$1, height: v.$2));
+    }
     Log.d('[VSR] 面板网格跟随真值 dw/dh=${v.$1}x${v.$2}'
         '（预测 renderSize 仅首笔过渡；键=$_lastChainKey）');
   }
@@ -1690,10 +1712,28 @@ mixin PlayerMixin {
     await pp.setProperty('video-aspect-override', 'no');
     // record 字段不参与 field promotion，先落局部变量再判空（analyze 门禁）。
     final renderSize = t.renderSize;
-    if (renderSize != null) {
-      await videoController.setSize(width: renderSize.$1, height: renderSize.$2);
+    // 1.08.88（ISS-319）：rsGrid（真值优先网格）求值**前移到 setSize 之前**——
+    // setSize 喂面与面板网格同源（单次计算、单源，修左右/底部 1px 黑边）。
+    // 依赖全为不可变目标快照 t.* + 只读字段 + 纯函数，零副作用零 await（闭环 R4 核）；
+    // 非 Windows 亦求值（纯函数无害），喂法 `rsGrid ?? renderSize` 兜底（非 Windows 恒回落）。
+    final chainKey =
+        vsrChainKey(scale: t.scale, crop: t.crop, srcH: t.rawH, aspect: t.aspect);
+    _lastChainKey = chainKey;
+    final rsGrid = vsrTruthPriority(
+      truthGrid: _vsrTruthGrid,
+      truthKey: _vsrTruthKey,
+      newKey: chainKey,
+      renderSize: t.renderSize,
+    );
+    final feedSize = rsGrid ?? renderSize;
+    if (feedSize != null) {
+      await videoController.setSize(width: feedSize.$1, height: feedSize.$2);
+      // 1.08.88（ISS-319）：喂值后置去重锚点（采纳点据此判断是否需要补一笔）。
+      _lastFedSurface = feedSize;
     } else {
       await videoController.setSize();
+      // no-arg reset 清锚：重置后的补写不被去重锚误判为「已喂」而跳过（v3 必修 1）。
+      _lastFedSurface = null;
     }
     // 写入成功后才记缓存（复核 P3-3）：异常（dispose 竞态）时保持旧值，下次同步会重试。
     // 复核 P4：若写期间源尺寸已变（open/切流把签名作废后又来新尺寸），别用旧签名回填
@@ -1725,15 +1765,7 @@ mixin PlayerMixin {
       // （非字面「crop 非空」）；单次赋值，避免连写两笔触发两次 Obx 重建。
       // 1.08.87（ISS-316）：同签名（含源高/理想比）下已有采纳真值 ⇒ 写**真值网格**；否则回落
       // `t.renderSize`（预测）。防「同签名重写把真值覆盖回预测」（字段乒乓）。
-      final chainKey =
-          vsrChainKey(scale: t.scale, crop: t.crop, srcH: t.rawH, aspect: t.aspect);
-      _lastChainKey = chainKey;
-      final rsGrid = vsrTruthPriority(
-        truthGrid: _vsrTruthGrid,
-        truthKey: _vsrTruthKey,
-        newKey: chainKey,
-        renderSize: t.renderSize,
-      );
+      // 1.08.88（ISS-319）：chainKey/rsGrid 已前移至 setSize 之前（同源喂面），此处复用。
       if (rsGrid != null) {
         videoWidthRx.value = rsGrid.$1;
         videoHeightRx.value = rsGrid.$2;
@@ -1757,9 +1789,10 @@ mixin PlayerMixin {
         '（源 ${player.state.width}x${player.state.height}）',
       );
       // 1.08.85 必修1：几何一致性验收日志（Δ≤2‱ 的唯一计数锚点）。
-      // surface 取写链 renderSize（与 plan 同源、settle 后恒定可判；勿用过渡期 dw/dh，
-      // 否则起播过渡期会打 ~79‱ 瞬时大值干扰计数）。Δ 公式 = |panel−surface|/surface×10000。
-      final rsD = t.renderSize;
+      // surface 取**实际喂入值**（rsGrid ?? renderSize，1.08.88 同源）——与 plan 同源、
+      // settle 后恒定可判；勿用过渡期 dw/dh，否则起播过渡期会打 ~79‱ 瞬时大值干扰计数。
+      // Δ 公式 = |panel−surface|/surface×10000。
+      final rsD = rsGrid ?? t.renderSize;
       if (rsD != null && rsD.$1 > 0 && rsD.$2 > 0) {
         final surfRatio = rsD.$1 / rsD.$2;
         final deltaBps = ((t.aspect - surfRatio).abs() / surfRatio) * 10000;

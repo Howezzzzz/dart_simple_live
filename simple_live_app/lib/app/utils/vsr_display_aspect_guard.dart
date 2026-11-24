@@ -88,3 +88,21 @@ String vsrChainKey({
   }
   return renderSize;
 }
+
+/// 1.08.88（ISS-318）：**真实源尺寸**（旋转口径）——采纳点「拒 == 源尺寸」主防的取值函数。
+///
+/// 背景：首开/换源时链写前的旧真值（dw/dh）恒等于源尺寸且早已稳定 ⇒ 三重门拦不住，
+/// 须显式拒绝「采纳值 == 源尺寸」。源尺寸取自 mpv `video-params`（未旋转存储尺寸）：
+/// rotate 90/270 时按旋转交换为显示尺寸；0/180 不交换。
+///
+/// 与 `PlayerController._trueSourceSize` 的区别：**不回退 `state.width/height`**——
+/// 那是 dw/dh 本身（被 `video-aspect-override` 污染），回退会使旋转源恒拒（闭环 R4 证真）。
+/// w/h 不可得（null）→ `(0, 0)` ⇒ 与 dw/dh（恒 >0）比较恒 false ⇒ 守卫退化为放行，
+/// 方向保守可接受（v3/`_maybeSyncVsrDisplayGrid` 已有 `v.$1 <= 0` 早退）。
+/// [rotate] 为 `int?`（media_kit `VideoParams.rotate`）：null 参与 `==` 比较恒 false ⇒ 不交换。
+(int, int) vsrRotatedSourceSize({
+  required int? w,
+  required int? h,
+  required int? rotate,
+}) =>
+    (rotate == 90 || rotate == 270) ? (h ?? 0, w ?? 0) : (w ?? 0, h ?? 0);
