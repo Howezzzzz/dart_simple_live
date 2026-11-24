@@ -1,15 +1,15 @@
 {
-    "version": "1.08.87",
-    "version_num": 1008087,
-    "version_desc": "- 修复：**960x540 类源开画质增强（VSR）后画面左右各 1 像素细黑边**（上一版修好了 960x544，本版补齐 540 这类源）——原因是面板宽仍按「预测的渲染尺寸」折算，而这个预测对奇数高会向下取偶（540×3.75=20\n- 修复：**未开 VSR 时切换线路要白等约 6 秒才出画面**（上一版起播门控在换线路时被武装，但换线路走的重载不会重发「已开始播放」信号，导致只能等满 6 秒超时才掀遮罩）——本版限量放行：**仅换线路门**允许用「重载完成 + 正在\n- 保持：不改画质 / 解码 / 超分 / 裁切行为；遮罩不多挂、起播不变慢；1.08.85 的上下黑线修复与 1.08.86 的左右黑线修复均原样保留\n- 请复测：**960x540** 开 VSR（看左右 1px 黑边是否消失）、**960x544** 开 VSR（确认未回归）、**未开 VSR 进房后切线路**（应很快出画面、不再白等）、反复开关 VSR、换线路后再开",
+    "version": "1.08.88",
+    "version_num": 1008088,
+    "version_desc": "- 修复：**960x540 类源开 VSR 后画面右侧、底部各 1 像素细黑线**（上一版已把面板几何对齐 mpv 实际显示尺寸，但**视频渲染面**仍按「预测尺寸」喂给播放器，两者差 1 行 → 纹理缩进 16:9 面板后右侧/底部各露\n- 修复：**未开 VSR 进房后再开 VSR，画面上下黑边约 1 秒才自动调整**（面板在滤镜链写完前就采纳了「旧的稳定尺寸」＝源尺寸，比值偏 → 上下黑边，待新真值到达才纠正）；本版加**「拒绝采纳等于源尺寸的旧值」**主防，直接跳过过\n- 保持：不改画质 / 解码 / 超分 / 裁切行为；1.08.85~1.08.87 的黑线修复全部原样保留\n- 请复测：**960x540** 开 VSR（右侧/底部 1px 黑线应消失）、**1920x1088 房**未开 VSR 进房后再开 VSR（应无上下黑边、无约 1 秒瞬态）、**960x544** 开 VSR（确认不回归）、反复开关 ",
     "prerelease": true,
     "download_url": "https://github.com/Howezzzzz/dart_simple_live/releases",
     "download_urls": {
-        "android": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.87/app-arm64-v8a-release.apk",
-        "windows": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.87/Slive-1.08.87+1008087-windows-setup.exe",
-        "macos": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.87/simple_live_app-1.08.87+1008087-macos.dmg",
-        "linux": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.87/Slive-x86_64-linux.deb",
-        "linux_flatpak": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.87/Slive-x86_64.flatpak"
+        "android": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.88/app-arm64-v8a-release.apk",
+        "windows": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.88/Slive-1.08.88+1008088-windows-setup.exe",
+        "macos": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.88/simple_live_app-1.08.88+1008088-macos.dmg",
+        "linux": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.88/Slive-x86_64-linux.deb",
+        "linux_flatpak": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.88/Slive-x86_64.flatpak"
     },
     "mirror_prefixes": [
         "https://gh-proxy.com/",
@@ -17,10 +17,10 @@
         "https://ghproxy.cc/"
     ],
     "download_sha256": {
-        "android": "3c475df4e46a5570c69536f9e26cf2f15e16540fac15f8d4a5ce326a95d632da",
-        "windows": "db4afbb85c9940170454ff6bb9e1971e07104bf85a1221100604a5c56c4bf562",
-        "macos": "cee1ab2608ef950aeed8f085c09b669e326e459b4576739906cfd26512909714",
-        "linux": "c230117d530751ae9ed54fbfcdffdf7dc3db4d0d704f1d0e87df73ad891bef13",
-        "linux_flatpak": "8fd9700a8fe2c009bc3e028ff7899afe396054f938296d9bb39a31a493c3cf43"
+        "android": "920563a8ea78911937fdfc619bf95846adc3e4e46f5f3678bb99be1349e69e6f",
+        "windows": "29dce1ffebe8a749deaac2b9aaa8cb7a90364bf72caae4f949d6f407dbbb1f79",
+        "macos": "b02663e6e99d56301b353ec164131f3cbfb4fd3428404e396bcb9cfa0ac35f44",
+        "linux": "23436ce56b671ccae40a26675ac8c7479a097730364cb4460f8b9fc285035659",
+        "linux_flatpak": "fcc5674b746ea58b3fefbe6a72246517681d88302e0862f89239e7cf991814c1"
     }
 }
