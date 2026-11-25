@@ -150,6 +150,13 @@ void main() {
       expect(rtxVsrRenderSize(3840, 2160), (7680, 4320)); // 未超限
       expect(rtxVsrRenderSize(4096, 2160, scale: 4), isNull); // 16384 > 8192
     });
+
+    test('1.08.89（ISS-320）：crop 空（无补边）时网格用未取偶，与 mpv 真值对齐', () {
+      // 540 非 16 对齐 → 无补边（crop 空）→ 未取偶 3600x2025（= mpv dw/dh）；旧行为会取偶成 2024。
+      expect(rtxVsrRenderSize(960, 540, scale: 3.75), (3600, 2025));
+      // 补边流（crop 非空）仍取偶——544 不回归（@3.75 → 3600x2024）。
+      expect(rtxVsrRenderSize(960, 544, scale: 3.75), (3600, 2024));
+    });
   });
 
   group('rtxVsrAdaptiveScale（自适应倍数：目标≈播放区物理分辨率）', () {
