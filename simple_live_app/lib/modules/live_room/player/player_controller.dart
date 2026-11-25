@@ -332,6 +332,12 @@ mixin PlayerMixin {
   /// finish 条件在 toggle 期永不满足）。`_readyPending` 为真时**不抢所有权**（就绪门遮罩本就在）。
   bool _vsrToggleMaskOn = false;
   Timer? _vsrToggleMaskTimer;
+  /// 1.08.89（ISS-321）：本次 toggle 遮罩期内是否已见「本轮 restart complete」——
+  /// 遮罩由「单次写链完成即撤」改为「等它（或 3s 兜底）再撤」，盖住 mpv 重建链的可见重载。
+  bool _vsrToggleRestartSeen = false;
+  /// 1.08.89（ISS-321，复核轮1 补）：本遮罩轮次绑定的门控代际——防快速 on→off 时上一轮
+  /// restart-complete 串轮掀掉本轮遮罩；listener 撤遮罩时比对 `_vsrGateEpoch`。
+  int _vsrToggleMaskEpoch = -1;
   /// v3.5i：本次门控是 toggle 还是进房（release 的抑制窗是否解除按此区分）。
   bool _vsrGateIsToggle = false;
 
@@ -855,6 +861,10 @@ mixin PlayerMixin {
   /// ≥2s 不变」的计时起点，P1-3 语义：首现起算/值变重置/零 timer）。
   DateTime? _voutStableSince;
 
+  /// 1.08.89（ISS-320）：**真值采纳专用**稳定锚（区别于校正器的 `_voutStableSince`）——
+  /// 链写后置 null、dw/dh 值变时置 now；`_maybeSyncVsrDisplayGrid` 读它（吃 `vsrTruthStableDuration` 短门）。
+  DateTime? _voutTruthSince;
+
   /// v3.3（ISS-294）：校正器本轮代际是否已写过（一次性标记，防自激）；
   /// 随 `_resetLastVoutDwh` 三点代际重置（P1-5：连同全部时间状态一起清）。
   bool _vsrCorrectorFired = false;
@@ -862,6 +872,11 @@ mixin PlayerMixin {
   /// v3.3 校正器时限（ISS-294 终轮验证定）：静默/稳定 2s（过渡态实测 ≤0.6s，裕度 1.5~3×）。
   static const Duration vsrCorrectorQuietAfterWrite = Duration(seconds: 2);
   static const Duration vsrCorrectorStableDuration = Duration(seconds: 2);
+
+  /// 1.08.89（ISS-320）：**真值采纳**专用时限（短）——与校正器的 2s 门分离，缩短
+  /// 「链写 → 面板/渲染面跟随 mpv 真值」的过渡期（真值 ~1s 内即出现，勿再等满 2s 稳定门）。
+  static const Duration vsrTruthQuietAfterWrite = Duration(milliseconds: 400);
+  static const Duration vsrTruthStableDuration = Duration(milliseconds: 400);
 
   /// v3.3 校正器比值容差（滤 967↔968 量化噪声；也作门④比例比较容差，P1-4 禁裸等值）。
   static const double vsrCorrectorRatioTolerance = 0.005;
@@ -1022,16 +1037,16 @@ mixin PlayerMixin {
     final v = _lastVoutDwh;
     if (cur == null || v == null || v.$1 <= 0 || v.$2 <= 0) return;
     if (cur == v) return; // 幂等：稳态零写
-    // ① 静默门（链写时间未知→放行；与校正器①门同参）。
+    // ① 静默门（1.08.89/ISS-320：真值采纳用**专用短门**，不再共用校正器 2s，缩短过渡期）。
     final lastWrite = _lastVsrChainWriteAt;
     if (lastWrite != null &&
-        DateTime.now().difference(lastWrite) < vsrCorrectorQuietAfterWrite) {
+        DateTime.now().difference(lastWrite) < vsrTruthQuietAfterWrite) {
       return;
     }
-    // ② 稳定门（dw/dh 未连续 2s 不变）。
-    final s = _voutStableSince;
+    // ② 稳定门（1.08.89/ISS-320：读专用锚 `_voutTruthSince` + 短门）。
+    final s = _voutTruthSince;
     if (s == null ||
-        DateTime.now().difference(s) < vsrCorrectorStableDuration) {
+        DateTime.now().difference(s) < vsrTruthStableDuration) {
       return;
     }
     // 1.08.88（ISS-318）：主防——拒绝采纳「== 源尺寸」的真值。首开/换源时链写前的旧真值
@@ -1096,6 +1111,7 @@ mixin PlayerMixin {
       // P1-3 语义：值变化才重置首现时刻；稳态（值不变）保持原时刻、零 timer 零重置。
       if (prev == null || prev.$1 != dw || prev.$2 != dh) {
         _voutStableSince = DateTime.now();
+        _voutTruthSince = DateTime.now(); // 1.08.89（ISS-320）：真值采纳专用锚（值变即重置）
       }
       _maybeCompleteVsrSettle(); // v3.5 C2：唤醒写链定序等待器
       _maybeApplyVsrCorrector();
@@ -1271,6 +1287,7 @@ mixin PlayerMixin {
     _lastVoutDwh = null;
     _lastVoutWH = null;
     _voutStableSince = null;
+    _voutTruthSince = null; // 1.08.89（ISS-320）：真值锚随代际作废
     _voutWHStableSince = null;
     _vsrCorrectorFired = false;
     // 1.08.87（ISS-316）：真值网格随代际作废（只清真值缓存，**不碰** `_vsrDisplaySize` 置空纪律）。
@@ -1667,12 +1684,14 @@ mixin PlayerMixin {
           }
           _lastRtxVsrScale = t.scale;
           _lastVsrChainWriteAt = DateTime.now(); // v3.3：校正器静默门计时点
+          _voutTruthSince = null; // 1.08.89（ISS-320）：链写后真值锚作废（防老锚复用）
           Log.d('[VSR] 写入滤镜链 #${++_vsrChainWriteCount}'
               ' scale=${t.scale?.toStringAsFixed(2)}');
         } else {
           await pp.setProperty('vf', '');
           _lastRtxVsrScale = null;
           _lastVsrChainWriteAt = DateTime.now(); // v3.3：校正器静默门计时点（摘链也计）
+          _voutTruthSince = null; // 1.08.89（ISS-320）：链写后真值锚作废
           Log.d('[VSR] 摘除滤镜链 #${++_vsrChainWriteCount}');
         }
         // v3.5 C2（写链定序）：vf 重建（升档/挂链）后，**等新 scale 的帧在 VO 落定**再下发
@@ -1704,6 +1723,7 @@ mixin PlayerMixin {
     // v3.5 C1（C-1 复核项）：crop 写后刷新静默门锚点——原锚点在 vf 写处，crop 写入后不刷新
     // 会让校正器静默门在 crop 刚写完即满足（超时路径下）。
     _lastVsrChainWriteAt = DateTime.now();
+    _voutTruthSince = null; // 1.08.89（ISS-320）：链写后真值锚作废
     // ② P4/D0（复验-b 裁定 T2）：`video-aspect-override` 不复写计算出的 16:9——
     // 对带补边源它被 mpv 折算成未裁切帧的 PAR=1.0074 → 裁切区显示尺寸膨胀 3868x2160
     // → contain-fit x 卡 → 上下各 8px 黑边（黑边制造者）。恒写 "no"（=mpv 默认 -2.0，
@@ -1880,6 +1900,8 @@ mixin PlayerMixin {
       return; // 就绪门遮罩本就在 → 不抢所有权（否则 finish('restart') 会提前掀掉）
     }
     _vsrToggleMaskOn = true;
+    _vsrToggleRestartSeen = false; // 1.08.89（ISS-321）：本轮重置
+    _vsrToggleMaskEpoch = _vsrGateEpoch; // 1.08.89（复核轮1）：绑定本轮代际
     showReadyMaskRx.value = true;
     _vsrToggleMaskTimer?.cancel();
     _vsrToggleMaskTimer = Timer(vsrDeferPlayTimeout, () {
@@ -1968,6 +1990,7 @@ mixin PlayerMixin {
             await pp.setProperty('vf', '');
             _lastRtxVsrScale = null;
             _lastVsrChainWriteAt = DateTime.now(); // v3.3：校正器静默门计时点（兜底摘链也计）
+            _voutTruthSince = null; // 1.08.89（ISS-320）：链写后真值锚作废
             // 1.08.76 几何修复（次点）：此路径不经 `_applyVsrTargetUnlocked`、摘链不产
             // 尺寸事件（日志「无尺寸事件，sync 未写」）→ 门控期热关（T6-③）摘链后同样
             // 刷新面板几何回**源比例**（VSR 已关；经 `_panelAspectSize`，此时
@@ -2027,11 +2050,26 @@ mixin PlayerMixin {
       // 实现复核 6c8bc6e C-R2：await 期间若已被换线路重武装（epoch 变）→ 新门控/就绪门接管
       // 遮罩，不得用旧快照提前掀掉（否则一次可见闪烁）。
       if (toggleMaskOwned && !_playerDisposed && epoch == _vsrGateEpoch) {
-        _vsrToggleMaskTimer?.cancel();
-        _vsrToggleMaskTimer = null;
-        _vsrToggleMaskOn = false;
-        showReadyMaskRx.value = false;
-        Log.d('[VSR] toggle 遮罩撤下');
+        // 1.08.89（ISS-321）：**不再「单次写链一完成就撤」**——若本轮 restart 尚未完成，保留遮罩
+        // 盖住 mpv 重建视频链（可见重载），等 `playback restart complete` 落地或 3s 兜底再撤。
+        if (_vsrToggleRestartSeen) {
+          _vsrToggleMaskTimer?.cancel();
+          _vsrToggleMaskTimer = null;
+          _vsrToggleMaskOn = false;
+          showReadyMaskRx.value = false;
+          Log.d('[VSR] toggle 遮罩撤下（本轮 restart 已完成）');
+        } else {
+          _vsrToggleMaskTimer?.cancel();
+          _vsrToggleMaskTimer = Timer(vsrDeferPlayTimeout, () {
+            _vsrToggleMaskTimer = null;
+            if (_vsrToggleMaskOn && !_playerDisposed) {
+              _vsrToggleMaskOn = false;
+              showReadyMaskRx.value = false;
+              Log.d('[VSR] toggle 遮罩撤下（restart 等超时兜底）');
+            }
+          });
+          Log.d('[VSR] toggle 遮罩保留（等本轮 restart complete）');
+        }
       }
     }
   }
@@ -2062,6 +2100,7 @@ mixin PlayerMixin {
       }
       _lastRtxVsrScale = rtxVsrScale;
       _lastVsrChainWriteAt = DateTime.now(); // v3.3：校正器静默门计时点（预挂兜底也计）
+      _voutTruthSince = null; // 1.08.89（ISS-320）：链写后真值锚作废
       Log.d('[VSR] 预挂兜底链 #${++_vsrChainWriteCount}'
           ' scale=${rtxVsrScale.toStringAsFixed(2)}（门控超时降级）');
     } finally {
@@ -3028,6 +3067,18 @@ class PlayerController extends BaseController
       if (event.text.contains('Using hardware decoding')) _tlMark('硬解生效');
       if (event.text.contains('playback restart complete')) {
         _tlMark('restart完成');
+        // 1.08.89（ISS-321）：toggle 遮罩轮次的本轮 restart 已完成 → 可撤遮罩（重建期至此盖住）。
+        // epoch 守卫（复核轮1）：只撤「本轮」遮罩，防快速 on→off 时上一轮 restart-complete 串轮。
+        if (_vsrToggleMaskOn &&
+            !_playerDisposed &&
+            _vsrToggleMaskEpoch == _vsrGateEpoch) {
+          _vsrToggleRestartSeen = true;
+          _vsrToggleMaskTimer?.cancel();
+          _vsrToggleMaskTimer = null;
+          _vsrToggleMaskOn = false;
+          showReadyMaskRx.value = false;
+          Log.d('[VSR] toggle 遮罩撤下（本轮 restart 完成）');
+        }
         // 就绪门：**门控窗口内任何时刻的 restart 完成都记**（② 改序后：VSR 开的路径没有 seek
         // → 管线在暂停期就绪 → restart 完成会落在 play() **之前**，原「仅认 play 之后」会拿不到
         // 信号、只能干等 6s 超时）。「play 已发 + 无在途写入」仍由 readyGateCanFinish 强制，

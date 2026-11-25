@@ -91,8 +91,15 @@ double? rtxVsrDisplayAspect(int width, int height, {double scale = rtxVsrScale})
     {double scale = rtxVsrScale}) {
   if (width <= 0 || height <= 0) return null;
   final pad = rtxVsrBottomPadRows(width, height);
-  final outW = _evenFloor(width * scale);
-  final outH = _evenFloor((height - pad) * scale);
+  // 1.08.89（ISS-320）：crop 为空（无补边）时，mpv 显示尺寸是**未取偶**的放大尺寸（如 540×3.75
+  // =2025，mpv dw/dh=2025）；此处须与 mpv 真值对齐，否则首笔面板 2024 与视频 2025 差 1 行 →
+  // 右侧 1px 黑线。crop 非空（有补边）时 mpv 显示 = 裁切高度（取偶），保持 `_evenFloor`（否则
+  // 544 类源 3600x2024 反被改成 2025 而冒新黑线）。
+  final bool noCrop = pad <= 0;
+  final outW = noCrop ? (width * scale).round() : _evenFloor(width * scale);
+  final outH = noCrop
+      ? ((height - pad) * scale).round()
+      : _evenFloor((height - pad) * scale);
   if (outW <= 0 || outH <= 0) return null;
   // sanity：单边超 8192 视为异常（显存/驱动上限），不设显式尺寸。
   if (outW > 8192 || outH > 8192) return null;
