@@ -878,6 +878,10 @@ mixin PlayerMixin {
   static const Duration vsrTruthQuietAfterWrite = Duration(milliseconds: 400);
   static const Duration vsrTruthStableDuration = Duration(milliseconds: 400);
 
+  /// 1.08.89（ISS-321 真机修正）：in-room toggle **不发** `playback restart complete`（仅进房/换线路发），
+  /// 故不能死等该信号（会掉 3s 兜底 → 长时间黑屏）；改用「短的释放宽限」封顶遮罩时长。
+  static const Duration vsrToggleMaskReleaseGrace = Duration(milliseconds: 400);
+
   /// v3.3 校正器比值容差（滤 967↔968 量化噪声；也作门④比例比较容差，P1-4 禁裸等值）。
   static const double vsrCorrectorRatioTolerance = 0.005;
 
@@ -2050,8 +2054,8 @@ mixin PlayerMixin {
       // 实现复核 6c8bc6e C-R2：await 期间若已被换线路重武装（epoch 变）→ 新门控/就绪门接管
       // 遮罩，不得用旧快照提前掀掉（否则一次可见闪烁）。
       if (toggleMaskOwned && !_playerDisposed && epoch == _vsrGateEpoch) {
-        // 1.08.89（ISS-321）：**不再「单次写链一完成就撤」**——若本轮 restart 尚未完成，保留遮罩
-        // 盖住 mpv 重建视频链（可见重载），等 `playback restart complete` 落地或 3s 兜底再撤。
+        // 1.08.89（ISS-321，真机修正）：in-room toggle **不发** `playback restart complete`（仅进房/换线路有），
+        // 故不能死等（会掉 3s 兜底 → 长黑屏）；已见 restart 则即时撤，否则用**短释放宽限**封顶。
         if (_vsrToggleRestartSeen) {
           _vsrToggleMaskTimer?.cancel();
           _vsrToggleMaskTimer = null;
@@ -2060,15 +2064,15 @@ mixin PlayerMixin {
           Log.d('[VSR] toggle 遮罩撤下（本轮 restart 已完成）');
         } else {
           _vsrToggleMaskTimer?.cancel();
-          _vsrToggleMaskTimer = Timer(vsrDeferPlayTimeout, () {
+          _vsrToggleMaskTimer = Timer(vsrToggleMaskReleaseGrace, () {
             _vsrToggleMaskTimer = null;
             if (_vsrToggleMaskOn && !_playerDisposed) {
               _vsrToggleMaskOn = false;
               showReadyMaskRx.value = false;
-              Log.d('[VSR] toggle 遮罩撤下（restart 等超时兜底）');
+              Log.d('[VSR] toggle 遮罩撤下（宽限释放）');
             }
           });
-          Log.d('[VSR] toggle 遮罩保留（等本轮 restart complete）');
+          Log.d('[VSR] toggle 遮罩保留（短宽限后释放）');
         }
       }
     }
