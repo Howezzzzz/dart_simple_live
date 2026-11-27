@@ -471,7 +471,9 @@ Widget buildControls(
             }
           },
           child: MouseRegion(
-            onEnter: controller.onEnter,
+            onHover: (PointerHoverEvent event) {
+              controller.onHover(event, videoState.context);
+            },
             child: Container(
               width: double.infinity,
               height: double.infinity,
