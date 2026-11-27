@@ -144,16 +144,22 @@ class LiveRoomPage extends GetView<LiveRoomController> {
         // 桌面横屏 + 安卓横屏：顶栏叠在画面上（沉浸式）→ 不加 AppBar。
         // （2026-10-21 Howe：安卓端顶栏也要半透明 + 界面延伸到系统状态栏）
         final overlayBar = tablet && (desktop || Platform.isAndroid);
-        final scaffold = Scaffold(
-          appBar: overlayBar
-              ? null
-              : AppBar(
-                  title: Obx(
-                    () => Text(controller.detail.value?.title ?? "直播间"),
-                  ),
-                  actions: buildAppbarActions(context),
-                ),
-          body: tablet ? buildTabletUI(context, showOverlayBar: overlayBar) : buildPhoneUI(context),
+        // 上游 99c0db9：消息面板折叠时，非沉浸式（竖屏手机）连标题栏一起收起；
+        // 沉浸式（overlayBar=true）本就无 AppBar，不受影响。
+        final scaffold = Obx(
+          () => Scaffold(
+            appBar: overlayBar
+                ? null
+                : (controller.showMessagePanel.value
+                    ? AppBar(
+                        title: Obx(
+                          () => Text(controller.detail.value?.title ?? "直播间"),
+                        ),
+                        actions: buildAppbarActions(context),
+                      )
+                    : null),
+            body: tablet ? buildTabletUI(context, showOverlayBar: overlayBar) : buildPhoneUI(context),
+          ),
         );
         // 沉浸式（视频延伸到状态栏后）：浅色状态栏图标；非沉浸式保持主题/全局设置不动
         if (!overlayBar) return scaffold;
@@ -484,6 +490,9 @@ class LiveRoomPage extends GetView<LiveRoomController> {
                   final overlay = layout.overlay;
                   final renderW = layout.renderW;
                   final openOverlay = controller.panelOverlayOpen.value;
+                  // 上游 99c0db9/50a879b：消息面板折叠状态（F11 / 底栏折叠按钮切换）。
+                  // false 时收起右侧面板（分栏面板/覆盖面板一并收起），把画面让给视频。
+                  final panelVisible = controller.showMessagePanel.value;
                   // 订阅「重算信号」：用户动作（如点「分栏」）后自增即触发本 Obx 重算
                   // （普通字段 panelOverlayActive/panelManualOverride 改不动 UI，见控制器注释）
                   final panelEpoch = controller.panelLayoutEpoch.value;
@@ -519,7 +528,7 @@ class LiveRoomPage extends GetView<LiveRoomController> {
                               child: buildMediaPlayer(),
                             ),
                           ),
-                          if (!overlay)
+                          if (!overlay && panelVisible)
                             SizedBox(
                               width: renderW,
                               child: Container(
@@ -541,7 +550,7 @@ class LiveRoomPage extends GetView<LiveRoomController> {
                       ),
                       // 覆盖层展开时，点击画面空白处直接收起弹幕栏（Howe 2026-10-21）：
                       // 置于顶栏之前（不挡顶栏按钮）、只在视频区（覆盖层左侧）生效；收起后恢复正常点击
-                      if (overlay && openOverlay)
+                      if (overlay && openOverlay && panelVisible)
                         Positioned(
                           key: const ValueKey('overlayTapCatcher'), // 固定身份：避免插入/移除时兄弟元素错位（弹幕栏动画失效）
                           left: 0,
@@ -563,7 +572,7 @@ class LiveRoomPage extends GetView<LiveRoomController> {
                               : -(64 + MediaQuery.paddingOf(context).top),
                           // 右边界对齐面板左缘（原来是 renderW+8，把 8px 拖拽手柄那一竖条露在顶栏渐变之外 → Windows 桌面恒分栏，能看见一条未压暗的竖缝，Howe 2026-10-24）；
                           // 手柄在本顶栏之后绘制，照样可拖，不受影响
-                          right: overlay ? 0.0 : renderW,
+                          right: (overlay || !panelVisible) ? 0.0 : renderW,
                           duration: const Duration(milliseconds: 200),
                           child: MouseRegion(
                             // 鼠标移到顶栏上等同移到画面上：唤出并重新计时
@@ -575,11 +584,11 @@ class LiveRoomPage extends GetView<LiveRoomController> {
                           ),
                         ),
                       // 覆盖层置于顶栏之后（否则顶栏会压住其关闭按钮）；宽度夹逼防遮满画面
-                      if (overlay) _buildOverlayPanel(context, layout.overlayW, topInset),
+                      if (overlay && panelVisible) _buildOverlayPanel(context, layout.overlayW, topInset),
                       // 手柄**常驻且始终最后绘制**（同一 Element，翻转时不丢手势）：
                       // 分栏 → 贴面板左缘；覆盖式展开 → 贴覆盖层左缘（照样能拖）
                       // 2026-10-22 Howe：**覆盖式收起态不放手柄**——它贴屏幕最右缘会抢安卓边缘返回手势（右缘左滑变拖宽）
-                      if (!(overlay && !openOverlay))
+                      if (!(overlay && !openOverlay) && panelVisible)
                         Positioned(
                           key: const ValueKey('panelHandle'), // 固定身份
                           right: !overlay ? renderW : layout.overlayW,
@@ -601,20 +610,28 @@ class LiveRoomPage extends GetView<LiveRoomController> {
             },
           ),
         ),
-        Container(
-          decoration: BoxDecoration(
-            color: Theme.of(context).cardColor,
-            border: Border(
-              top: BorderSide(
-                color: Colors.grey.withAlpha(25),
-              ),
-            ),
-          ),
-          padding: AppStyle.edgeInsetsV4.copyWith(
-            bottom: AppStyle.bottomBarHeight + 4,
-          ),
-          child: Row(
-            children: [
+        // 上游 99c0db9/50a879b：底栏随「控制栏显示 or 消息面板展开」存在（沉浸式自动收起）；
+        // 末位新增折叠按钮（F11 同效）。我方保留中缝居中标题。
+        Obx(
+          () => AnimatedSize(
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeInOut,
+            alignment: Alignment.topCenter,
+            child: (controller.showControlsState.value || controller.showMessagePanel.value)
+                ? Container(
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).cardColor,
+                      border: Border(
+                        top: BorderSide(
+                          color: Colors.grey.withAlpha(25),
+                        ),
+                      ),
+                    ),
+                    padding: AppStyle.edgeInsetsV4.copyWith(
+                      bottom: AppStyle.bottomBarHeight + 4,
+                    ),
+                    child: Row(
+                      children: [
               TextButton.icon(
                 style: TextButton.styleFrom(
                   textStyle: const TextStyle(fontSize: 14),
@@ -681,7 +698,20 @@ class LiveRoomPage extends GetView<LiveRoomController> {
                       icon: const Icon(Remix.file_copy_line),
                       label: const Text("复制链接"),
                     ),
+                        // 折叠/展开消息面板（上游 99c0db9；与 F11 同效）
+                        Obx(
+                          () => IconButton(
+                            tooltip: controller.showMessagePanel.value ? "收起面板" : "展开面板",
+                            icon: controller.showMessagePanel.value
+                                ? const Icon(Icons.chevron_right)
+                                : const Icon(Icons.chevron_left),
+                            onPressed: () => controller.setShowMessagePanel(),
+                          ),
+                        ),
             ],
+          ),
+                  )
+                : const SizedBox(width: double.infinity, height: 0),
           ),
         ),
         //buildBottomActions(context),

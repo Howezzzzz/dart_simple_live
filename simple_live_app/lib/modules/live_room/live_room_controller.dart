@@ -5,7 +5,6 @@ import 'dart:math' as math;
 import 'package:canvas_danmaku/canvas_danmaku.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/rendering.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:get/get.dart';
 import 'package:material_ui/material_ui.dart';
@@ -186,6 +185,10 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
   VoidCallback? _hotkeyShowFollowFull;
   VoidCallback? _hotkeyShowSCListFull;
   VoidCallback? _hotkeyShowSettingFull;
+  VoidCallback? _hotkeyShowMessagePanel;
+
+  // ui control
+  RxBool showMessagePanel = true.obs;
 
   @override
   void onInit() {
@@ -193,7 +196,7 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     if (FollowService.instance.followList.isEmpty) {
       FollowService.instance.loadData();
     }
-    _initHotKeyWhenFull();
+    _initHotKey();
     initAutoExit();
     showDanmakuState.value = AppSettingsController.instance.danmuEnable.value;
     followed.value = FollowService.instance.getFollowExist("${site.id}_$roomId");
@@ -228,7 +231,7 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     super.onInit();
   }
 
-  void _initHotKeyWhenFull() {
+  void _initHotKey() {
     // 热键仅 PC 端初始化（上游 ab86ddcc fix）
     if (Platform.isAndroid || Platform.isIOS) {
       return;
@@ -240,27 +243,30 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     }
     _hotkeyShowFollowFull = HotKeyService.instance.register(
       HotKeyService.instance.hotKeyShowFollowFull,
-      _buildHotKeyRegister(() => showFollowUser(this)),
+      _buildFullHotKeyRegister(() => showFollowUser(this)),
     );
     _hotkeyShowSCListFull = HotKeyService.instance.register(
       HotKeyService.instance.hotkeyShowSCListFull,
-      _buildHotKeyRegister(() => showSuperChatSheet()),
+      _buildFullHotKeyRegister(() => showSuperChatSheet()),
     );
     _hotkeyShowSettingFull = HotKeyService.instance.register(
       HotKeyService.instance.hotkeyShowSettingFull,
-      _buildHotKeyRegister(() => showPlayerSettings(this)),
+      _buildFullHotKeyRegister(() => showPlayerSettings(this)),
+    );
+    _hotkeyShowMessagePanel = HotKeyService.instance.register(
+      HotKeyService.instance.hotkeyShowMessagePanel,
+      () => setShowMessagePanel(),
     );
   }
 
-  VoidCallback _buildHotKeyRegister(VoidCallback fun) {
+  VoidCallback _buildFullHotKeyRegister(VoidCallback fun) {
     return () {
-      if (fullScreenState.value == false) {
-        return;
-      }
-      if (SmartDialog.checkExist()) {
-        SmartDialog.dismiss(status: SmartStatus.allCustom);
-      } else {
-        fun(); // call()
+      if (fullScreenState.value || showMessagePanel.value == false) {
+        if (SmartDialog.checkExist()) {
+          SmartDialog.dismiss(status: SmartStatus.allCustom);
+        } else {
+          fun(); // call()
+        }
       }
     };
   }
@@ -273,6 +279,12 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     _hotkeyShowSCListFull = null;
     _hotkeyShowSettingFull?.call();
     _hotkeyShowSettingFull = null;
+    _hotkeyShowMessagePanel?.call();
+    _hotkeyShowMessagePanel = null;
+  }
+
+  void setShowMessagePanel() {
+    showMessagePanel.value = !showMessagePanel.value;
   }
 
   void _initDanmakuMask() async {
@@ -1423,7 +1435,7 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
 
   // 弹出sc列表
   void showSuperChatSheet({int? duration}) {
-    if (fullScreenState.value) {
+    if (fullScreenState.value || showMessagePanel.value == false) {
       if (isVertical.value && duration == null) {
         // 不适配竖屏直播间
         Utils.showBottomSheet(

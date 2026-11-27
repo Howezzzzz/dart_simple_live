@@ -62,33 +62,7 @@ class DouyuUtils {
     bool cookieExpired = await _isCookieExpired(cookie);
     bool validExpire = await _validateCookie(cookie);
     if ((cookieExpired || validExpire) && ltp0.isNotEmpty) {
-      // milliseconds not sec
-      final t = DateTime.now().millisecondsSinceEpoch.toString();
-      final query = <String, dynamic>{
-        'client_id': '1',
-        't': t,
-        '_': t,
-        'callback': 'axiosJsonpCallback',
-      };
-      // douyu 有cookie会话残留绑定did需要重启，暂时写死did
-      try {
-        final resp = await HttpClient.instance.getResponse(
-          _apiDouyuPassport,
-          queryParameters: query,
-          header: requestHeader(cookie: 'dy_did=$did;LTP0=$ltp0'),
-        );
-        cookie = (resp.headers['set-cookie'] ?? const <String>[])
-            .map((raw) => raw.split(';').first.trim())
-            .where((s) => s.contains('='))
-            .join('; ');
-        // check again
-        bool validAgain = await _validateCookie(cookie);
-        bool expiredAgain = await _isCookieExpired(cookie);
-        cookie = (validAgain || expiredAgain) ? '' : cookie;
-      } catch (e, s) {
-        CoreLog.e('Douyu refresh cookie error: ${e.toString()}', s);
-        cookie = '';
-      }
+      cookie = await getNewCookies(did: did, ltp0: ltp0, cookie: cookie);
     }
     Map<String, dynamic> map = {
       'cookie': cookie,
@@ -96,6 +70,36 @@ class DouyuUtils {
       'LTP0': ltp0,
     };
     return map;
+  }
+
+  static Future<String> getNewCookies({String did = '', String ltp0 = '', String cookie = ''}) async {
+    // milliseconds not sec
+    final t = DateTime.now().millisecondsSinceEpoch.toString();
+    final query = <String, dynamic>{
+      'client_id': '1',
+      't': t,
+      '_': t,
+      'callback': 'axiosJsonpCallback',
+    };
+    // douyu 有cookie会话残留绑定did需要重启，暂时写死did
+    try {
+      final resp = await HttpClient.instance.getResponse(
+        _apiDouyuPassport,
+        queryParameters: query,
+        header: requestHeader(cookie: 'dy_did=$did;LTP0=$ltp0'),
+      );
+      cookie = (resp.headers['set-cookie'] ?? const <String>[])
+          .map((raw) => raw.split(';').first.trim())
+          .where((s) => s.contains('='))
+          .join('; ');
+      // check again
+      bool validAgain = await _validateCookie(cookie);
+      cookie = validAgain ? '' : cookie;
+    } catch (e, s) {
+      CoreLog.e('Douyu refresh cookie error: ${e.toString()}', s);
+      cookie = '';
+    }
+    return cookie;
   }
 
   // expired -> true
@@ -144,10 +148,9 @@ class DouyuUtils {
         header: requestHeader(roomId: '6657', cookie: cookie),
       );
       CoreLog.i('douyu cookie is not expired.');
-    } on CoreError catch (e) {
-      if (e.statusCode == 401 || e.statusCode == 403) {
-        return true;
-      }
+    } catch (e) {
+      CoreLog.i('douyu cookie is expired.');
+      return true;
     }
     return false;
   }
@@ -168,6 +171,10 @@ class DouyuUtils {
         },
         header: requestHeader(cookie: cookie),
       );
+      // cookie expired return error '909' & msg 'cookie过期'
+      if(res['error'] != 0){
+        return;
+      }
       res['data']?["expire_at"] = DateTime.now().millisecondsSinceEpoch ~/ 1000 + _encCacheTTL;
       _encKey = res['data'];
     } catch (e, s) {
@@ -182,7 +189,7 @@ class DouyuUtils {
     String randStr = _encKey["rand_str"] ?? "";
     int encTime = _encKey["enc_time"] ?? 1;
     String salt = (_encKey['is_special'] ?? 0) == 1 ? "" : "$rid$ts";
-    String key = _encKey['key'];
+    String key = _encKey['key'] ?? '';
 
     String secret = randStr;
     // 其实只有一次

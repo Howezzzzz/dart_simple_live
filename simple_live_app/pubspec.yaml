@@ -5,7 +5,6 @@ description: "Slive APP"
 environment: 
   sdk: '>=3.12.0 <4.0.0'   # 2026-10-22 插件现代化：wakelock_plus 1.8.1 要求 Dart >=3.12（原 >=3.0.5 已失真，同步为真实底线）
   flutter: 3.47.9
-
 dependencies: 
   flutter: 
     sdk: flutter
@@ -19,14 +18,17 @@ dependencies:
 
   # 框架、工具
   archive: ^4.3.0 # 文件压缩
-  get: ^4.7.3 # 状态管理、路由管理、国际化
+  # get：2026-11-27 起**内嵌本仓库副本**（packages/get，快照自 SlotSun/get@f0ddb351，get 4.7.3），
+  # 斩断外部 git 依赖（上游可 force-push，锁文件/构建不可重现）
+  get:
+    path: packages/get
   dio: ^5.11.0 # 网络请求
   hive_ce: ^2.22.0 # 持久化存储
   hive_ce_flutter: ^2.5.0 # 持久化存储
   logger: ^2.8.0 # 日志
-  firebase_analytics: ^12.4.6
-  firebase_crashlytics: ^5.2.7 # firebase
-  firebase_core: ^4.13.0
+  firebase_analytics: ^13.0.1
+  firebase_crashlytics: ^6.0.1 # firebase
+  firebase_core: ^5.1.0
   intl: ^0.20.2 # 国际化
   pinyin: ^3.3.0
   cryptography: ^2.9.0
@@ -47,7 +49,7 @@ dependencies:
   ffi: ^2.2.0 # ShellExecuteW 拉起安装程序（Windows 前台 + UAC 兼容）
   rust_lib_simple_live_app:
     path: rust_builder
-  flutter_rust_bridge: ^2.13.0
+  flutter_rust_bridge: 2.14.0-beta.2
 
   # Widget
   flutter_staggered_grid_view: ^0.7.0 # 瀑布流 / GridView
@@ -69,24 +71,24 @@ dependencies:
   cross_file: ^0.3.5+4 # 跨平台文件
   # permission_handler: ^12.0.1 # 权限处理
   permission_handler_apple: ^9.5.0
-  permission_handler_android: ^14.0.0
+  permission_handler_android: ^13.0.1
   permission_handler_platform_interface: ^4.4.0
-  flutter_image_gallery_saver: ^2.0.0 # 图片保存到相册
-  screen_brightness_android: ^2.1.3
-  screen_brightness_ios: ^2.1.2
-  screen_brightness_platform_interface: ^2.1.0 #亮度控制
+  flutter_image_gallery_saver: ^2.1.0 # 图片保存到相册
+  screen_brightness_android: ^2.1.6
+  screen_brightness_ios: ^2.1.4
+  screen_brightness_platform_interface: ^2.1.2 #亮度控制
   auto_orientation_v2: 2.3.8 # 屏幕方向
   wakelock_plus: ^1.3.3 # 屏幕常亮
-  file_picker: ^13.1.0 # 文件选择（11→13，API 有变更已适配）
+  file_picker: ^13.3.3 # 文件选择（11→13，API 有变更已适配）
   window_manager: ^0.5.0 # 窗口管理
   floating: ^6.0.0 # PIP 画中画
+  # flutter_inappwebview：2026-11-27 起**内嵌本仓库副本**
+  #（packages/guide_flutter_inappwebview，快照自 guide-inc-org/guide-flutter_inappwebview@3e6c4c4a，6.2.0-beta.3 / sbi_fx_pc 分支）；
+  # 子包（*_android/_ios/_macos/_web/_windows/_platform_interface）经仓库内相对 path 解析，一并进仓。
   flutter_inappwebview:
-    git:
-      url: https://github.com/guide-inc-org/guide-flutter_inappwebview.git
-      path: flutter_inappwebview
-      ref: sbi_fx_pc/v6.2.0-beta.3
-  connectivity_plus: ^7.0.0 # 网络状态
-  qr_code_scanner_plus: ^2.3.2 # 二维码扫描
+    path: packages/guide_flutter_inappwebview/flutter_inappwebview
+  connectivity_plus: ^7.3.2 # 网络状态
+  qr_code_scanner_plus: ^2.4.1 # 二维码扫描
   flutter_secure_storage: ^11.2.0 # 密钥存储
 
   # 网络相关
@@ -97,7 +99,7 @@ dependencies:
   signalr_netcore: ^1.4.4 # SignalR
 
   # 视频播放
-  volume_controller: any
+  volume_controller: ^3.7.1
   # media_kit / media_kit_video：**2026-10-22 起两者均内嵌本仓库副本**（方案 A：斩断外部 git 依赖）
   # ——上游 SlotSun/media-kit 有 force-push 改写历史的前科（`b2bb9ff0` 被冲掉 → Linux runner 新克隆拉不到、CI 挂），
   #   内嵌后上游怎么改都不影响构建；`media_kit_video` 内部 `media_kit: path: ../media_kit` 自然指向本仓库副本。
@@ -110,18 +112,16 @@ dependencies:
     path: packages/media_kit_video
 
 dependency_overrides:
+  # 强制 get 用本仓库内嵌副本（原为 SlotSun/get 钉 ref，2026-11-27 内嵌；同 media_kit 方案 A）
   get:
-    git:
-      url: https://github.com/SlotSun/get.git
-      # 钉固定 commit（get 4.7.3）而非 master：避免锁文件不可重现/构建非确定（ISS-016）
-      ref: f0ddb3514c96dde2816495e3461d1c3b8456de3c
+    path: packages/get
   # 强制 media_kit 用本仓库内嵌副本（media_kit_video 内部引用 ../media_kit）
   media_kit:
     path: packages/media_kit
 
 dev_dependencies:
   flutter_lints: ^6.0.0
-  build_runner: ^2.15.1
+  build_runner: ^2.16.1
   hive_ce_generator: ^1.11.2
   flutter_launcher_icons: ^0.14.4
   flutter_test: 
