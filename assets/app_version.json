@@ -1,15 +1,15 @@
 {
-    "version": "1.08.90",
-    "version_num": 1008090,
-    "version_desc": "- 修复：**在直播间里关掉画质增强（VSR）再重新打开时，黑屏加载过久（约 4 秒）**——上一版让切换时的遮罩等一个「播放器重建完成」信号再撤，但**直播间内开关并不产生该信号**，遮罩只能等满 3 秒兜底；本版改为**短宽限封顶**（\n- 保持：不改画质 / 解码 / 超分 / 裁切行为；1.08.85~1.08.89 的修复全部原样保留\n- 请复测：**在直播间里反复「关 VSR → 再开」**（黑屏加载应像进房一样快、不再长时间等待）、开 VSR 进房、960x540 / 960x544 开 VSR",
+    "version": "1.08.91",
+    "version_num": 1008091,
+    "version_desc": "- 新增：**PC 端按 `F11` 一键折叠 / 展开消息面板**（面板收起后画面占满，更接近沉浸式全屏；底栏右侧也加了一个折叠按钮，点它效果相同）\n- 合并：同步上游最新一批改动 —— 修复**斗鱼登录时 cookie 校验误判（#211）**（已登录仍被当成未登录 / 登录失败）、斗鱼接口 key 的有效性校验；其余为依赖与构建链升级（Flutter 3.47.9、firebase、\n- 加固：`get` 与 `flutter_inappwebview` 两个依赖改为**随应用内嵌**（不再从外部仓库拉取）——构建更稳定，不再受上游仓库被改写的影响\n- 保持：画质增强（VSR）全场景、音量均衡、沉浸式顶栏 / 分栏 / 悬浮弹幕栏等定制行为**全部原样保留**\n- 请复测：**PC 端 F11 折叠 / 展开面板**（分栏与悬浮两种布局都试）、斗鱼登录与播放、开 / 关画质增强与切换线路、常规进房",
     "prerelease": true,
     "download_url": "https://github.com/Howezzzzz/dart_simple_live/releases",
     "download_urls": {
-        "android": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.90/app-arm64-v8a-release.apk",
-        "windows": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.90/Slive-1.08.90+1008090-windows-setup.exe",
-        "macos": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.90/simple_live_app-1.08.90+1008090-macos.dmg",
-        "linux": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.90/Slive-x86_64-linux.deb",
-        "linux_flatpak": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.90/Slive-x86_64.flatpak"
+        "android": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.91/app-arm64-v8a-release.apk",
+        "windows": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.91/Slive-1.08.91+1008091-windows-setup.exe",
+        "macos": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.91/simple_live_app-1.08.91+1008091-macos.dmg",
+        "linux": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.91/Slive-x86_64-linux.deb",
+        "linux_flatpak": "https://github.com/Howezzzzz/dart_simple_live/releases/download/v1.08.91/Slive-x86_64.flatpak"
     },
     "mirror_prefixes": [
         "https://gh-proxy.com/",
@@ -17,10 +17,10 @@
         "https://ghproxy.cc/"
     ],
     "download_sha256": {
-        "android": "4b5f71cb145ea0282488ce85f65dd2911122d86b45bf5d89d4b17a3e023a5be5",
-        "windows": "7493810726151e170e29f78673c7d7bc1da63fdcb0dfd5b89dc45fc6c9f74909",
-        "macos": "8f40bf39a6887e003e29516db0d0af9ebf33a588ae81d88498103ae72ec9507a",
-        "linux": "953fde0485c67766ef69284383a55b19587051484c4bf9e49b9733b5c2076080",
-        "linux_flatpak": "11829199197f414baa74a427056de8a22e10b841c895a9025fce2f8a9e6427b1"
+        "android": "b52b59ae5650ea0665a212ae97cda6d090d78290d2c30225000282f25fbe5093",
+        "windows": "1583ee1382276e944923e89ea395d98e73c40963b61a641a13b682481a2e1b11",
+        "macos": "c7af61f4ab252dfb27dee0129c9e272bfaae8f147a98f979e2bf5f7dd86ce356",
+        "linux": "4caa5e9fff21e9b04324fd49e5b1a629e81a9eb75d9673305894b23738fab737",
+        "linux_flatpak": "e8e57e2105b8cfc5b3e24d6d50b776171d3f3df3eee73b0f823e90b16761f0ea"
     }
 }
