@@ -144,22 +144,20 @@ class LiveRoomPage extends GetView<LiveRoomController> {
         // 桌面横屏 + 安卓横屏：顶栏叠在画面上（沉浸式）→ 不加 AppBar。
         // （2026-10-21 Howe：安卓端顶栏也要半透明 + 界面延伸到系统状态栏）
         final overlayBar = tablet && (desktop || Platform.isAndroid);
-        // 上游 99c0db9：消息面板折叠时，非沉浸式（竖屏手机）连标题栏一起收起；
-        // 沉浸式（overlayBar=true）本就无 AppBar，不受影响。
-        final scaffold = Obx(
-          () => Scaffold(
-            appBar: overlayBar
-                ? null
-                : (controller.showMessagePanel.value
-                    ? AppBar(
-                        title: Obx(
-                          () => Text(controller.detail.value?.title ?? "直播间"),
-                        ),
-                        actions: buildAppbarActions(context),
-                      )
-                    : null),
-            body: tablet ? buildTabletUI(context, showOverlayBar: overlayBar) : buildPhoneUI(context),
-          ),
+        // 注意（2026-11-28 灰屏教训）：**不要**在 Scaffold 外面再套一层 Obx 来门控 appBar！
+        // 本页 buildTabletUI 里有 LayoutBuilder→Obx（面板布局引擎），若其外层再加 Obx，
+        // GetX 会在 LayoutBuilder.rebuildWithConstraints 阶段抛 “improper use of a GetX” → 整页灰屏。
+        // appBar 的折叠效果舍弃（桌面/横屏本就是 null，不影响 Windows），面板折叠走 panelVisible。
+        final scaffold = Scaffold(
+          appBar: overlayBar
+              ? null
+              : AppBar(
+                  title: Obx(
+                    () => Text(controller.detail.value?.title ?? "直播间"),
+                  ),
+                  actions: buildAppbarActions(context),
+                ),
+          body: tablet ? buildTabletUI(context, showOverlayBar: overlayBar) : buildPhoneUI(context),
         );
         // 沉浸式（视频延伸到状态栏后）：浅色状态栏图标；非沉浸式保持主题/全局设置不动
         if (!overlayBar) return scaffold;
