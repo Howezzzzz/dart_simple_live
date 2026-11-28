@@ -51,8 +51,9 @@ class AppSettingsController extends GetxController {
 
   bool _inited = false;
 
-  @override
-  Future<void> onInit() async {
+  // 2026-11-28 同步上游 afbb71ba：`onInit` 改名 `init`（去 `@override`）＝「初始化代码保持单次调用」；
+  // GetX 不再自动调用，只能由 main.dart / settings_sync_resource 显式 `init()`。
+  Future<void> init() async {
     // 幂等：避免 main.dart 里 Get.put 与手动 onInit 双跑（见 ISS-217）
     if (_inited) return;
     _inited = true;

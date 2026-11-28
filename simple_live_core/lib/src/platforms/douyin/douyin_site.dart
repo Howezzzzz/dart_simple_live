@@ -548,6 +548,8 @@ class DouyinSite implements LiveSite {
       //     CoreLog.error("未找到 ao 流 $e");
       //   }
     }
+    // 2026-11-28 同步上游 ce6c0dc7：访客模式下剔除 fake「原画」
+    qualities.removeWhere((item) => item.quality == '原画');
     qualities.sort((a, b) => b.sort.compareTo(a.sort));
     return qualities;
   }
